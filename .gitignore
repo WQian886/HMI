@@ -1,0 +1,87 @@
+# ===== Build outputs =====
+build/
+build-*/
+out/
+cmake-build-*/
+
+# VS build config dirs (all platforms)
+x64/
+x86/
+ARM/
+ARM64/
+
+# Build flavors
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# ===== Qt =====
+*.pro.user
+*.pro.user.*
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+*.qmake.stash
+moc_predefs.h.cbt
+
+# ===== Compilers / Linkers / Binaries =====
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.recipe
+*.log
+*.tlog/
+*.ipch
+*.obj.enc
+*.db
+*.db-shm
+*.db-wal
+*.vsidx
+
+# ===== IDEs =====
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ===== CMake / Ninja =====
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+Testing/
+
+# ===== Editor swap / backup =====
+*.swp
+*.swo
+*~
+*.tmp
+*.bak
+*.cache
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ===== Secrets (just in case) =====
+*.env
+.env
+secrets/

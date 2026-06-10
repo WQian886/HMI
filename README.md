@@ -1,0 +1,74 @@
+# HMI — Qt 工业人机界面学习项目
+
+> 个人学习项目：用 Qt（C++）从零实现工业 HMI（Human-Machine Interface，人机界面）。
+> 目标场景：与 PLC（可编程逻辑控制器）通信、实时显示设备状态、接收操作指令。
+
+## 🎯 项目目标
+
+- 掌握 Qt 框架核心用法（信号槽、控件、布局）
+- 实现工业现场常用 HMI 功能（数值显示、按钮、报警、历史曲线）
+- 打通"上位机 ↔ PLC"通信链路（串口 / Modbus / 以太网）
+- 形成可复用的 HMI 代码模板
+
+## 📌 当前状态
+
+**项目骨架已就位**（Qt Widgets 模板起步，VS 工程结构）。
+
+`hmi/hmi.cpp` / `hmi.h` / `main.cpp` / `hmi.ui` 是 Qt VS Tools 默认生成的窗口框架，**暂未实现任何 HMI 业务逻辑**。
+
+按下方"学习路线"逐步推进，每完成一个阶段就 commit 一次。
+
+## 📚 学习路线
+
+按阶段推进，每阶段一个子模块：
+
+- **0 · Qt 基础** — 窗口、控件、信号槽
+- **1 · 布局管理** — 按钮、标签、数值显示
+- **2 · 串口通信** — QSerialPort 收发
+- **3 · Modbus 协议** — libmodbus / QModbus
+- **4 · 真机联调** — 接 PLC（西门子 S7 / 三菱 FX）
+- **5 · 报警系统** — 阈值检测 + 列表显示
+- **6 · 历史曲线** — QCustomPlot / QtCharts
+- **7 · 高级** — 多页面切换、权限管理
+
+状态标记：⬜ 待开始 / 🟡 进行中 / ✅ 已完成
+
+## 🛠️ 编译与运行
+
+**环境要求**
+- Visual Studio 2022（v18+）
+- Qt 5.15+ 或 Qt 6.x（Qt VS Tools 已配置）
+
+**打开 `hmi/hmi.slnx` → 选择 `x64 / Debug` → F5 运行**
+
+或命令行（VS Developer Command Prompt）：
+```
+msbuild hmi.slnx /p:Configuration=Debug /p:Platform=x64
+```
+
+## 📁 目录结构
+
+```
+HMI/
+├── README.md                  # 本文件
+├── LICENSE                    # MIT
+├── .gitignore                 # Git 忽略规则
+└── hmi/                       # Qt VS 工程根（VS 打开这一层）
+    ├── main.cpp
+    ├── hmi.h
+    ├── hmi.cpp
+    ├── hmi.ui                 # Qt Designer 文件
+    ├── hmi.qrc                # Qt 资源文件
+    ├── hmi.vcxproj            # VS 工程文件
+    ├── hmi.slnx               # VS 解决方案
+    ├── hmi.vcxproj.filters
+    └── x64/                   # build 输出（git 忽略）
+```
+
+## 📝 学习笔记
+
+每个阶段的踩坑、关键点写到 `docs/` 对应目录（`docs/00-qt-basics.md` 等）。
+
+## 📄 License
+
+MIT — 随便用、改、卖，保留原作者声明即可。
