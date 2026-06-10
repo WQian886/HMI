@@ -1,0 +1,96 @@
+# ============================================================
+# Qt 6 / MSVC / VS 2026 标准 .gitignore
+# 由孟德 2026-06-10 写入，对应 GitHub gitignore 模板组合
+# ============================================================
+
+# ---------- VS 用户/缓存文件 ----------
+.vs/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.userprefs
+[Bb]in/
+[Oo]bj/
+
+# ---------- VS 编译输出 ----------
+x64/
+x86/
+Win32/
+ARM/
+ARM64/
+[Dd]ebug/
+[Rr]elease/
+[Dd]ebug-*/
+[Rr]elease-*/
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.log
+*.tlog
+
+# ---------- MSBuild 自动生成 ----------
+*.cachefile
+*.VC.db
+*.opensdf
+*.sdf
+*.ipch
+*.pch
+
+# ---------- Qt 临时 / 构建 ----------
+*.moc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+*.exp
+*.idb
+*.pdb
+
+# Makefile 相关
+Makefile*
+*.pri
+*.prl
+*.pro.user*
+
+# ---------- CMake (备用,目前没用) ----------
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# ---------- OS 临时文件 ----------
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+.DS_Store
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ---------- 临时调试/构建脚本 ----------
+_build_*.log
+_build_*.bat
+_sunlogin_*
+_screenshot_*.png
+
+# ---------- 凭据 / 密钥(防御性,避免误传) ----------
+*.pem
+*.key
+*.pfx
+*.p12
+.env
+.env.local
+
+# ---------- 编辑器临时 ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
