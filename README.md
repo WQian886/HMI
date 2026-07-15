@@ -5,69 +5,81 @@
 
 ## 🎯 项目目标
 
-- 掌握 Qt 框架核心用法（信号槽、控件、布局）
-- 实现工业现场常用 HMI 功能（数值显示、按钮、报警、历史曲线）
-- 打通"上位机 ↔ PLC"通信链路（串口 / Modbus / 以太网）
+- 掌握 Qt 框架核心用法（信号槽、元对象系统、控件、布局）
+- 实现工业现场常用 HMI 功能（数值显示、按钮、报警、变量订阅）
+- 打通"上位机 ↔ PLC"通信链路（TCP / Modbus RTU/TCP）
 - 形成可复用的 HMI 代码模板
 
 ## 📌 当前状态
 
-**项目骨架已就位**（Qt Widgets 模板起步，VS 工程结构）。
+**已超出初始骨架，进入变量模型阶段。**
 
-`hmi/hmi.cpp` / `hmi.h` / `main.cpp` / `hmi.ui` 是 Qt VS Tools 默认生成的窗口框架，**暂未实现任何 HMI 业务逻辑**。
-
-按下方"学习路线"逐步推进，每完成一个阶段就 commit 一次。
+- ✅ 阶段 0 ~ 2 已完成（Qt 热身 → TCP → Modbus 全套）
+- 🟡 阶段 3 进行中（变量模型：订阅发布 + 轮询 + 死区 + Quality/TimeStamp）
+- ⬜ 阶段 4 ~ 7 待开始
 
 ## 📚 学习路线
 
-按阶段推进，每阶段一个子模块：
-
-- **0 · Qt 基础** — 窗口、控件、信号槽
-- **1 · 布局管理** — 按钮、标签、数值显示
-- **2 · 串口通信** — QSerialPort 收发
-- **3 · Modbus 协议** — libmodbus / QModbus
-- **4 · 真机联调** — 接 PLC（西门子 S7 / 三菱 FX）
-- **5 · 报警系统** — 阈值检测 + 列表显示
-- **6 · 历史曲线** — QCustomPlot / QtCharts
-- **7 · 高级** — 多页面切换、权限管理
-
-状态标记：⬜ 待开始 / 🟡 进行中 / ✅ 已完成
+| 阶段 | 状态 | 内容 |
+|---|---|---|
+| 0 | ✅ | Qt 热身（窗口、信号槽、元对象系统） |
+| 1.1 | ✅ | TCP 客户端（基础连接 + 收发） |
+| 1.2 | ✅ | TCP 进阶（超时 + 重连 + 心跳 + 状态机） |
+| 2 | ✅ | Modbus RTU/TCP（0x03/0x04/0x05/0x06/0x0F） + 异常响应处理 |
+| 3 | 🟡 | 变量模型（订阅发布 + 轮询 + 死区） |
+| 4 | ⬜ | 控件绑定（变量 ↔ UI） |
+| 5 | ⬜ | 业务层（状态机 + 报警） |
+| 6 | ⬜ | 工程文件（JSON 存读） |
+| 7 | ⬜ | 整合 demo（真实 PLC + 完整框架） |
 
 ## 🛠️ 编译与运行
 
 **环境要求**
 - Visual Studio 2022（v18+）
 - Qt 5.15+ 或 Qt 6.x（Qt VS Tools 已配置）
+- CMake 3.20+
 
-**打开 `hmi/hmi.slnx` → 选择 `x64 / Debug` → F5 运行**
+**VS 打开：双击 `hmi.slnx` → 选择 `x64 / Debug` → F5**
 
-或命令行（VS Developer Command Prompt）：
-```
-msbuild hmi.slnx /p:Configuration=Debug /p:Platform=x64
+**CMake 打开：**
+```bash
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Debug
 ```
 
 ## 📁 目录结构
 
 ```
 HMI/
-├── README.md                  # 本文件
-├── LICENSE                    # MIT
-├── .gitignore                 # Git 忽略规则
-└── hmi/                       # Qt VS 工程根（VS 打开这一层）
-    ├── main.cpp
-    ├── hmi.h
-    ├── hmi.cpp
-    ├── hmi.ui                 # Qt Designer 文件
-    ├── hmi.qrc                # Qt 资源文件
-    ├── hmi.vcxproj            # VS 工程文件
-    ├── hmi.slnx               # VS 解决方案
-    ├── hmi.vcxproj.filters
-    └── x64/                   # build 输出（git 忽略）
+├── README.md                              # 本文件
+├── LICENSE                                # MIT
+├── .gitignore                             # Git 忽略规则
+├── CMakeLists.txt                         # CMake 工程文件
+├── hmi.slnx                              # VS 解决方案
+├── hmi.vcxproj / .filters                # VS 工程文件
+├── main.cpp                              # 程序入口
+├── hmi.h / .cpp / .ui / .qrc             # Qt 主窗口
+├── Variable.h / .cpp                     # 变量类（阶段 3）
+├── VariableManager.h / .cpp              # 变量管理器（阶段 3）
+├── ModbusMaster.h / .cpp                 # Modbus 主站（阶段 2）
+├── ModbusDemo.h / .cpp                   # Modbus 测试 demo
+├── TcpClient.h / .cpp                    # TCP 客户端（阶段 1.2）
+└── 2026-07-06_ModbusMaster响应处理_知识点总结.md
 ```
+
+## 🧱 关键模块
+
+| 模块 | 文件 | 阶段 |
+|---|---|---|
+| TCP 客户端 | `TcpClient.{h,cpp}` | 1.2 |
+| Modbus 主站 | `ModbusMaster.{h,cpp}` | 2 |
+| 变量 | `Variable.{h,cpp}` | 3 |
+| 变量管理 | `VariableManager.{h,cpp}` | 3 |
 
 ## 📝 学习笔记
 
-每个阶段的踩坑、关键点写到 `docs/` 对应目录（`docs/00-qt-basics.md` 等）。
+阶段性踩坑、关键点已写到仓库根目录的 `YYYY-MM-DD_主题.md`，例如：
+- `2026-07-06_ModbusMaster响应处理_知识点总结.md`
 
 ## 📄 License
 
