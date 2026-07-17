@@ -2,6 +2,22 @@
 
 #include "Variable.h"
 
+namespace {
+// 判断 QVariant 是否匹配指定的 DataType
+// 用匿名 namespace,不暴露到 .h
+bool matchesDataType(const QVariant& v, Variable::DataType t) {
+    using Var = Variable::DataType;
+    switch (t) {
+        case Var::Bool:    return v.typeId() == QMetaType::Bool;
+        case Var::Int16:   return v.typeId() == QMetaType::Short;
+        case Var::UInt16:  return v.typeId() == QMetaType::UShort;
+        case Var::Int32:   return v.typeId() == QMetaType::Int;
+        case Var::Float:   return v.typeId() == QMetaType::Float;
+    }
+    return false;
+}
+} // namespace
+
 Variable::Variable(const QString& name,
                    quint16 address,
                    DataType type,
@@ -18,6 +34,13 @@ Variable::Variable(const QString& name,
 }
 
 void Variable::setValue(const QVariant& v) {
+    // 类型校验:不匹配就拒绝,warning 后直接 return
+    if (!matchesDataType(v, type_)) {
+        qWarning() << "Variable" << name_
+                   << "type mismatch: expected" << dataTypeName(type_)
+                   << ", got" << v.typeName();
+        return;
+    }
     value_ = v;
     // timestamp 跟 value 同步更新
     timestamp_ = QDateTime::currentDateTime();
@@ -32,7 +55,7 @@ void Variable::setTimestamp(const QDateTime& t) {
     timestamp_ = t;
 }
 
-QString Variable::dataTypeName(DataType t) {
+QString Variable::dataTypeName(DataType t) {// QMetaEnum::fromType 需要 Q_ENUM 注册,header 里已经加了
     // QMetaEnum::fromType 需要 Q_ENUM 注册,header 里已经加了
     return QString::fromLatin1(
         QMetaEnum::fromType<DataType>().valueToKey(static_cast<int>(t)));

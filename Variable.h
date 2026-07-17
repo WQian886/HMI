@@ -68,11 +68,11 @@ public:
     static QString qualityName(Quality q);
 
 private:
-    QString   name_;
-    quint16   address_;
-    DataType  type_;
-    Access    access_;
-    QVariant  value_;
+	QString   name_;// PLC 工程师给的名字,唯一标识一个数据点
+	quint16   address_;// PLC 内的地址(寄存器号 / 位号)
+	DataType  type_;// 数据类型(PLC 那边对应的寄存器宽度)
+	Access    access_;// 访问权限(只读 / 可读可写)
+	QVariant  value_;// 当前值(PLC 内的值,可能是 bool/int/float 等)
     Quality   quality_   = Quality::Bad;  // 初始 Bad,直到首次 setValue
-    QDateTime timestamp_;
+	QDateTime timestamp_;// 上次更新时间(PLC 内的值被刷新到本地的时间戳)
 };
