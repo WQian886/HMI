@@ -5,6 +5,9 @@
 #include <QPair>   // 阶段 2-1 第 2 步:连接建立后待发的读请求
 #include "TcpClient.h"  // 阶段 1 第 1 练:TCP 客户端封装
 #include "ModbusMaster.h" // 阶段 2 第 3 练:手写 ModbusMaster 接入 UI
+#include "VariableManager.h"  // 阶段 3.2:把 VariableManager 接入主工程
+#include "PollScheduler.h"  // 阶段 3.3:定时轮询调度器
+#include "Binding.h"        // 阶段 4.1:变量↔UI 绑定框架(替 onVariableChanged)
 #include "ui_hmi.h"
 
 class hmi : public QMainWindow
@@ -34,6 +37,8 @@ private slots:
 	void onTcpReadyRead(const QByteArray& data);// TCP 收到数据了槽函数
 	void onTcpError(const QString& msg);// TCP 错误槽函数
 	void appendRecv(const QByteArray& data, const QString& prefix);// 辅助函数:把收到的数据追加到文本框,加个前缀区分收/发
+
+
 
 private:
     // 阶段 0 第 2 练:状态机雏形(业务)
@@ -83,4 +88,6 @@ private:
     int counter = 0;  // 阶段 0 第 1 练:用成员变量存计数(修法 B,数据归程序)
     TcpClient* tcp_ = nullptr;  // 阶段 1 第 1 练:TCP 客户端(生命周期由 this 管)
     ModbusMaster* modbus_ = nullptr;  // 阶段 2 第 3 练:Modbus 客户端(手写版)
+    VariableManager* varMgr_ = nullptr;  // 阶段 3.2:变量管理器(管理所有 Variable 生命周期)
+    PollScheduler* pollScheduler_ = nullptr;  // 阶段 3.3:定时轮询调度器(替代 demoTimer,真 modbus 读)
 };

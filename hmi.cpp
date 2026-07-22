@@ -1,4 +1,7 @@
 #include "hmi.h"
+#include "Variable.h"             // 阶段 3.2:Variable 数据模型
+#include "VariableManager.h"      // 阶段 3.2:Variable 容器
+#include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
 #include <QIntValidator>
 #include <QMessageBox>
 #include <QRegularExpression>
@@ -181,6 +184,38 @@ hmi::hmi(QWidget *parent)
         // 已连接:直接发
         executeModbus(isRead, type, slaveId, addr);
     });
+
+    // ==================== 阶段 3.2:VariableManager + demo 变量(订阅发布 UI 验证) ====================
+    varMgr_ = new VariableManager(this);
+
+    // 3 个 demo:模拟工业现场常见数据点(压力 Float / 温度 Int16 / 转速 UInt16)
+    auto* pressure = new Variable("Pressure", 0x0000,
+                                  Variable::DataType::Int16,
+                                  Variable::Access::ReadOnly, varMgr_);
+    auto* temperature = new Variable("Temperature", 0x0001,
+                                     Variable::DataType::Int16,
+                                     Variable::Access::ReadOnly, varMgr_);
+    auto* speed = new Variable("Speed", 0x0002,
+                               Variable::DataType::UInt16,
+                               Variable::Access::ReadWrite, varMgr_);
+    varMgr_->addVariable(pressure);
+    varMgr_->addVariable(temperature);
+    varMgr_->addVariable(speed);
+
+    // 阶段 3.x 死区验证对比:speed 设 5 单位死区,其他默认 0
+    // 这样改 ModbusSlave 0x0002 (±4 内) 标签不变,(±6 以上) 标签更新 — 一眼看到效果
+    pressure->setDeadband(0.0);     // 无死区,每次变化都更新
+    temperature->setDeadband(0.0);  // 无死区
+    speed->setDeadband(5.0);        // ±5 内吞掉(Float 也可,这里 Int16 转 double 后 5 单位合理)
+
+    // 阶段 4.1:Binding 框架 — 替 onVariableChanged 手工 if/else,加新变量只需写一行
+    Binding::bind(ui.pressureLabel,    pressure,     "压力(bar): %1");
+    Binding::bind(ui.temperatureLabel, temperature,  "温度(℃): %1");
+    Binding::bind(ui.speedLabel,       speed,        "转速(rpm): %1");
+
+    // 阶段 3.3:启动定时轮询(替代 demoTimer 的 random 数据,真 modbus 读 PLC)
+    pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);
+    pollScheduler_->start();
 }
 
 hmi::~hmi()
@@ -332,6 +367,8 @@ void hmi::onConnectClicked() {// 用户点击连接按钮,发起 TCP 连接
     connState_ = ConnState::Connecting;
     updateUi();
     tcp_->connectTo(host, port);
+    // 2026-07-21 同步连 modbus_(以前只连 TCP 客户端,导致 PollScheduler 一直报未连接)
+    modbus_->connectTo(host, port);
 }
 
 void hmi::onDisconnectClicked() {
@@ -397,6 +434,11 @@ void hmi::appendRecv(const QByteArray& data, const QString& prefix) {// 显示�
 	QString hex = data.toHex(' ').toUpper();// 转成十六进制字符串,每字节用空格分隔,大写
 	ui.recvText->append(prefix + " " + hex);//  在 recvText 上追加显示,加个前缀区分发送/接收
 }
+
+// 阶段 4.1:onVariableChanged 已删除,改用 Binding 框架做 UI 绑定
+//   (hmi.cpp 构造函数里 3 行 Binding::bind 替代此处 30 行 if/else)
+
+// 阶段 3.3:onDemoTick 已删除,数据来源改由 PollScheduler 周期性 modbus 读 PLC
 
 // ==================== updateUi():唯一的 UI 渲染入口 ====================
 // 由 state(业务)+ connState_(网络)共同决定所有 UI 元素的文字/颜色/enabled

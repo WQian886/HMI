@@ -41,11 +41,19 @@ public:
     };
     Q_ENUM(Quality)
 
-    Variable(const QString& name,
-             quint16 address,
-             DataType type,
-             Access access,
-             QObject* parent = nullptr);//
+    // ===== 信号 =====
+    // 订阅发布的"发布"端 — Manager / UI 监听这个信号,决定何时刷新
+    signals:
+        void valueChanged(const Variable& v);
+
+    // 注:signals: 段结束后必须紧跟一个 access 修饰符
+    //    否则 moc 会把后续的构造函数当成"下一个信号"去解析,会报 Not a signal declaration
+    public:
+        Variable(const QString& name,
+                 quint16 address,
+                 DataType type,
+                 Access access,
+                 QObject* parent = nullptr);//
     // ===== getters =====
     QString   name()      const { return name_; }//     
     quint16   address()   const { return address_; }//
@@ -54,6 +62,18 @@ public:
     QVariant  value()     const { return value_; }
     Quality   quality()   const { return quality_; }
     QDateTime timestamp() const { return timestamp_; }
+
+    // ===== 阶段 3.3:轮询周期(ms),PollScheduler 按此字段调度 =====
+    // 默认 1000ms = 1 秒。改这个就改 PollScheduler 多久读一次 PLC
+    int        pollIntervalMs() const { return pollIntervalMs_; }
+    void       setPollIntervalMs(int ms) { pollIntervalMs_ = ms; }
+
+    // ===== 阶段 3.x:死区阈值(0 = 不启用,>0 = 变化超过这个数才发信号)=====
+    // 数值类型适用:Float 强烈建议(防精度抖动);计数器/状态码/控制字一般 0
+    // Bool 也能用(0→1 差值 1,配 deadband=0.5 同样有效),但默认 0 不启用
+    // 配置入口放阶段 6,先 setter 留出来,默认 0 向后兼容
+    double     deadband() const { return deadband_; }
+    void       setDeadband(double d) { deadband_ = d; }
 
     // ===== setters =====
     // setValue 自动更新 timestamp;quality 由调用方决定(因为可能是新值也可能是异常)
@@ -75,4 +95,6 @@ private:
 	QVariant  value_;// 当前值(PLC 内的值,可能是 bool/int/float 等)
     Quality   quality_   = Quality::Bad;  // 初始 Bad,直到首次 setValue
 	QDateTime timestamp_;// 上次更新时间(PLC 内的值被刷新到本地的时间戳)
+	int        pollIntervalMs_ = 1000;     // 阶段 3.3:轮询周期(ms),默认 1000
+	double     deadband_       = 0.0;      // 阶段 3.x:死区阈值,0 = 不启用;>0 = |新-旧| > deadband 才发信号
 };

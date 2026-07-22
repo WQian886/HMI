@@ -21,6 +21,7 @@ set(SOURCES
     ModbusMaster.cpp  # 2026-07-08:阶段 2 第 4 练补回 —— 没加进 SOURCES 导致链接缺符号
     Variable.cpp          # 阶段 3.1:Variable 数据模型
     VariableManager.cpp   # 阶段 3.1:变量管理器
+    PollScheduler.cpp      # 阶段 3.3:定时轮询调度器
 )
 
 set(HEADERS
@@ -30,6 +31,7 @@ set(HEADERS
     ModbusMaster.h  # 2026-07-08:同上
     Variable.h            # 阶段 3.1
     VariableManager.h     # 阶段 3.1
+    PollScheduler.h       # 阶段 3.3
 )
 
 set(FORMS

@@ -38,7 +38,8 @@ public:
     // 阶段 2-4 重设计:跟 Qt 官方 QModbusClient 接口一致
     // ============================================================
     // 读请求:返回 reply 句柄,用户接 finished 信号拿数据
-    QModbusReply* sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress);
+    // 阶段 3.3 加 requestId(default 0 = 旧调用方式兼容)
+    QModbusReply* sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, int requestId = 0);
 
     // 写请求:返回 reply 句柄,finished 信号表示写完成
     QModbusReply* sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress);
@@ -51,6 +52,8 @@ signals:
     // 2026-07-09 新增:pending_ 变空时发 → UI 层可借此重新 enable 发送按钮
     // 触发时机:正常响应 / 异常响应 / 超时清理 / TCP 断开后
     void idle();
+    // 阶段 3.3:read 成功后发 → PollScheduler 用 requestId 反查 + 分发到 Variable
+    void readFinished(int requestId, QModbusDataUnit unit, bool success);
 
 private slots:
     // TCP 数据到达 → 拆 MBAP 头 + 按 type 分发拆帧
@@ -90,6 +93,7 @@ private:
         QDateTime sentAt;
         int      timeoutMs;
         bool     isWrite;
+        int      requestId = 0;            // 阶段 3.3:PollScheduler 用来反查
     };
 
     // 帧组装/拆帧 helper(Pending 必须在这些之前声明)

@@ -112,6 +112,12 @@
     <!-- 阶段 3.1:Variable.cpp + VariableManager.cpp -->
     <ClCompile Include="Variable.cpp" />
     <ClCompile Include="VariableManager.cpp" />
+    <!-- 阶段 3.3:PollScheduler 轮询调度器(QtMoc + ClCompile) -->
+    <QtMoc Include="PollScheduler.h" />
+    <ClCompile Include="PollScheduler.cpp" />
+    <!-- 阶段 4.1:Binding 框架(替 onVariableChanged 手工 if/else) -->
+    <QtMoc Include="Binding.h" />
+    <ClCompile Include="Binding.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

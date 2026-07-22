@@ -121,7 +121,7 @@ QByteArray ModbusMaster::buildFrame(quint16 tid, int serverAddress, quint8 fc, c
 // 读请求
 // ============================================================
 // 2026-07-07 重设计:跟 Qt 官方 sendReadRequest 签名一致
-QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress) {
+QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, int requestId) {
     if (!isConnected()) {
         emit errorOccurred("Modbus 未连接");
         return nullptr;
@@ -175,11 +175,13 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
     p.sentAt        = QDateTime::currentDateTime();
     p.timeoutMs     = 3000;
     p.isWrite       = false;
+    p.requestId     = requestId;  // 阶段 3.3:PollScheduler 用来反查
     pending_.insert(tid, p);
 
     qDebug() << "[ModbusMaster] 已发读 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID=" << tid << "slave=" << serverAddress
              << "addr=" << addr << "count=" << count
+             << "reqId=" << requestId
              << "frame=" << frame.toHex(' ').toUpper();
 
     return reply;
@@ -453,6 +455,8 @@ void ModbusMaster::handleReadResponse(quint8 fc, Pending* req, const QByteArray&
         req->reply->setFinished(true);
         req->reply->deleteLater();
     }
+    // 阶段 3.3:reply 成功后通知 PollScheduler(带 requestId 反查)
+    emit readFinished(req->requestId, unit, true);
 }
 
 // 2026-07-07 新增:写响应拆帧(0x05/0x06/0x0F/0x10 都是 echo)

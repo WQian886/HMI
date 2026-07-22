@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>HMI 学习项目 - 阶段 2</string>
+   <string>HMI 学习项目 - 阶段 4</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="centralLayout">
@@ -96,7 +96,7 @@
       </item>
       <item>
        <widget class="QLineEdit" name="portEdit">
-        <property name="text"><string>5000</string></property>
+        <property name="text"><string>502</string></property>
         <property name="minimumSize">
          <size><width>80</width><height>40</height></size>
         </property>
@@ -196,6 +196,35 @@
         <property name="styleSheet">
          <string>color: blue; font-size: 14px; font-weight: bold;</string>
         </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <!-- 阶段 3.2:变量模型展示(订阅发布 UI 验证) -->
+     <layout class="QHBoxLayout" name="varDisplayLayout">
+      <item>
+       <widget class="QLabel" name="pressureLabel">
+        <property name="minimumSize"><size><width>140</width><height>30</height></size></property>
+        <property name="text"><string>压力(bar): --</string></property>
+        <property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property>
+        <property name="styleSheet"><string>font-size: 14px; font-weight: bold; color: #0066cc; background-color: #f0f8ff;</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="temperatureLabel">
+        <property name="minimumSize"><size><width>140</width><height>30</height></size></property>
+        <property name="text"><string>温度(℃): --</string></property>
+        <property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property>
+        <property name="styleSheet"><string>font-size: 14px; font-weight: bold; color: #cc6600; background-color: #fff8f0;</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="speedLabel">
+        <property name="minimumSize"><size><width>140</width><height>30</height></size></property>
+        <property name="text"><string>转速(rpm): --</string></property>
+        <property name="alignment"><set>Qt::AlignmentFlag::AlignCenter</set></property>
+        <property name="styleSheet"><string>font-size: 14px; font-weight: bold; color: #009933; background-color: #f0fff0;</string></property>
        </widget>
       </item>
      </layout>

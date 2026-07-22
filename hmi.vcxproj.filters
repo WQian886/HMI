@@ -55,6 +55,20 @@
     <ClCompile Include="VariableManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 3.3:PollScheduler 注册到过滤器 -->
+    <QtMoc Include="PollScheduler.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="PollScheduler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <!-- 阶段 4.1:Binding 框架注册到过滤器 -->
+    <QtMoc Include="Binding.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="Binding.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ResourceCompile Include="$pro_name$.rc">
     </ResourceCompile>
     <None Include="$pro_name$.ico">
