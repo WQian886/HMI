@@ -227,6 +227,20 @@
         <property name="styleSheet"><string>font-size: 14px; font-weight: bold; color: #009933; background-color: #f0fff0;</string></property>
        </widget>
       </item>
+      <!-- 阶段 4.2:UI → 变量 反向写测试入口(威纶通输入确认模式) -->
+      <item>
+       <widget class="QLineEdit" name="speedWriteEdit">
+        <property name="minimumSize">
+         <size><width>120</width><height>30</height></size>
+        </property>
+        <property name="placeholderText">
+         <string>按回车写,Esc 取消</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignmentFlag::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>

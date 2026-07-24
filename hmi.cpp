@@ -206,12 +206,16 @@ hmi::hmi(QWidget *parent)
     // 这样改 ModbusSlave 0x0002 (±4 内) 标签不变,(±6 以上) 标签更新 — 一眼看到效果
     pressure->setDeadband(0.0);     // 无死区,每次变化都更新
     temperature->setDeadband(0.0);  // 无死区
-    speed->setDeadband(5.0);        // ±5 内吞掉(Float 也可,这里 Int16 转 double 后 5 单位合理)
+    // 阶段 4.2:测试期间临时关掉死区(5 单位吞掉小波动不便 F5 验证);练完决定是否恢复
+    speed->setDeadband(0.0);
 
     // 阶段 4.1:Binding 框架 — 替 onVariableChanged 手工 if/else,加新变量只需写一行
     Binding::bind(ui.pressureLabel,    pressure,     "压力(bar): %1");
     Binding::bind(ui.temperatureLabel, temperature,  "温度(℃): %1");
     Binding::bind(ui.speedLabel,       speed,        "转速(rpm): %1");
+
+    // 阶段 4.2:UI → 变量 反向 + 威纶通输入确认(回车写 / Esc 取消)
+    Binding::bindEdit(ui.speedWriteEdit, speed);
 
     // 阶段 3.3:启动定时轮询(替代 demoTimer 的 random 数据,真 modbus 读 PLC)
     pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);

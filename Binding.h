@@ -12,6 +12,7 @@
 
 class Variable;
 class QLabel;
+class QLineEdit;
 
 class Binding {
 public:
@@ -24,6 +25,14 @@ public:
     // 完全自定义(进阶):lambda — Bool 转 ON/OFF / Float 控小数位都用这个
     using Formatter = std::function<QString(const QVariant&)>;
     static void bind(QLabel* label, Variable* v, Formatter fmt);
+
+    // 阶段 4.2 新增:可编辑控件 ↔ 变量 双向,带"输入确认"(对齐威纶通 eMT PC 仿真行为)
+    //   textEdited      → 变脏(边框橙)
+    //   returnPressed   → 校验 → 写变量 → 清脏(写 PLC 留给 4.3)
+    //   Esc (QShortcut) → 从变量重读回 UI + 清脏(取消)
+    //   valueChanged    → 同步到 UI + 清脏(PLC 改 UI 跟着变)
+    // 校验/转换失败:回滚(从变量重读)+ qDebug
+    static void bindEdit(QLineEdit* edit, Variable* v);
 
 private:
     // 内部:bind 调一次立刻把当前 var 值推到 label(防启动空白 1-2 秒)
