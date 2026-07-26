@@ -42,7 +42,8 @@ public:
     QModbusReply* sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, int requestId = 0);
 
     // 写请求:返回 reply 句柄,finished 信号表示写完成
-    QModbusReply* sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress);
+    // 阶段 4.3.0:加 requestId(默认 0 = 旧调用方式兼容),跟 writeFinished 配合
+    QModbusReply* sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress, int requestId = 0);
 
 signals:
     // 错误 + 状态
@@ -54,6 +55,9 @@ signals:
     void idle();
     // 阶段 3.3:read 成功后发 → PollScheduler 用 requestId 反查 + 分发到 Variable
     void readFinished(int requestId, QModbusDataUnit unit, bool success);
+    // 阶段 4.3.0:write 完成后发 → WriteScheduler 用 requestId 反查 + 清 dirty
+    // 成功 / 失败 都发(success 区分),失败时 WriteScheduler 保留 dirty 等下一帧重试
+    void writeFinished(int requestId, bool success);
 
 private slots:
     // TCP 数据到达 → 拆 MBAP 头 + 按 type 分发拆帧
@@ -105,6 +109,10 @@ private:
     void notifyIdleIfEmpty() {
         if (pending_.isEmpty()) emit idle();
     }
+
+public:
+    // 阶段 4.3.0 调试暴露:WriteScheduler 用它判断"上一帧未完成"避免自己撞自己
+    int pendingCount() const { return pending_.size(); }
 
 private:
     TcpClient* tcp_ = nullptr;

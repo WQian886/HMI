@@ -11,6 +11,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QShortcut>
+#include <QVariant>   // 阶段 4.3.0 bugfix:QVariant::fromValue<quint16>() 显式转换类型
+
 
 void Binding::applyNow(QLabel* label, Variable* v, const Formatter& fmt) {
     if (!label || !v) return;
@@ -101,7 +103,8 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
                 qDebug() << "[BindEdit] 校验失败,已回滚:" << edit->text();
                 return;
             }
-            v->setValue(val);
+            v->setValue(QVariant::fromValue<quint16>(val));   // 阶段 4.3.0 bugfix:显式 UShort typeId,绕开 MSVC 推断歧义("expected UInt16, got int")
+            v->markDirty();           // 阶段 4.3.0:告诉 WriteScheduler 待写 PLC
             setDirtyStyle(edit, false);
         });
 

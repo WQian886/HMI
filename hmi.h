@@ -7,6 +7,7 @@
 #include "ModbusMaster.h" // 阶段 2 第 3 练:手写 ModbusMaster 接入 UI
 #include "VariableManager.h"  // 阶段 3.2:把 VariableManager 接入主工程
 #include "PollScheduler.h"  // 阶段 3.3:定时轮询调度器
+#include "WriteScheduler.h" // 阶段 4.3.0:写调度器(Variable.dirty_ → Modbus 写 PLC)
 #include "Binding.h"        // 阶段 4.1:变量↔UI 绑定框架(替 onVariableChanged)
 #include "ui_hmi.h"
 
@@ -90,4 +91,5 @@ private:
     ModbusMaster* modbus_ = nullptr;  // 阶段 2 第 3 练:Modbus 客户端(手写版)
     VariableManager* varMgr_ = nullptr;  // 阶段 3.2:变量管理器(管理所有 Variable 生命周期)
     PollScheduler* pollScheduler_ = nullptr;  // 阶段 3.3:定时轮询调度器(替代 demoTimer,真 modbus 读)
+    WriteScheduler* writeScheduler_ = nullptr; // 阶段 4.3.0:写调度器(Variable.dirty_ → modbus 写 PLC,与 PollScheduler 对称)
 };

@@ -118,6 +118,9 @@
     <!-- 阶段 4.1:Binding 框架(替 onVariableChanged 手工 if/else) -->
     <QtMoc Include="Binding.h" />
     <ClCompile Include="Binding.cpp" />
+    <!-- 阶段 4.3.0:WriteScheduler 写调度器(Variable.dirty_ → Modbus 写 PLC;PollScheduler 对称) -->
+    <QtMoc Include="WriteScheduler.h" />
+    <ClCompile Include="WriteScheduler.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

@@ -220,6 +220,10 @@ hmi::hmi(QWidget *parent)
     // 阶段 3.3:启动定时轮询(替代 demoTimer 的 random 数据,真 modbus 读 PLC)
     pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);
     pollScheduler_->start();
+
+    // 阶段 4.3.0:启动写调度(与 PollScheduler 对称,处理 Variable.dirty_ → Modbus 写 PLC)
+    writeScheduler_ = new WriteScheduler(varMgr_, modbus_, this);
+    writeScheduler_->start();
 }
 
 hmi::~hmi()

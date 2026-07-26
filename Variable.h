@@ -81,6 +81,16 @@ public:
     void setQuality(Quality q);
     void setTimestamp(const QDateTime& t);
 
+    // ===== 阶段 4.3.0:写调度脏标记 =====
+    // UI 用户主动 setValue 后调 markDirty(),告知 WriteScheduler「此变量待写 PLC」
+    // WriteScheduler 写成功后调 clearDirty()
+    // PLC 读回来的 setValue 不动 dirty(因为 PLC 值 == 本地值,自然无需再写)
+    // 生命周期:UI 改 → markDirty → WriteScheduler 写成功 → clearDirty
+    // 失败保留 dirty,下一帧 WriteScheduler 重试(决策 3:不回滚值)
+    void markDirty()    { dirty_ = true; }
+    void clearDirty()   { dirty_ = false; }
+    bool isDirty() const { return dirty_; }
+
     // ===== enum → 可读名字(给 qDebug / UI 显示用) =====
     // 用了 Q_ENUM 后,可以用 QMetaEnum 反射拿名字
     static QString dataTypeName(DataType t);
@@ -97,4 +107,5 @@ private:
 	QDateTime timestamp_;// 上次更新时间(PLC 内的值被刷新到本地的时间戳)
 	int        pollIntervalMs_ = 1000;     // 阶段 3.3:轮询周期(ms),默认 1000
 	double     deadband_       = 0.0;      // 阶段 3.x:死区阈值,0 = 不启用;>0 = |新-旧| > deadband 才发信号
+    bool        dirty_          = false;    // 阶段 4.3.0:写调度脏标志。true = 本地值待写 PLC
 };

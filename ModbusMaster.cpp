@@ -191,7 +191,8 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
 // 写请求
 // ============================================================
 // 2026-07-07 重设计:跟 Qt 官方 sendWriteRequest 签名一致
-QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress) {
+// 阶段 4.3.0:加 requestId(配合 writeFinished 信号给 WriteScheduler 反查)
+QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress, int requestId) {
     if (!isConnected()) {
         emit errorOccurred("Modbus 未连接");
         return nullptr;
@@ -286,6 +287,7 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
     p.sentAt        = QDateTime::currentDateTime();
     p.timeoutMs     = 3000;
     p.isWrite       = true;
+    p.requestId     = requestId;  // 阶段 4.3.0:WriteScheduler 用来反查 dirty Variable
     pending_.insert(tid, p);
 
     qDebug() << "[ModbusMaster] 已发写 FC=0x" << QString::number(fc, 16).toUpper()
@@ -472,6 +474,8 @@ void ModbusMaster::handleWriteResponse(quint8 fc, Pending* req, const QByteArray
             req->reply->setFinished(true);
             req->reply->deleteLater();
         }
+        // 阶段 4.3.0:失败也 emit writeFinished,WriteScheduler 保留 dirty 等下一帧重试
+        emit writeFinished(req->requestId, false);
         return;
     }
 
@@ -488,6 +492,8 @@ void ModbusMaster::handleWriteResponse(quint8 fc, Pending* req, const QByteArray
         req->reply->setFinished(true);  // 写响应只标记完成,没有 result 数据
         req->reply->deleteLater();
     }
+    // 阶段 4.3.0:成功路径 emit writeFinished,WriteScheduler 据此 clearDirty
+    emit writeFinished(req->requestId, true);
 }
 
 // ============================================================
@@ -508,6 +514,8 @@ void ModbusMaster::onTimeoutScan() {
                 req.reply->setFinished(true);
                 req.reply->deleteLater();
             }
+            // 阶段 4.3.0:超时也 emit writeFinished(success=false),WriteScheduler 保留 dirty
+            emit writeFinished(req.requestId, false);
             it = pending_.erase(it);
             notifyIdleIfEmpty();   // 2026-07-09:超时清理也可能让 pending_ 变空
         } else {

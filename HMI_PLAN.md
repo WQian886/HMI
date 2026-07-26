@@ -7,6 +7,80 @@
 
 ---
 
+## 📌 孟德补充(2026-07-27 07:20)— 工程环境同步 + 进度核对
+
+> 这份 HMI_PLAN.md 是子衿 2026-07-25 写的。**主体一行没动**,这一节只补孟德(Mengde / 🐉)做的事 + 工程当前真实状态。阶段进度(0 → 7.x)以子衿原表为准。
+
+### A. 工程迁移(2026-07-16)
+
+- 路径:`E:\qt\hmi\hmi\` → **`E:\01 qianwei\HMI\`**
+- 来源:`git clone https://github.com/WQian886/HMI.git` `main`,HEAD **`175f91e`**(子衿在此之上又有 5 个本地 commit)
+- 老的 `_build_*.bat` 脚本**未迁移**(迁过来后直接作废)
+
+### B. 编译环境踩坑 → 解决
+
+- **环境**:VS 2026 v18.6.2 + Qt 6.8.3 `msvc2022_64`(路径 `D:\Qt\6.8.3\msvc2022_64\`) + MSVC `v145`(cl 19.51.36246)+ Win SDK `10.0.26100.0`
+- **坑**:VS 2026 v18 的 `vcvars64.bat` 只把 `um/shared/winrt/cppwinrt` 加进 INCLUDE,**漏了 `ucrt`** → `error C1083: 无法打开包括文件: "stddef.h"`
+- **两条无效解**:
+  - `set INCLUDE=...;%INCLUDE%`(shell 设环境变量 → MSBuild 会重置 env,**不生效**)
+  - `/p:IncludePath="ucrt;$(IncludePath)"`(编译过,但 link 时找不到 `kernel32.lib`,因为 `$(LibraryPath)` 此时还没被 props 赋值,被整体替换成只剩 UCRT 一个)
+- **真稳修法**:改 `hmi.vcxproj.user`(VS 标准用户级覆盖,不污染 vcxproj / git),加:
+
+  ```xml
+  <PropertyGroup>
+    <IncludePath>$(IncludePath);C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt</IncludePath>
+    <LibraryPath>$(LibraryPath);C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64</LibraryPath>
+  </PropertyGroup>
+  ```
+  这俩属性 props sheet 设置**之后**追加,VS IDE 和 MSBuild 命令行都生效。
+
+**命令行构建**(工程根):
+```cmd
+"D:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
+"D:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" hmi.slnx /t:Build /p:Configuration=Debug /p:Platform=x64 /m
+```
+
+### C. 编译验证通过(2026-07-25)
+
+- ✅ Debug|x64 → `x64\Debug\hmi.exe` 664KB
+- Qt6 DLLs(windeployqt 自动拷)+ plugins 全到位,双击可起,无 stderr,正常退出
+
+### D. 进度真实状态(2026-07-27 早核对)
+
+**已 commit(子衿本地 `main`)**:
+| commit | 内容 |
+|---|---|
+| `768d52f` | init: 项目骨架 |
+| `175f91e` | init: stages 0-2 done, stage 3 in progress |
+| `c3d8d9e` | stage 3.1 close |
+| `4e0f6b8` | 阶段 4.1 收官 |
+| `5f43da3` | 4.1 后微调 |
+| `d86cae6` | docs: HMI_PLAN.md + 16 目标 + 阶段 6/7 细化 |
+
+→ 入库:**阶段 0 / 1 / 2 / 3.1 / 3.2+3.3 / 4.1 + 计划文档**
+
+**未 commit(working tree,本节核对时)**:
+- `M Binding.cpp` ← 含 **4.2 简化版**(`bindEdit()`,回车=确认 / Esc=取消 / 橙色边框,L83-84 注释明写 "⚠️ 简化版")
+- `M ModbusMaster.cpp` / `ModbusMaster.h`
+- `M Variable.h`
+- `M hmi.cpp` / `hmi.h`
+- `M hmi.vcxproj`
+- `?? WriteScheduler.cpp` / `WriteScheduler.h`(可能是 4.2 配套)
+- `A  hmi.vcxproj.user.bak-20260725-pre-ucrt`(我改 vcxproj.user 前的备份)
+
+> ⚠️ **这些 working tree 改动不归孟德管**——是子衿 / 钱卫本地工作没 commit 的,孟德不会去 `git add` / `commit` / `push`。4.2 简化版已经在 working tree 里,钱卫 commit 时自己处理。
+
+### E. 原文件几处过期点(本次未改)
+
+| 项 | 原文件写 | 实际 |
+|---|---|---|
+| 工程目录 | `E:\qianwie\hmi\hmi\` | `E:\01 qianwei\HMI\`(2026-07-16 已迁) |
+| 关键参考用户名 | `HP` | `Zz` |
+| 关键参考路径 | `C:\Users\HP\.openclaw\...` | `C:\Users\Zz\.openclaw\...` |
+| 存档目录 | `E:\qianwie\HMI存档\` | 未核对(可能也不存在) |
+
+---
+
 ## 🎯 项目目标
 
 **主目标**: 理解 HMI 底层原理, 最终形成自己的 HMI 框架
