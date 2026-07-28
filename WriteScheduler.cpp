@@ -43,8 +43,8 @@ void WriteScheduler::onTick() {
     // 遍历:找一个 dirty + ReadWrite + 非 in-flight 的 Variable
     // 简化策略:每帧只发一个,避免一帧堆积 + 好调试
     for (Variable* v : varMgr_->allVariables()) {
-        if (!v->isDirty()) continue;
-        if (v->access() != Variable::Access::ReadWrite) continue;
+		if (!v->isDirty()) continue; // 只发 dirty
+		if (v->access() != Variable::Access::ReadWrite) continue;// 只发 ReadWrite
 
         QModbusDataUnit::RegisterType type;
         QVector<quint16> payload;
@@ -53,8 +53,10 @@ void WriteScheduler::onTick() {
         switch (v->dataType()) {
             case Variable::DataType::Bool: {
                 // Bool → 0x05 写单线圈
+                // Modbus 规范:0x0000 = OFF,0xFF00 = ON(Qt 的 QModbusDataUnit::Coils 内部也按这俩编码)
+                // ★ BUGFIX(2026-07-28):之前写 0/1 走 Qt 自动转换;严格按协议改成 0x0000/0xFF00
                 type = QModbusDataUnit::Coils;
-                payload = {(v->value().toBool() ? quint16(1) : quint16(0))};
+                payload = {(v->value().toBool() ? quint16(0xFF00) : quint16(0x0000))};
                 break;
             }
             case Variable::DataType::Int16:
@@ -112,4 +114,15 @@ void WriteScheduler::onWriteReply(int requestId, bool success) {
         qWarning() << "[Write] FAIL:" << v->name()
                    << "=" << v->value().toString() << "(dirty 保留,下帧重试)";
     }
+
+    // ★ 阶段 4.x 写审计日志(2026-07-28):追加一条 + emit(只 UI 列表,不写文件)
+    WriteAuditEntry e;
+    e.timestamp    = QDateTime::currentDateTime();
+    e.variableName = v->name();
+    e.newValue     = v->value().toString();
+    e.success      = success;
+    e.address      = QString("0x%1").arg(v->address(), 4, 16, QChar('0')).toUpper();
+    e.resultText   = success ? QStringLiteral("OK") : QStringLiteral("FAIL");
+    auditLog_.append(e);
+    emit auditAppended(e);
 }

@@ -29,6 +29,22 @@
 #include <QObject>
 #include <QTimer>
 #include <QHash>
+#include <QList>
+#include <QString>
+#include <QDateTime>
+#include <QMetaType>  // 阶段 4.x 写审计日志:Q_DECLARE_METATYPE
+
+// 阶段 4.x 写审计日志(2026-07-28):一条写操作的记录
+// 放顶层,信号参数用更顺;moc 自定义类型 emit 需要 Q_DECLARE_METATYPE
+struct WriteAuditEntry {
+    QDateTime timestamp;     // 写动作发生时间
+    QString   variableName;  // Variable 名("Speed")
+    QString   newValue;      // 写出去的值
+    bool      success;       // true = 写成功
+    QString   address;       // "0x0002"
+    QString   resultText;    // "OK" / "FAIL"
+};
+Q_DECLARE_METATYPE(WriteAuditEntry)
 
 class Variable;
 class VariableManager;
@@ -43,6 +59,13 @@ public:
     void stop();
     bool isRunning() const { return timer_.isActive(); }
 
+    // 阶段 4.x 写审计日志(2026-07-28):给 UI 一次性拉所有记录
+    QList<WriteAuditEntry> auditLog() const { return auditLog_; }
+
+signals:
+    // 阶段 4.x 写审计日志(2026-07-28):每条新记录都发,UI 接了加行
+    void auditAppended(const WriteAuditEntry& entry);
+
 private slots:
     void onTick();
     void onWriteReply(int requestId, bool success);
@@ -53,4 +76,5 @@ private:
     QTimer           timer_;                           // 100ms tick
     QHash<int, Variable*> pending_;                    // requestId → 等待 ack 的 Variable
     int nextReqId_ = 1;                                // 请求 id 自增
+    QList<WriteAuditEntry> auditLog_;                  // 阶段 4.x 写审计日志
 };

@@ -6,6 +6,8 @@
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
+#include <QTableWidget>     // 阶段 4.x 写审计日志
+#include <QTableWidgetItem> // 阶段 4.x 写审计日志
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
 QVector<quint16> parseValueList(const QString& text, QString* errOut);
@@ -80,6 +82,8 @@ hmi::hmi(QWidget *parent)
     // 2026-07-07 重设计:连接 / 错误 信号(同阶段 2-3 风格)
     connect(modbus_, &ModbusMaster::connected, this, [this](){
         modbusState_ = ModbusState::Connected;
+        // ★ BUGFIX(2026-07-28):重连时清 PollScheduler 残留 in-flight -1,避免 Variable 永远不读
+        if (pollScheduler_) pollScheduler_->resetAll();
         // 连接刚建好,如果之前有"待发"请求 → 现在发(消除 500ms hack)
         if (hasPendingModbus_) {
             executePendingModbus();
@@ -209,6 +213,11 @@ hmi::hmi(QWidget *parent)
     // 阶段 4.2:测试期间临时关掉死区(5 单位吞掉小波动不便 F5 验证);练完决定是否恢复
     speed->setDeadband(0.0);
 
+    // 阶段 4.x 写范围检查(2026-07-28):UI 输入超范围拒绝,PLC 值不超(从 modbus 读)
+    pressure->setRange(-1000.0, 1000.0);  // bar,允许负压
+    temperature->setRange(-100.0, 200.0); // ℃(工业传感器常见)
+    speed->setRange(0, 65535);            // UInt16 全范围
+
     // 阶段 4.1:Binding 框架 — 替 onVariableChanged 手工 if/else,加新变量只需写一行
     Binding::bind(ui.pressureLabel,    pressure,     "压力(bar): %1");
     Binding::bind(ui.temperatureLabel, temperature,  "温度(℃): %1");
@@ -224,6 +233,22 @@ hmi::hmi(QWidget *parent)
     // 阶段 4.3.0:启动写调度(与 PollScheduler 对称,处理 Variable.dirty_ → Modbus 写 PLC)
     writeScheduler_ = new WriteScheduler(varMgr_, modbus_, this);
     writeScheduler_->start();
+
+    // 阶段 4.x 写审计日志(2026-07-28):配置 auditTable + 接 WriteScheduler 信号
+    ui.auditTable->setColumnCount(4);
+    ui.auditTable->setHorizontalHeaderLabels({"时间", "Variable", "新值", "结果/地址"});
+    ui.auditTable->horizontalHeader()->setStretchLastSection(true);
+    connect(writeScheduler_, &WriteScheduler::auditAppended, this,
+        [this](const WriteAuditEntry& e){
+            int row = ui.auditTable->rowCount();
+            ui.auditTable->insertRow(row);
+            ui.auditTable->setItem(row, 0, new QTableWidgetItem(e.timestamp.toString("HH:mm:ss")));
+            ui.auditTable->setItem(row, 1, new QTableWidgetItem(e.variableName));
+            ui.auditTable->setItem(row, 2, new QTableWidgetItem(e.newValue));
+            ui.auditTable->setItem(row, 3, new QTableWidgetItem(
+                QString("%1 %2").arg(e.resultText, e.address)));
+            ui.auditTable->scrollToBottom();
+        });
 }
 
 hmi::~hmi()
@@ -439,6 +464,14 @@ void hmi::onTcpReadyRead(const QByteArray& data) {// 收到数据了,显示在 r
 }
 
 void hmi::appendRecv(const QByteArray& data, const QString& prefix) {// 显示在 recvText 上(纯文本追加,不走 state)
+	// ★ BUGFIX(2026-07-28):防止 recvText 无限增长 — 超过 200 行清空
+	// 【背景】原代码无上限,长时间跑(7x24)+ 高频收发,recvText 会越来越大,UI 卡顿
+	// 【改法】超过 200 行自动 clear,丢老日志保新日志
+	// 【取舍】真要"永不丢",得接 #3 写审计升级(持久化到文件)或 #G73 历史数据存储
+	// 【参照】改善计划.md #8
+	if (ui.recvText->document()->lineCount() > 200) {
+		ui.recvText->clear();
+	}
 	QString hex = data.toHex(' ').toUpper();// 转成十六进制字符串,每字节用空格分隔,大写
 	ui.recvText->append(prefix + " " + hex);//  在 recvText 上追加显示,加个前缀区分发送/接收
 }

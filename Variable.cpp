@@ -34,13 +34,23 @@ Variable::Variable(const QString& name,
     // quality_ 默认 Bad — 见 header 默认成员初始化
 }
 
-void Variable::setValue(const QVariant& v) {
-    // 类型校验:不匹配就拒绝,warning 后直接 return
+bool Variable::setValue(const QVariant& v, bool checkRange) {
+    // 类型校验:不匹配就拒绝,warning 后返 false
     if (!matchesDataType(v, type_)) {
         qWarning() << "Variable" << name_
                    << "type mismatch: expected" << dataTypeName(type_)
                    << ", got" << v.typeName();
-        return;
+        return false;
+    }
+    // ★ 阶段 4.x 范围检查(2026-07-28):超出 [min, max] 拒绝,值不变,无信号
+    //   checkRange=false 给 PLC 读路径(原始寄存器值可能超工程值范围)
+    if (hasRange() && checkRange) {
+        double d = v.toDouble();
+        if (d < minValue_.toDouble() || d > maxValue_.toDouble()) {
+            qWarning() << "Variable" << name_ << "out of range:" << v
+                       << "not in [" << minValue_ << "," << maxValue_ << "]";
+            return false;
+        }
     }
     // 订阅发布:先判断"旧值 vs 新值",再用结果决定要不要 emit
     // 阶段 3.x:死区过滤
@@ -64,6 +74,13 @@ void Variable::setValue(const QVariant& v) {
         emit valueChanged(*this);
     }
     // quality 不在这里改 — 调用方知道这次是正常数据还是异常数据
+    return true;  // 接受
+}
+
+// 阶段 4.x:写范围检查 setter
+void Variable::setRange(const QVariant& min, const QVariant& max) {
+    minValue_ = min;
+    maxValue_ = max;
 }
 
 void Variable::setQuality(Quality q) {

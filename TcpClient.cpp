@@ -126,8 +126,8 @@ void TcpClient::onSocketDisconnected() {
     // 原因:onSocketError 已经先调了 scheduleReconnect(决定 UI 橙/红)
     //      如果这里再 emit disconnected → hmi 端 onTcpDisconnected 会把 UI 覆盖成 Disconnected(灰)
     // 修复:被动断开时,onSocketError 已经接管了所有事(状态由 scheduleReconnect 决定)
-    //      这里什么都不做,只 stopHeartbeat 已经在函数开头做了
-    scheduleReconnect();   // 保留(防重入检查:isActive 时 return,无副作用)
+    //      主动调 scheduleReconnect(让重连机制接管),靠 isActive 防重入
+    scheduleReconnect();   // 防重入检查:isActive 时 return,无副作用
 }
 
 void TcpClient::onSocketReadyRead() {

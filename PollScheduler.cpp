@@ -36,9 +36,40 @@ void PollScheduler::stop() {
     pending_.clear();
 }
 
+// ★ BUGFIX(2026-07-28):重连时调用,把所有 nextPollAtMs 强制置 0
+//   解决"断连瞬间 in-flight 的 Variable 永久卡 -1,重连后永远不读"的 bug
+void PollScheduler::resetAll() {
+    qDebug() << "[PollScheduler] resetAll() — 清 in-flight 残留";
+    for (auto it = nextPollAtMs_.begin(); it != nextPollAtMs_.end(); ++it) {
+        it.value() = 0;  // 0 = 立即可发
+    }
+    pending_.clear();     // 顺手清掉 pending reqId(旧的不会影响新的,清掉更干净)
+}
+
 void PollScheduler::onTick() {
     // 2026-07-21 防御:modbus 未连就别 poll,避免连环弹错
     if (!modbus_->isConnected()) return;
+
+    // ★ BUGFIX(2026-07-28):跟 WriteScheduler 对齐,加 modbus in-flight 防御
+    //
+    //   【背景】ModbusMaster 2026-07-09 加了「并发请求限流」机制:
+    //     同一时刻 ModbusMaster::pending_ 只能有 1 个未完成请求
+    //     (Modbus 协议从站串行响应,master 不能同时问 1 又问 2)
+    //
+    //   【Bug 现象】本函数 onTick() 100ms 一次,直接发读请求;但 WriteScheduler
+    //     也 100ms 一次发写请求,二者偶尔撞车:一个发完没回,另一个接着发,
+    //     第二个被 ModbusMaster 拒,emit errorOccurred → hmi.cpp 弹窗
+    //     「Modbus 错误 / 上一帧未完成,稍后再发(pending=1)」
+    //
+    //   【修法】onTick 顶部加 pending 检查,有未完成的就静默 return,
+    //     等下一帧(100ms)再发,不会撞 WriteScheduler
+    //
+    //   【参照】WriteScheduler::onTick (WriteScheduler.cpp:41) 已经有同样防御:
+    //     if (modbus_->pendingCount() > 0) return;
+    //
+    //   【取舍】静默 return 会让 PollScheduler 100ms 内少读一次(最多 1 次),
+    //     对工业 HMI 1 秒轮询周期影响可忽略;比弹窗骚扰操作员好得多
+    if (modbus_->pendingCount() > 0) return;
 
     qint64 now = QDateTime::currentMSecsSinceEpoch();
 
@@ -144,7 +175,7 @@ void PollScheduler::onModbusReply(int requestId, QModbusDataUnit unit, bool succ
                 break;
             }
         }
-        v->setValue(val);
+        v->setValue(val, false);  // 阶段 4.x 范围检查(2026-07-28):PLC 读路径不查范围(原始寄存器值可能超工程值)
         v->setQuality(Variable::Quality::Good);
         nextPollAtMs_[v] = now + v->pollIntervalMs();
         regIdx++;

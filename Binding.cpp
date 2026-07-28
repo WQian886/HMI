@@ -10,6 +10,7 @@
 #include "Variable.h"
 #include <QLabel>
 #include <QLineEdit>
+#include <QPointer>  // 阶段 4.x:bindEdit 用 QPointer 防止 Variable delete 后 lambda 段错,见改善计划.md #7
 #include <QShortcut>
 #include <QVariant>   // 阶段 4.3.0 bugfix:QVariant::fromValue<quint16>() 显式转换类型
 
@@ -86,6 +87,13 @@ namespace {
 void Binding::bindEdit(QLineEdit* edit, Variable* v) {
     if (!edit || !v) return;
 
+    // ★ 阶段 4.x(2026-07-28):QPointer 防止 Variable 被 remove 后 lambda 段错
+    // 【背景】原代码 lambda 捕获 v(Variable*),Variable 被 VariableManager::removeVariable
+    //   删除后,lambda 仍然触发 → v->setValue(...) 段错
+    // 【改法】用 QPointer 捕获,QObject 析构时自动置 null,lambda 里判 null 早返回
+    // 【参照】改善计划.md #7
+    QPointer<Variable> vPtr(v);
+
     applyNowEdit(edit, v);  // 启动同步初值
 
     // ① 用户编辑 → 变脏(textEdited 只用户输入触发,代码 setText 不回环)
@@ -94,16 +102,51 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
 
     // ② 回车 → 写变量
     QObject::connect(edit, &QLineEdit::returnPressed, edit,
-        [edit, v]() {
-            bool ok = false;
-            quint16 val = edit->text().trimmed().toUShort(&ok);
-            if (!ok) {
-                applyNowEdit(edit, v);   // 回滚
-                setDirtyStyle(edit, false);
+        [edit, vPtr]() {
+            // ★ 防 v 被 delete(2026-07-28):QPointer 早返
+            if (vPtr.isNull()) return;
+            Variable* v = vPtr.data();
+            // 阶段 4.3.1 类型参数化:按 v->dataType() 分派(替换原 quint16 硬编码)
+            bool parseOk = false;
+            QVariant typedVal;
+
+            switch (v->dataType()) {
+                case Variable::DataType::Bool: {
+                    QString s = edit->text().trimmed().toLower();
+                    if (s == "true" || s == "1" || s == "on") {
+                        typedVal = QVariant::fromValue<bool>(true); parseOk = true;
+                    } else if (s == "false" || s == "0" || s == "off") {
+                        typedVal = QVariant::fromValue<bool>(false); parseOk = true;
+                    }
+                    break;
+                }
+                case Variable::DataType::Int16:
+                    typedVal = QVariant::fromValue<qint16>(edit->text().trimmed().toShort(&parseOk));
+                    break;
+                case Variable::DataType::UInt16:
+                    typedVal = QVariant::fromValue<quint16>(edit->text().trimmed().toUShort(&parseOk));
+                    break;
+                case Variable::DataType::Int32:
+                    typedVal = QVariant::fromValue<qint32>(edit->text().trimmed().toInt(&parseOk));
+                    break;
+                case Variable::DataType::Float:
+                    typedVal = QVariant::fromValue<float>(edit->text().trimmed().toFloat(&parseOk));
+                    break;
+            }
+
+            if (!parseOk) {
+                applyNowEdit(edit, v);
                 qDebug() << "[BindEdit] 校验失败,已回滚:" << edit->text();
                 return;
             }
-            v->setValue(QVariant::fromValue<quint16>(val));   // 阶段 4.3.0 bugfix:显式 UShort typeId,绕开 MSVC 推断歧义("expected UInt16, got int")
+
+            // ★ 阶段 4.x 范围检查(2026-07-28):setValue 返 false = 类型不匹配 / 范围超 → 回滚
+            if (!v->setValue(typedVal)) {
+                applyNowEdit(edit, v);   // 从变量重读回 UI(回滚)
+                setDirtyStyle(edit, true);  // 边框留橙,告诉用户没成功
+                qDebug() << "[BindEdit] 校验失败(类型/范围),已回滚:" << edit->text();
+                return;
+            }
             v->markDirty();           // 阶段 4.3.0:告诉 WriteScheduler 待写 PLC
             setDirtyStyle(edit, false);
         });
@@ -112,7 +155,10 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
     auto* esc = new QShortcut(QKeySequence(Qt::Key_Escape), edit);
     esc->setContext(Qt::WidgetShortcut);  // 只本控件内有效,不污染全局
     QObject::connect(esc, &QShortcut::activated, edit,
-        [edit, v]() {
+        [edit, vPtr]() {
+            // ★ 防 v 被 delete(2026-07-28):QPointer 早返
+            if (vPtr.isNull()) return;
+            Variable* v = vPtr.data();
             applyNowEdit(edit, v);
             setDirtyStyle(edit, false);
         });

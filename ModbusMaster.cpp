@@ -158,6 +158,7 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
     body.append(static_cast<char>(count & 0xFF));
 
     quint16 tid = nextTid_++;
+    if (tid == 0) tid = nextTid_++;  // ★ BUGFIX(2026-07-28):跳过 TID 0(留给"未分配"标识),见改善计划.md #4
     QByteArray frame = buildFrame(tid, serverAddress, fc, body);
 
     qint64 sent = tcp_->send(frame);
@@ -271,6 +272,7 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
     }
 
     quint16 tid = nextTid_++;
+    if (tid == 0) tid = nextTid_++;  // ★ BUGFIX(2026-07-28):跳过 TID 0(留给"未分配"标识),见改善计划.md #4
     QByteArray frame = buildFrame(tid, serverAddress, fc, body);
 
     qint64 sent = tcp_->send(frame);

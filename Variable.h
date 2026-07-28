@@ -77,9 +77,19 @@ public:
 
     // ===== setters =====
     // setValue 自动更新 timestamp;quality 由调用方决定(因为可能是新值也可能是异常)
-    void setValue(const QVariant& v);
+    // ★ 阶段 4.x 范围检查(2026-07-28):返 true = 接受(改了),false = 拒绝(类型不匹配 / 范围超)
+    //   checkRange = false 给 PLC 读路径用(原始寄存器值可能超工程值范围,不查)
+    bool setValue(const QVariant& v, bool checkRange = true);
     void setQuality(Quality q);
     void setTimestamp(const QDateTime& t);
+
+    // ===== 阶段 4.x:写范围检查(可选,没配 = 不校验)=====
+    // UI 输入 / 反向写前用;类型可不严格(toDouble 统一比)
+    // 工业常见:温度 -100~200℃ / 压力 0~10 bar / 转速 0~3000 rpm
+    void setRange(const QVariant& min, const QVariant& max);
+    QVariant minValue() const { return minValue_; }
+    QVariant maxValue() const { return maxValue_; }
+    bool hasRange() const { return minValue_.isValid() && maxValue_.isValid(); }
 
     // ===== 阶段 4.3.0:写调度脏标记 =====
     // UI 用户主动 setValue 后调 markDirty(),告知 WriteScheduler「此变量待写 PLC」
@@ -108,4 +118,6 @@ private:
 	int        pollIntervalMs_ = 1000;     // 阶段 3.3:轮询周期(ms),默认 1000
 	double     deadband_       = 0.0;      // 阶段 3.x:死区阈值,0 = 不启用;>0 = |新-旧| > deadband 才发信号
     bool        dirty_          = false;    // 阶段 4.3.0:写调度脏标志。true = 本地值待写 PLC
+    QVariant    minValue_;                      // 阶段 4.x:范围下限(无效 QVariant = 未配)
+    QVariant    maxValue_;                      // 阶段 4.x:范围上限
 };

@@ -251,6 +251,14 @@
       </property>
      </widget>
     </item>
+    <item>
+     <!-- 阶段 4.x 写审计日志(2026-07-28):只 UI,显示最近写操作记录 -->
+     <widget class="QTableWidget" name="auditTable">
+      <property name="minimumSize">
+       <size><width>0</width><height>120</height></size>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menuBar">

@@ -29,6 +29,10 @@ public:
 	void stop();// 停止轮询调度
 	bool isRunning() const { return timer_.isActive(); }// 是否正在运行
 
+	// ★ BUGFIX(2026-07-28):重连时清空 nextPollAtMs,避免 -1 in-flight 残留
+	//   让所有 Variable 下一帧 tick 立即可发(否则某些 Variable 可能永久卡 in-flight 永远不读)
+	void resetAll();
+
 private slots:
     void onTick();                                       // 100ms 一次扫描
 	void onModbusReply(int requestId, QModbusDataUnit unit, bool success);// ModbusMaster::readFinished 回调
