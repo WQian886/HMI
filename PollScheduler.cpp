@@ -38,11 +38,13 @@ void PollScheduler::stop() {
 
 // ★ BUGFIX(2026-07-28):重连时调用,把所有 nextPollAtMs 强制置 0
 //   解决"断连瞬间 in-flight 的 Variable 永久卡 -1,重连后永远不读"的 bug
+// ★ IMPROVE-A7(2026-07-29):inFlight_ 独立 set 一起清(替原 -1 magic number)
 void PollScheduler::resetAll() {
     qDebug() << "[PollScheduler] resetAll() — 清 in-flight 残留";
     for (auto it = nextPollAtMs_.begin(); it != nextPollAtMs_.end(); ++it) {
         it.value() = 0;  // 0 = 立即可发
     }
+    inFlight_.clear();   // ★ IMPROVE-A7:清 in-flight 集合
     pending_.clear();     // 顺手清掉 pending reqId(旧的不会影响新的,清掉更干净)
 }
 
@@ -74,15 +76,16 @@ void PollScheduler::onTick() {
     qint64 now = QDateTime::currentMSecsSinceEpoch();
 
     // 1. 找所有"到期"的 Variable
+    // inFlight_.contains(v) → 请求已发,等 reply,跳过
     // nextPollAtMs[v] == 0   → 第一次启动,立即发
     // nextPollAtMs[v] < now → 已到期,再发
-    // nextPollAtMs[v] == -1  → in-flight,跳过(等 reply 回调重置)
     QList<Variable*> due;
     for (Variable* v : varMgr_->allVariables()) {
+        if (inFlight_.contains(v)) continue;  // ★ IMPROVE-A7:in-flight 用 QSet 替 -1
         qint64 next = nextPollAtMs_.value(v, 0);
-        if (next != -1 && now >= next) {
+        if (now >= next) {
             due.append(v);
-            nextPollAtMs_[v] = -1;  // 标记 in-flight
+            inFlight_.insert(v);  // ★ IMPROVE-A7:标记 in-flight
         }
     }
     if (due.isEmpty()) return;
@@ -104,7 +107,9 @@ void PollScheduler::onTick() {
         }
 
         // 4. 发读请求(holding register,从 first->address() 起 count 个)
-        int reqId = nextReqId_++;
+        // ★ IMPROVE-A2(2026-07-29):++ 前缀 + 跳过 0
+        quint32 reqId = ++nextReqId_;
+        if (reqId == 0) reqId = ++nextReqId_;
         pending_[reqId] = batch;
         modbus_->sendReadRequest(
             QModbusDataUnit(QModbusDataUnit::HoldingRegisters, first->address(), count),
@@ -113,11 +118,16 @@ void PollScheduler::onTick() {
     }
 }
 
-void PollScheduler::onModbusReply(int requestId, QModbusDataUnit unit, bool success) {
+void PollScheduler::onModbusReply(quint32 requestId, QModbusDataUnit unit, bool success) {
     QList<Variable*> batch = pending_.take(requestId);
     if (batch.isEmpty()) return;
 
     qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    // ★ IMPROVE-A7(2026-07-29):reply 到了,清 in-flight set(无论成功失败都清)
+    for (Variable* v : batch) {
+        inFlight_.remove(v);
+    }
 
     if (!success) {
         // 失败:全部标 Bad,等下一个 poll interval 再试
@@ -175,7 +185,9 @@ void PollScheduler::onModbusReply(int requestId, QModbusDataUnit unit, bool succ
                 break;
             }
         }
-        v->setValue(val, false);  // 阶段 4.x 范围检查(2026-07-28):PLC 读路径不查范围(原始寄存器值可能超工程值)
+        // ★ IMPROVE-A6(2026-07-29):PLC 读路径不查范围(原始寄存器值可能超工程值)
+        //   返 NoChange 时也继续推进 quality=Good + nextPollAt(只是没 emit valueChanged)
+        v->setValue(val, false);
         v->setQuality(Variable::Quality::Good);
         nextPollAtMs_[v] = now + v->pollIntervalMs();
         regIdx++;

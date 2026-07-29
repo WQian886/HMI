@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QHash>
 #include <QList>
+#include <QSet>            // ★ IMPROVE-A7(2026-07-29):inFlight_ 用 QSet
 #include <QModbusDataUnit>
 
 class Variable; 
@@ -35,13 +36,18 @@ public:
 
 private slots:
     void onTick();                                       // 100ms 一次扫描
-	void onModbusReply(int requestId, QModbusDataUnit unit, bool success);// ModbusMaster::readFinished 回调
+    void onModbusReply(quint32 requestId, QModbusDataUnit unit, bool success);// ModbusMaster::readFinished 回调
 
 private:
     VariableManager* varMgr_;
     ModbusMaster* modbus_;
     QTimer timer_;                                       // 100ms tick
-    QHash<Variable*, qint64> nextPollAtMs_;            // 下次轮询时刻(0/-1 = 待发或 in-flight)
-    int nextReqId_ = 1;
-    QHash<int, QList<Variable*>> pending_;              // reqId → 待更新变量列表(合并读用)
+    QHash<Variable*, qint64> nextPollAtMs_;            // 下次轮询时刻(0 = 立即可发,>0 = 等到该时刻)
+    // ★ IMPROVE-A7(2026-07-29):in-flight 状态独立用 QSet,替原来的 -1 magic number
+    //   原代码 nextPollAtMs_[v] = -1 表示 in-flight,但 -1 跟"下次时间"语义混一起
+    //   现在:nextPollAtMs_ 只存时间,inFlight_ 单独表达"请求已发,等 reply"
+    QSet<Variable*> inFlight_;
+    // ★ IMPROVE-A2(2026-07-29):quint32 防回绕(int 跑 2^31 次也会爆)
+    quint32 nextReqId_ = 1;
+    QHash<quint32, QList<Variable*>> pending_;         // reqId → 待更新变量列表(合并读用)
 };

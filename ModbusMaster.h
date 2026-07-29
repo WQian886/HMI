@@ -39,11 +39,12 @@ public:
     // ============================================================
     // 读请求:返回 reply 句柄,用户接 finished 信号拿数据
     // 阶段 3.3 加 requestId(default 0 = 旧调用方式兼容)
-    QModbusReply* sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, int requestId = 0);
+    // ★ IMPROVE-A2(2026-07-29):quint32 防回绕,跟 PollScheduler / WriteScheduler 对齐
+    QModbusReply* sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, quint32 requestId = 0);
 
     // 写请求:返回 reply 句柄,finished 信号表示写完成
     // 阶段 4.3.0:加 requestId(默认 0 = 旧调用方式兼容),跟 writeFinished 配合
-    QModbusReply* sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress, int requestId = 0);
+    QModbusReply* sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress, quint32 requestId = 0);
 
 signals:
     // 错误 + 状态
@@ -54,10 +55,11 @@ signals:
     // 触发时机:正常响应 / 异常响应 / 超时清理 / TCP 断开后
     void idle();
     // 阶段 3.3:read 成功后发 → PollScheduler 用 requestId 反查 + 分发到 Variable
-    void readFinished(int requestId, QModbusDataUnit unit, bool success);
+    // ★ IMPROVE-A2(2026-07-29):quint32 跟 Pending.requestId + PollScheduler / WriteScheduler 对齐
+    void readFinished(quint32 requestId, QModbusDataUnit unit, bool success);
     // 阶段 4.3.0:write 完成后发 → WriteScheduler 用 requestId 反查 + 清 dirty
     // 成功 / 失败 都发(success 区分),失败时 WriteScheduler 保留 dirty 等下一帧重试
-    void writeFinished(int requestId, bool success);
+    void writeFinished(quint32 requestId, bool success);
 
 private slots:
     // TCP 数据到达 → 拆 MBAP 头 + 按 type 分发拆帧
@@ -97,13 +99,21 @@ private:
         QDateTime sentAt;
         int      timeoutMs;
         bool     isWrite;
-        int      requestId = 0;            // 阶段 3.3:PollScheduler 用来反查
+        // ★ IMPROVE-A2(2026-07-29):quint32 跟 sendReadRequest / sendWriteRequest 参数对齐
+        quint32  requestId = 0;            // 阶段 3.3:PollScheduler 用来反查
     };
 
     // 帧组装/拆帧 helper(Pending 必须在这些之前声明)
 	QByteArray buildFrame(quint16 tid, int serverAddress, quint8 fc, const QByteArray& pduBody);// 组装请求帧
 	void handleReadResponse(quint8 fc, Pending* req, const QByteArray& frame);// 处理读响应帧
 	void handleWriteResponse(quint8 fc, Pending* req, const QByteArray& frame);// 处理写响应帧
+
+	// ★ IMPROVE-B5(2026-07-29):错误收尾 helper,5 处重复 setError/setFinished/deleteLater 提一处
+	//   【背景】异常响应 / 帧太短 / 数据不足 / echo 错 等错误路径都重复:
+	//          emit errorOccurred + reply->setError(ProtocolError) + setFinished + deleteLater
+	//   【改法】提 helper,所有错误路径调一次
+	//   【取舍】helper 只覆盖"emit + reply 收尾",其他清理(pending_.erase 等)在调用方做
+	void finalizeErrorReply(Pending* req, const QString& msg);
 
     // 2026-07-09 新增:erase 后 / clear() 后调用 —— pending_ 变空就 emit idle
     void notifyIdleIfEmpty() {
@@ -117,9 +127,10 @@ public:
 private:
     TcpClient* tcp_ = nullptr;
     QByteArray recvBuf_;
-    quint16 nextTid_ = 1;
+    // ★ IMPROVE-A1(2026-07-29):quint16 跑 7.6 天回绕,改 quint32 + 跳过 0
+    quint32 nextTid_ = 1;
 
-    QHash<quint16, Pending> pending_;
+    QHash<quint32, Pending> pending_;
 
     QTimer* timeoutTimer_ = nullptr;
 };

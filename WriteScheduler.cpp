@@ -85,7 +85,9 @@ void WriteScheduler::onTick() {
             }
         }
 
-        int reqId = nextReqId_++;
+        // ★ IMPROVE-A2(2026-07-29):++ 前缀 + 跳过 0
+        quint32 reqId = ++nextReqId_;
+        if (reqId == 0) reqId = ++nextReqId_;
         pending_[reqId] = v;
 
         QModbusDataUnit unit(type, v->address(), payload);
@@ -99,7 +101,7 @@ void WriteScheduler::onTick() {
     }
 }
 
-void WriteScheduler::onWriteReply(int requestId, bool success) {
+void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
     Variable* v = pending_.take(requestId);
     if (!v) {
         qWarning() << "[WriteScheduler] 收到未知 reqId:" << requestId;
@@ -108,11 +110,24 @@ void WriteScheduler::onWriteReply(int requestId, bool success) {
 
     if (success) {
         v->clearDirty();
+        v->clearWriteFail();  // ★ IMPROVE-A4(2026-07-29):成功后清失败计数
         qDebug() << "[Write] OK:" << v->name() << "=" << v->value().toString();
     } else {
-        // 决策 3:失败不回滚,保留 dirty 等下一帧重试
-        qWarning() << "[Write] FAIL:" << v->name()
-                   << "=" << v->value().toString() << "(dirty 保留,下帧重试)";
+        // ★ IMPROVE-A4(2026-07-29):失败累加,达到上限报警 + 清 dirty(工业铁律)
+        //   之前决策 3「失败不回滚,保留 dirty 等下一帧重试」,但 PLC 故障时会刷屏
+        //   现在重试 kMaxWriteRetries 次后:清 dirty + 标 Bad + emit writeFailed(阶段 5 报警)
+        v->incrementWriteFail();
+        if (v->writeFailCount() >= kMaxWriteRetries) {
+            v->clearDirty();
+            v->setQuality(Variable::Quality::Bad);  // UI 能看 Bad 知道不可信
+            QString reason = QString("重试 %1 次仍失败,已停止重发(PLC 故障?)").arg(kMaxWriteRetries);
+            qWarning() << "[Write] FAIL 报警:" << v->name() << reason;
+            emit writeFailed(v->name(), reason);
+        } else {
+            qWarning() << "[Write] FAIL:" << v->name()
+                       << "=" << v->value().toString()
+                       << "(" << v->writeFailCount() << "/" << kMaxWriteRetries << " 保留 dirty)";
+        }
     }
 
     // ★ 阶段 4.x 写审计日志(2026-07-28):追加一条 + emit(只 UI 列表,不写文件)
@@ -122,7 +137,9 @@ void WriteScheduler::onWriteReply(int requestId, bool success) {
     e.newValue     = v->value().toString();
     e.success      = success;
     e.address      = QString("0x%1").arg(v->address(), 4, 16, QChar('0')).toUpper();
-    e.resultText   = success ? QStringLiteral("OK") : QStringLiteral("FAIL");
+    QString failSuffix;
+    if (!success && v->writeFailCount() >= kMaxWriteRetries) failSuffix = " (报警)";
+    e.resultText   = success ? QStringLiteral("OK") : (QStringLiteral("FAIL") + failSuffix);
     auditLog_.append(e);
     emit auditAppended(e);
 }

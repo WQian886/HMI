@@ -21,6 +21,20 @@ bool VariableManager::addVariable(Variable* v) {
     if (name.isEmpty())           return false;  // name 为空
     if (vars_.contains(name))     return false;  // name 重复
 
+    // ★ IMPROVE-A5(2026-07-29,hotfix):检查 v->parent()
+    //   【bug 复盘】原版“直接拒绝”导致变量进了 hash 但 manager 不管 — PollScheduler
+    //          遍历不到 → 永远不读 → 压力/温度/转速 label 一直空
+    //   【现状】hmi.cpp 现有代码 new Variable 时就传 varMgr_ 作 parent,此时 v->parent()
+    //          已经 == this,必须接受(否则全拒)。这里仅作为防御检查 + warning:
+    //          阶段 6 工程文件加载外部变量时如果遇到 parent 冲突会 warning 提醒
+    if (v->parent() != nullptr && v->parent() != this) {
+        qWarning() << "[VariableManager] Variable" << name
+                   << "已有别的 parent:" << v->parent()
+                   << "(this=" << this << ")— 阶段 6 工程文件需注意可能存在二次 delete";
+        // 不拒绝:接受并接管(接管后原 parent 不再 delete 它,生命周期归本 manager)
+    }
+
+    // setParent 即使 v->parent() 已是 this,Qt 是 no-op,不会双重父
     v->setParent(this);  // 交给 manager 管生命周期
     vars_.insert(name, v);
     return true;
