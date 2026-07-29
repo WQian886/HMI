@@ -79,6 +79,28 @@ private:
 
     void updateUi();   // state + connState_ + modbusState_ → UI 同步函数(唯一的 UI 渲染入口)
 
+    // ★ IMPROVE-B3(2026-07-29):updateUi 拆 5 个 helper,每个负责一个 UI 区域
+    //   【背景】原 updateUi 110+ 行,4 块大区(stateLabel / connLabel / 按钮 / modbusLabel)+ 6 处 numberLineEdit 重复
+    //   【改法】拆 helper,updateUi() 变 5 行调用
+    //   【取舍】helper 间共享 state/connState_ 读取(都是只读,顺序无关)— 安全
+    //   【参照】Wqian 2026-07-29 review #2(hmi.cpp #2 updateUi 巨函数)
+    void updateStateLabel();       // state → stateLabel + timer 启停 + counter 复位
+    void updateConnLabel();        // connState_ → connLabel + 重连进度
+    void updateNumberLineEdit();   // counter → numberLineEdit(替原 6 处重复)
+    void updateButtons();          // state + connState_ → 业务三键 + 网络按钮 enabled
+    void updateModbusLabel();      // lastResultText_ → modbusResultLabel
+
+    // ★ IMPROVE-B4(2026-07-29):magic number 提常量,改超时/提示时长集中一处
+    //   【背景】原代码 statusBar(...) 调 13 处,timeout 参数 1500/3000/5000 散落;timer interval 1000/3000 散落
+    //          改任何一处超时都要全文搜数字,易漏
+    //   【改法】提 5 个 static constexpr,按场景分档
+    //   【取舍】常量放 class 内 private static(类作用域,不污染全局)— Qt 习惯
+    static constexpr int kStatusBarShortMs  = 1500;  // 短提示:请求中 / 空闲(在 1.5s 内自动消失)
+    static constexpr int kStatusBarMediumMs = 3000;  // 中等提示:校验失败 / 输入错误(给操作员看到)
+    static constexpr int kStatusBarLongMs   = 5000;  // 长提示:连接等待(失败会弹窗,长时间看得见)
+    static constexpr int kCounterTickMs     = 1000;  // counter QTimer 周期(阶段 0 第 1 练)
+    static constexpr int kResetIntervalMs   = 3000;  // 复位 QTimer 间隔(到点转 Stopped)
+
     // 2026-07-07 重设计:Modbus 通用请求入口
     void executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int slaveId, int addr);
     void executePendingModbus();

@@ -65,16 +65,23 @@ public:
 signals:
     // 阶段 4.x 写审计日志(2026-07-28):每条新记录都发,UI 接了加行
     void auditAppended(const WriteAuditEntry& entry);
+    // ★ IMPROVE-A4(2026-07-29):写失败达上限报警 → 阶段 5 报警系统接
+    //   决策:超限后清 dirty(工业铁律 — 失败不能无限重发),让操作员决定后续
+    void writeFailed(const QString& varName, const QString& reason);
 
 private slots:
     void onTick();
-    void onWriteReply(int requestId, bool success);
+    void onWriteReply(quint32 requestId, bool success);
 
 private:
+    // ★ IMPROVE-A4(2026-07-29):写失败重试上限(超过报警 + 清 dirty)
+    static constexpr int kMaxWriteRetries = 3;
+
     VariableManager* varMgr_;
     ModbusMaster*    modbus_;
     QTimer           timer_;                           // 100ms tick
-    QHash<int, Variable*> pending_;                    // requestId → 等待 ack 的 Variable
-    int nextReqId_ = 1;                                // 请求 id 自增
+    QHash<quint32, Variable*> pending_;                // requestId → 等待 ack 的 Variable
+    // ★ IMPROVE-A2(2026-07-29):quint32 防回绕
+    quint32 nextReqId_ = 1;                            // 请求 id 自增
     QList<WriteAuditEntry> auditLog_;                  // 阶段 4.x 写审计日志
 };

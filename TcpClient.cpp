@@ -62,7 +62,7 @@ void TcpClient::connectTo(const QString& host, quint16 port) {
     emit connectionAttempted();   // 通知 UI:正在连接了
 
     // 3 秒连接超时(用成员定时器,close() 会 stop,避免竞态)
-    connectTimeoutTimer_->start(3000);
+    connectTimeoutTimer_->start(TcpClient::kConnectTimeoutMs);  // ★ IMPROVE-B4ext
 }
 
 void TcpClient::close() {
@@ -181,7 +181,8 @@ void TcpClient::scheduleReconnect() {
     // 第 2 次:retryCount_=1,位移 1<<1=2,延迟 2000ms
     // 依此类推
     // 第 6 次:retryCount_=5,位移 1<<5=32,qMin(30000,32000)=30000ms,达到封顶
-    int delayMs = qMin(30000, 1000 * (1 << retryCount_));
+    // ★ IMPROVE-B4ext(2026-07-29):30000 → kReconnectMaxMs / 1000 → kReconnectBaseMs
+    int delayMs = qMin(TcpClient::kReconnectMaxMs, TcpClient::kReconnectBaseMs * (1 << retryCount_));
     retryCount_++;
 
     // 通知 UI(进入 Reconnecting 状态,显示"重连中(2/5)")
@@ -198,7 +199,7 @@ void TcpClient::onReconnectTimer() {
     emit connectionAttempted();   // 通知 UI:重连开始了
 
     // 每次重连也加 3s 超时(成员定时器)
-    connectTimeoutTimer_->start(3000);
+    connectTimeoutTimer_->start(TcpClient::kConnectTimeoutMs);  // ★ IMPROVE-B4ext
 }
 
 // ==================== 阶段 1 第 2 练:心跳 ====================
@@ -212,24 +213,28 @@ void TcpClient::stopHeartbeat() {
     heartbeatTimer_->stop();
 }
 
+// ★ IMPROVE-B2(2026-07-29):heartbeatTimer 改造
+//   【背景】原代码 timer 每 5s 醒一次,只 qDebug 打一行 "[TcpClient] 心跳定时器到..."
+//          — Modbus 协议不能主动发 1 字节 0x00(会污染协议帧),timer 空转刷屏
+//   【现状】timer 唯一作用:检查 inactivity timeout(15s 无活动 → 判掉线)
+//          实际是「被动超时检测」,不是真「心跳」
+//   【取舍】以后要做应用层心跳:每 N 秒主动发一次合规 Modbus 读请求(由 PollScheduler 承担)
+//          现在 timer 只剩 inactivity check,够用
+//   【参照】ModbusMaster::onTimeoutScan(2026-07-09)+ IMPL: https://doc.qt.io/qt-6/qabstractsocket.html
 void TcpClient::onHeartbeatTimer() {
+    // 重连期间 socket 不在 ConnectedState,timer 醒直接 return(每 5s 一次检查,无副作用)
     if (socket_->state() != QAbstractSocket::ConnectedState) {
-        return;   // 不在连着,不发
-    }
-
-    // 检查"无活动超时" — 8s 内没收到任何数据 → 判掉线
-    qint64 elapsed = lastReceivedTime_.msecsTo(QTime::currentTime());
-    if (lastReceivedTime_.isValid() && elapsed > inactivityTimeoutMs_) {
-        qDebug() << "心跳超时:" << elapsed << "ms 无活动,主动断开重连";
-        socket_->abort();
-        // ★ 不再 emit errorOccurred:abort 触发 onSocketError → scheduleReconnect
-        // hmi 端 onTcpError 不应再设 Failed(由 reconnectScheduled 决定 UI = 橙)
         return;
     }
 
-    // 2026-07-09:阶段 2 起不发心跳包 —— 1 字节 0x00 对 Modbus 是污染
-    // Modbus 自带超时机制(pending_ + 3s 超时扫描),不需要 TCP 层心跳
-    // 未来要做应用层心跳:每 N 秒主动发一次合规 Modbus 读请求
-    // socket_->write(QByteArray("\x00", 1));
-    qDebug() << "[TcpClient] 心跳定时器到(阶段 2 后暂不发送)";
+    // 检查"无活动超时" — 15s 内没收到任何数据 → 判掉线,触发重连
+    qint64 elapsed = lastReceivedTime_.msecsTo(QTime::currentTime());
+    if (lastReceivedTime_.isValid() && elapsed > inactivityTimeoutMs_) {
+        qDebug() << "[TcpClient] 心跳超时:" << elapsed << "ms 无活动,主动断开重连";
+        socket_->abort();
+        // ★ 不 emit errorOccurred:abort 触发 onSocketError → scheduleReconnect
+        // hmi 端 onTcpError 不应再设 Failed(由 reconnectScheduled 决定 UI = 橙)
+        return;
+    }
+    // 其余路径:timer 醒 + state Connected + 未超时 → 什么都不做(等下 5s 再检)
 }

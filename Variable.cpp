@@ -34,13 +34,13 @@ Variable::Variable(const QString& name,
     // quality_ 默认 Bad — 见 header 默认成员初始化
 }
 
-bool Variable::setValue(const QVariant& v, bool checkRange) {
-    // 类型校验:不匹配就拒绝,warning 后返 false
+Variable::SetValueResult Variable::setValue(const QVariant& v, bool checkRange) {
+    // 类型校验:不匹配就拒绝,warning 后返 Rejected
     if (!matchesDataType(v, type_)) {
         qWarning() << "Variable" << name_
                    << "type mismatch: expected" << dataTypeName(type_)
                    << ", got" << v.typeName();
-        return false;
+        return SetValueResult::Rejected;
     }
     // ★ 阶段 4.x 范围检查(2026-07-28):超出 [min, max] 拒绝,值不变,无信号
     //   checkRange=false 给 PLC 读路径(原始寄存器值可能超工程值范围)
@@ -49,7 +49,7 @@ bool Variable::setValue(const QVariant& v, bool checkRange) {
         if (d < minValue_.toDouble() || d > maxValue_.toDouble()) {
             qWarning() << "Variable" << name_ << "out of range:" << v
                        << "not in [" << minValue_ << "," << maxValue_ << "]";
-            return false;
+            return SetValueResult::Rejected;
         }
     }
     // 订阅发布:先判断"旧值 vs 新值",再用结果决定要不要 emit
@@ -72,9 +72,10 @@ bool Variable::setValue(const QVariant& v, bool checkRange) {
     // 仅在值真变了才发信号 — 死区过滤 / 轮询回包 / UI 刷新都挂这根信号
     if (changed) {
         emit valueChanged(*this);
+        return SetValueResult::Accepted;  // 真改了
     }
     // quality 不在这里改 — 调用方知道这次是正常数据还是异常数据
-    return true;  // 接受
+    return SetValueResult::NoChange;  // 没改(死区 / 同值)
 }
 
 // 阶段 4.x:写范围检查 setter
@@ -84,11 +85,17 @@ void Variable::setRange(const QVariant& min, const QVariant& max) {
 }
 
 void Variable::setQuality(Quality q) {
+    if (quality_ == q) return;  // 相同 quality 不 emit(避免没必要的信号,跟 valueChanged 死区逻辑对齐)
     quality_ = q;
+    // ★ IMPROVE-A3(2026-07-29):发信号让 Binding / Manager 能感知 quality 变化
+    emit qualityChanged(q);
 }
 
 void Variable::setTimestamp(const QDateTime& t) {
+    if (timestamp_ == t) return;  // 相同 timestamp 不 emit
     timestamp_ = t;
+    // ★ IMPROVE-A3(2026-07-29):发信号,虽然现在没 UI 用,阶段 5 报警时间戳会用
+    emit timestampChanged(t);
 }
 
 QString Variable::dataTypeName(DataType t) {// QMetaEnum::fromType 需要 Q_ENUM 注册,header 里已经加了

@@ -140,13 +140,17 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
                 return;
             }
 
-            // ★ 阶段 4.x 范围检查(2026-07-28):setValue 返 false = 类型不匹配 / 范围超 → 回滚
-            if (!v->setValue(typedVal)) {
+            // ★ IMPROVE-A6(2026-07-29):setValue 返 enum,Rejected 才回滚
+            //   Accepted = 真改了,NoChange = 死区过滤(没变),Rejected = 类型/范围不合法
+            Variable::SetValueResult r = v->setValue(typedVal);
+            if (r == Variable::SetValueResult::Rejected) {
                 applyNowEdit(edit, v);   // 从变量重读回 UI(回滚)
                 setDirtyStyle(edit, true);  // 边框留橙,告诉用户没成功
                 qDebug() << "[BindEdit] 校验失败(类型/范围),已回滚:" << edit->text();
                 return;
             }
+            // Accepted / NoChange 都算 OK — NoChange 时 markDirty 也会让 WriteScheduler 写一次
+            // (虽然值没变,但可能 PLC 端被外部改了,写回去对齐)— 简化决策:都 markDirty
             v->markDirty();           // 阶段 4.3.0:告诉 WriteScheduler 待写 PLC
             setDirtyStyle(edit, false);
         });

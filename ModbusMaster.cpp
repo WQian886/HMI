@@ -36,7 +36,9 @@ ModbusMaster::ModbusMaster(QObject* parent) : QObject(parent) {
     connect(tcp_, &TcpClient::readyRead, this, &ModbusMaster::onTcpReadyRead);
 
     timeoutTimer_ = new QTimer(this);
-    timeoutTimer_->setInterval(50);
+    // ★ IMPROVE-A8(2026-07-29):50ms → 100ms,跟 PollScheduler/WriteScheduler 对齐(都是 100ms tick)
+    //   100ms 精度下超时检测仍 30 tick 才超 3s,完全够
+    timeoutTimer_->setInterval(100);
     connect(timeoutTimer_, &QTimer::timeout, this, &ModbusMaster::onTimeoutScan);
     timeoutTimer_->start();
 }
@@ -121,7 +123,7 @@ QByteArray ModbusMaster::buildFrame(quint16 tid, int serverAddress, quint8 fc, c
 // 读请求
 // ============================================================
 // 2026-07-07 重设计:跟 Qt 官方 sendReadRequest 签名一致
-QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, int requestId) {
+QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int serverAddress, quint32 requestId) {
     if (!isConnected()) {
         emit errorOccurred("Modbus 未连接");
         return nullptr;
@@ -157,8 +159,9 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
     body.append(static_cast<char>((count >> 8) & 0xFF));
     body.append(static_cast<char>(count & 0xFF));
 
-    quint16 tid = nextTid_++;
-    if (tid == 0) tid = nextTid_++;  // ★ BUGFIX(2026-07-28):跳过 TID 0(留给"未分配"标识),见改善计划.md #4
+    // ★ IMPROVE-A1(2026-07-29):++ 前缀 + 跳过 0(quint32 也会回绕,只是更慢)
+    quint32 tid = ++nextTid_;
+    if (tid == 0) tid = ++nextTid_;  // 0 = 未分配标识,跳过
     QByteArray frame = buildFrame(tid, serverAddress, fc, body);
 
     qint64 sent = tcp_->send(frame);
@@ -193,7 +196,7 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
 // ============================================================
 // 2026-07-07 重设计:跟 Qt 官方 sendWriteRequest 签名一致
 // 阶段 4.3.0:加 requestId(配合 writeFinished 信号给 WriteScheduler 反查)
-QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress, int requestId) {
+QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, int serverAddress, quint32 requestId) {
     if (!isConnected()) {
         emit errorOccurred("Modbus 未连接");
         return nullptr;
@@ -271,8 +274,9 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
         }
     }
 
-    quint16 tid = nextTid_++;
-    if (tid == 0) tid = nextTid_++;  // ★ BUGFIX(2026-07-28):跳过 TID 0(留给"未分配"标识),见改善计划.md #4
+    // ★ IMPROVE-A1(2026-07-29):quint32 + 跳过 0
+    quint32 tid = ++nextTid_;
+    if (tid == 0) tid = ++nextTid_;
     QByteArray frame = buildFrame(tid, serverAddress, fc, body);
 
     qint64 sent = tcp_->send(frame);
@@ -311,7 +315,8 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
         if (recvBuf_.size() < 7) break;
 
         const quint8* p = reinterpret_cast<const quint8*>(recvBuf_.constData());
-        quint16 tid   = (quint16(p[0]) << 8) | quint16(p[1]);
+        // ★ IMPROVE-A1(2026-07-29):tid 改 quint32 匹配 pending_ key(MBAP TID 仍 2 字节)
+        quint32 tid   = (quint32(p[0]) << 8) | quint32(p[1]);
         quint16 proto = (quint16(p[2]) << 8) | quint16(p[3]);
         quint16 len   = (quint16(p[4]) << 8) | quint16(p[5]);
         quint8  uid   = p[6];
@@ -360,12 +365,7 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
                             .arg(fc, 2, 16, QChar('0'))
                             .arg(exCode, 2, 16, QChar('0'))
                             .arg(exMsg);
-            emit errorOccurred(msg);
-            if (req.reply) {
-                req.reply->setError(QModbusDevice::ProtocolError, msg);
-                req.reply->setFinished(true);
-                req.reply->deleteLater();
-            }
+            finalizeErrorReply(&req, msg);  // ★ IMPROVE-B5(2026-07-29):5 处重复 helper 替
             pending_.erase(it);
             notifyIdleIfEmpty();   // 2026-07-09:异常响应后可能 pending_ 变空
             recvBuf_.remove(0, frameSize);
@@ -385,32 +385,30 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
     }
 }
 
+// ★ IMPROVE-B5(2026-07-29):错误收尾 helper,5 处重复提一处
+void ModbusMaster::finalizeErrorReply(Pending* req, const QString& msg) {
+    emit errorOccurred(msg);
+    if (req->reply) {
+        req->reply->setError(QModbusDevice::ProtocolError, msg);
+        req->reply->setFinished(true);
+        req->reply->deleteLater();
+    }
+}
+
 // 2026-07-07 新增:读响应拆帧(0x01/0x02/0x03/0x04)
 void ModbusMaster::handleReadResponse(quint8 fc, Pending* req, const QByteArray& frame) {
     // 2026-07-09:测速 —— sentAt 是发送时刻,这里算收到响应的耗时
     qDebug() << "[ModbusMaster] 收到读响应 FC=0x" << QString::number(fc, 16).toUpper()
              << "elapsedMs=" << req->sentAt.msecsTo(QDateTime::currentDateTime());
     if (frame.size() < 9) {
-        QString msg = QString("读响应帧太短:%1 字节").arg(frame.size());
-        emit errorOccurred(msg);
-        if (req->reply) {
-            req->reply->setError(QModbusDevice::ProtocolError, msg);
-            req->reply->setFinished(true);
-            req->reply->deleteLater();
-        }
+        finalizeErrorReply(req, QString("读响应帧太短:%1 字节").arg(frame.size()));  // ★ IMPROVE-B5
         return;
     }
 
     quint8 byteCount = static_cast<quint8>(frame[8]);
     if (frame.size() < 9 + byteCount) {
-        QString msg = QString("读响应数据不足:声明 %1 字节,实际 %2 字节")
-                        .arg(byteCount).arg(frame.size() - 9);
-        emit errorOccurred(msg);
-        if (req->reply) {
-            req->reply->setError(QModbusDevice::ProtocolError, msg);
-            req->reply->setFinished(true);
-            req->reply->deleteLater();
-        }
+        finalizeErrorReply(req, QString("读响应数据不足:声明 %1 字节,实际 %2 字节")  // ★ IMPROVE-B5
+                                  .arg(byteCount).arg(frame.size() - 9));
         return;
     }
 
@@ -469,13 +467,7 @@ void ModbusMaster::handleWriteResponse(quint8 fc, Pending* req, const QByteArray
     qDebug() << "[ModbusMaster] 收到写响应 FC=0x" << QString::number(fc, 16).toUpper()
              << "elapsedMs=" << req->sentAt.msecsTo(QDateTime::currentDateTime());
     if (frame.size() < 12) {
-        QString msg = QString("写响应帧太短:%1 字节").arg(frame.size());
-        emit errorOccurred(msg);
-        if (req->reply) {
-            req->reply->setError(QModbusDevice::ProtocolError, msg);
-            req->reply->setFinished(true);
-            req->reply->deleteLater();
-        }
+        finalizeErrorReply(req, QString("写响应帧太短:%1 字节").arg(frame.size()));  // ★ IMPROVE-B5
         // 阶段 4.3.0:失败也 emit writeFinished,WriteScheduler 保留 dirty 等下一帧重试
         emit writeFinished(req->requestId, false);
         return;

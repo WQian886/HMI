@@ -1,4 +1,4 @@
-#include "hmi.h"
+﻿#include "hmi.h"
 #include "Variable.h"             // 阶段 3.2:Variable 数据模型
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
@@ -32,7 +32,7 @@ hmi::hmi(QWidget *parent)
     // 阶段 1 第 2 练:复位定时器(单次 3 秒,到点自动转 Stopped)
 	resetTimer_ = new QTimer(this);  // 创建一个复位定时器,单次触发
 	resetTimer_->setSingleShot(true); // 设置为单次触发,到点自动停止
-	resetTimer_->setInterval(3000);     // 设置触发间隔为 3 秒
+	resetTimer_->setInterval(kResetIntervalMs);     // ★ IMPROVE-B4
 	connect(resetTimer_, &QTimer::timeout, this, &hmi::onResetFinished);// 手写 connect:当 resetTimer_ 超时时调用 hmi::onResetFinished
 
     // 阶段 0 第 2 练:三按钮手写 connect(改用显式 connect,不再依赖 connectSlotsByName)
@@ -123,7 +123,7 @@ hmi::hmi(QWidget *parent)
     // (正常响应 / 异常响应 / 超时 / 断开 都会 emit idle)
     connect(modbus_, &ModbusMaster::idle, this, [this](){
         ui.modbusSendBtn->setEnabled(true);
-        statusBar()->showMessage("Modbus 空闲,可发下一帧", 1500);
+        statusBar()->showMessage("Modbus 空闲,可发下一帧", kStatusBarShortMs);  // ★ IMPROVE-B4
     });
 
     // 2026-07-07 重设计:通用「发送」按钮 — 靠 fcCombo 区分读/写
@@ -132,13 +132,13 @@ hmi::hmi(QWidget *parent)
         bool ok;
         quint16 port = ui.portEdit->text().toUShort(&ok);
         if (host.isEmpty() || !ok) {
-            statusBar()->showMessage("IP 或端口不能为空", 3000);
+            statusBar()->showMessage("IP 或端口不能为空", kStatusBarMediumMs);  // ★ IMPROVE-B4
             return;
         }
         int slaveId = ui.modbusSlaveEdit->text().toInt(&ok);
         int addr    = ui.modbusAddrEdit->text().toInt(&ok);
         if (!ok || slaveId < 0 || slaveId > 255) {
-            statusBar()->showMessage("slaveId 必须 0-255", 3000);
+            statusBar()->showMessage("slaveId 必须 0-255", kStatusBarMediumMs);  // ★ IMPROVE-B4
             return;
         }
         int typeIdx = ui.modbusTypeCombo->currentIndex();
@@ -167,21 +167,21 @@ hmi::hmi(QWidget *parent)
                 QString err;
                 QVector<quint16> vals = parseValueList(ui.modbusDataEdit->text(), &err);
                 if (vals.isEmpty()) {
-                    statusBar()->showMessage(err.isEmpty() ? "写值不能为空" : err, 3000);
+                    statusBar()->showMessage(err.isEmpty() ? "写值不能为空" : err, kStatusBarMediumMs);  // ★ IMPROVE-B4
                     return;
                 }
                 pendingModbus_.values = vals;  // 整个 list(单值就是 size=1)
             } else {
                 pendingModbus_.count = ui.modbusDataEdit->text().toInt(&ok);
                 if (!ok || pendingModbus_.count < 1 || pendingModbus_.count > 125) {
-                    statusBar()->showMessage("读数量必须 1-125", 3000);
+                    statusBar()->showMessage("读数量必须 1-125", kStatusBarMediumMs);  // ★ IMPROVE-B4
                     return;
                 }
             }
             updateUi();
             modbus_->connectTo(host, port);
             // 2026-07-09:延长到 5s,失败的话用户盯着屏幕等结果
-            statusBar()->showMessage("正在连接 Modbus...(失败会弹窗提示)", 5000);
+            statusBar()->showMessage("正在连接 Modbus...(失败会弹窗提示)", kStatusBarLongMs);  // ★ IMPROVE-B4
             return;
         }
 
@@ -310,7 +310,7 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
             QString err;
             vals = parseValueList(ui.modbusDataEdit->text(), &err);
             if (vals.isEmpty()) {
-                statusBar()->showMessage(err.isEmpty() ? "写值不能为空" : err, 3000);
+                statusBar()->showMessage(err.isEmpty() ? "写值不能为空" : err, kStatusBarMediumMs);  // ★ IMPROVE-B4
                 return;
             }
         }
@@ -321,7 +321,7 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
     if (!reply) return;
     // 2026-07-09:UI 防抖 —— 请求已发,按钮变灰,等 idle 信号再亮
     ui.modbusSendBtn->setEnabled(false);
-    statusBar()->showMessage("Modbus 请求中...", 1500);
+    statusBar()->showMessage("Modbus 请求中...", kStatusBarShortMs);  // ★ IMPROVE-B4
 
     // 2026-07-07 重设计:跟 Qt 官方写法一致 — reply->finished 拿数据
     connect(reply, &QModbusReply::finished, this,
@@ -393,7 +393,7 @@ void hmi::onConnectClicked() {// 用户点击连接按钮,发起 TCP 连接
 	quint16 port = ui.portEdit->text().toUShort(&ok);// 获取用户输入的端口号,转换为无符号短整数,并检查转换是否成功
 	if (!ok || host.isEmpty()) {//      如果端口转换失败或 IP 地址为空,提示用户输入错误
         // UI 收敛后,这里不再 setText —— 用 statusBar 临时提示(3 秒自动消失)
-		statusBar()->showMessage("IP 或端口不能为空", 3000);// 3000 毫秒后自动清除提示
+		statusBar()->showMessage("IP 或端口不能为空", kStatusBarMediumMs);  // ★ IMPROVE-B4
         return;
     }
     // 先改 state、再 updateUi()、最后调底层 —— 点完按钮 UI 立刻有反应
@@ -418,22 +418,22 @@ void hmi::onSendClicked() {// 发送框内容发给服务器
     // [FIX #6] 顺序校验:空、非法 hex、未连接、send 返回值
     QString text = ui.sendEdit->text();
 	if (text.trimmed().isEmpty()) {  // 发送内容不能为空
-		statusBar()->showMessage("发送框为空", 3000);// 3000 毫秒后自动清除提示
+		statusBar()->showMessage("发送框为空", kStatusBarMediumMs);// ★ IMPROVE-B4
 		return;// [FIX #6] 发送前校验:空
     }
 	QString hex = text.remove(' ');// 去掉空格
 	QByteArray bytes = QByteArray::fromHex(hex.toLatin1());// 从十六进制字符串转换为字节数组
 	if (bytes.isEmpty()) {// 发送内容必须是合法的十六进制
-		statusBar()->showMessage("发送内容不是合法 hex", 3000); // 3000 毫秒后自动清除提示
+		statusBar()->showMessage("发送内容不是合法 hex", kStatusBarMediumMs); // ★ IMPROVE-B4
         return;
     }
 	if (!tcp_->isConnected()) {// 只能在连接状态发送
-		statusBar()->showMessage("未连接,无法发送", 3000);// 3000 毫秒后自动清除提示
+		statusBar()->showMessage("未连接,无法发送", kStatusBarMediumMs);// ★ IMPROVE-B4
         return;
     }
 	qint64 n = tcp_->send(bytes);// 发送数据,返回实际发送的字节数
     if (n <= 0) {
-		statusBar()->showMessage(QString("发送失败,write 返回 %1").arg(n), 3000);// 3000 毫秒后自动清除提示
+		statusBar()->showMessage(QString("发送失败,write 返回 %1").arg(n), kStatusBarMediumMs);// ★ IMPROVE-B4
         return;
     }
 	appendRecv(bytes, "→");// 发送成功,把发送的内容也显示到接收框(加个前缀区分)
@@ -483,100 +483,96 @@ void hmi::appendRecv(const QByteArray& data, const QString& prefix) {// 显示�
 
 // ==================== updateUi():唯一的 UI 渲染入口 ====================
 // 由 state(业务)+ connState_(网络)共同决定所有 UI 元素的文字/颜色/enabled
+// ★ IMPROVE-B3(2026-07-29):拆 5 个 helper,updateUi() 变 5 行调用,每个 helper 单一职责
 
 void hmi::updateUi() {
-    // ===== 1. 业务侧 stateLabel(只跟 state 有关)=====
+    updateStateLabel();        // state → stateLabel + timer 启停 + counter 复位
+    updateConnLabel();         // connState_ → connLabel + 重连进度
+    updateNumberLineEdit();    // counter → numberLineEdit(替原 6 处重复)
+    updateButtons();           // state + connState_ → 业务三键 + 网络按钮 enabled
+    updateModbusLabel();       // lastResultText_ → modbusResultLabel
+}
+
+// 业务侧 stateLabel(只跟 state 有关)— timer 启停 + counter 复位 + 文字颜色
+void hmi::updateStateLabel() {
     switch (state) {
     case State::Running:
-        // [FIX #1] 进入 Running 才启动 timer
-        timer->start(1000);
+        timer->start(kCounterTickMs);  // ★ IMPROVE-B4
         ui.stateLabel->setText("状态:运行中");
         ui.stateLabel->setStyleSheet(
             "background-color: green; color: white; "
             "font-size: 18px; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     case State::Stopped:
-        // [FIX #1] 离开 Running 立即停 timer
         timer->stop();
         ui.stateLabel->setText("状态:已停止");
         ui.stateLabel->setStyleSheet(
             "background-color: lightgray; color: black; "
             "font-size: 18px; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     case State::Resetting:
-        // [FIX #1] Reset 状态停 timer
         timer->stop();
         ui.stateLabel->setText("状态:复位中");
         ui.stateLabel->setStyleSheet(
             "background-color: yellow; color: black; "
             "font-size: 18px; font-weight: bold;");
         counter = 0; // 复位时把 counter 也重置(保留原逻辑)
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     }
+}
 
-    // ===== 2. 网络侧 connLabel(只跟 connState_ 有关)=====
+// 网络侧 connLabel(只跟 connState_ 有关)— 文字 + 重连进度
+void hmi::updateConnLabel() {
     switch (connState_) {
     case ConnState::Disconnected:
         ui.connLabel->setText("状态:已断开");
         ui.connLabel->setStyleSheet("background-color: lightgray; color: black; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     case ConnState::Connecting:
         ui.connLabel->setText("状态:连接中...");
         ui.connLabel->setStyleSheet("background-color: yellow; color: black; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     case ConnState::Connected:
         ui.connLabel->setText("状态:已连接");
         ui.connLabel->setStyleSheet("background-color: green; color: white; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     case ConnState::Failed:
-        // 不再是"错误:xxx",统一走 ConnState 渲染
         ui.connLabel->setText("状态:连接失败(超时或网络错误)");
         ui.connLabel->setStyleSheet("background-color: red; color: white; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     case ConnState::Reconnecting:
-        // 阶段 1 第 2 练:重连进度显示
         ui.connLabel->setText(QString("状态:重连中(%1/%2),%3 秒后重试")
             .arg(reconnectAttempt_).arg(reconnectMax_).arg(reconnectDelayMs_ / 1000));
         ui.connLabel->setStyleSheet("background-color: orange; color: white; font-weight: bold;");
-        // [FIX #2] 复位时同步显示 0
-        ui.numberLineEdit->setText(QString::number(counter));
         break;
     }
+}
 
-    // ===== 3. 按钮 enabled(由 state + connState_ 共同决定)=====
-	bool tcpReady = (connState_ == ConnState::Connected); // 只有连接成功才能发送
-	bool tcpIdle = (connState_ == ConnState::Disconnected || connState_ == ConnState::Failed);// 只有断开或连接失败才能点击连接
+// counter → numberLineEdit ★ IMPROVE-B3:替原 6 处重复 setText
+void hmi::updateNumberLineEdit() {
+    ui.numberLineEdit->setText(QString::number(counter));
+}
+
+// 按钮 enabled(由 state + connState_ 共同决定)— 业务三键 + 网络按钮 + 发送
+void hmi::updateButtons() {
+    bool tcpReady = (connState_ == ConnState::Connected);
+    bool tcpIdle = (connState_ == ConnState::Disconnected || connState_ == ConnState::Failed);
+    bool isReconnecting = (connState_ == ConnState::Reconnecting);
 
     // 业务三键:必须 TCP 连上才能用(决策 1-B)
-	ui.startButton->setEnabled(tcpReady && state == State::Stopped);// 只能在已连接且当前状态是 Stopped 时才能点击 Start
-	ui.stopButton->setEnabled(tcpReady && state == State::Running);// 只能在已连接且当前状态是 Running 时才能点击 Stop
-	ui.resetButton->setEnabled(tcpReady && state != State::Resetting);//    只能在已连接且当前状态不是 Resetting 时才能点击 Reset
+    ui.startButton->setEnabled(tcpReady && state == State::Stopped);
+    ui.stopButton->setEnabled(tcpReady && state == State::Running);
+    ui.resetButton->setEnabled(tcpReady && state != State::Resetting);
 
-    // 网络按钮
-    // 阶段 1 第 2 练:Reconnecting 时 connectBtn 灰掉(已经在重连了),disconnectBtn 仍可点(用户取消)
-	bool isReconnecting = (connState_ == ConnState::Reconnecting);// 是否正在重连
-    ui.connectBtn->setEnabled(tcpIdle);        // 断开/失败时可重连
-    ui.disconnectBtn->setEnabled(!tcpIdle || isReconnecting);    // 连接中/已连/重连中 都可断
+    // 网络按钮:Reconnecting 时 connectBtn 灰掉,disconnectBtn 仍可点(用户取消)
+    ui.connectBtn->setEnabled(tcpIdle);
+    ui.disconnectBtn->setEnabled(!tcpIdle || isReconnecting);
 
-    // 发送按钮:必须已连(顺手收进 updateUi,断网时灰掉避免发不出去)
-	ui.sendBtn->setEnabled(tcpReady);// 只有连接成功才能发送
+    // 发送按钮:必须已连(断网时灰掉避免发不出去)
+    ui.sendBtn->setEnabled(tcpReady);
+}
 
-    // ===== 4. Modbus 侧 modbusResultLabel =====
-    // 2026-07-08 收敛:统一用 lastResultText_,废弃拆读写两个 label 的旧设计
-    // (hmi.ui 里也只有 modbusResultLabel,没有 modbusWriteResultLabel / readHoldBtn)
+// Modbus 侧 modbusResultLabel(2026-07-08 收敛:统一用 lastResultText_)
+void hmi::updateModbusLabel() {
     ui.modbusResultLabel->setText(lastResultText_);
 }

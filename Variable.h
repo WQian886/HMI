@@ -45,6 +45,10 @@ public:
     // 订阅发布的"发布"端 — Manager / UI 监听这个信号,决定何时刷新
     signals:
         void valueChanged(const Variable& v);
+        // ★ IMPROVE-A3(2026-07-29):quality / timestamp 单独发信号,阶段 5 报警要显示 quality
+        //   (setQuality / setTimestamp 只改字段不 emit,UI 没法知道)
+        void qualityChanged(Quality q);
+        void timestampChanged(const QDateTime& t);
 
     // 注:signals: 段结束后必须紧跟一个 access 修饰符
     //    否则 moc 会把后续的构造函数当成"下一个信号"去解析,会报 Not a signal declaration
@@ -75,11 +79,22 @@ public:
     double     deadband() const { return deadband_; }
     void       setDeadband(double d) { deadband_ = d; }
 
-    // ===== setters =====
+    // ===== setters 返回值(★ IMPROVE-A6 2026-07-29) =====
+    // 之前返 bool 语义模糊:死区过滤(值没真改)返 true 但没 emit valueChanged → 调用方误以为「改了」
+    // 现在 3 态分清楚:
+    //   Accepted  = 接受 + 真改了(emit valueChanged)
+    //   NoChange  = 接受但死区过滤(没改,没 emit)— 跟轮询回包语义对齐
+    //   Rejected  = 拒绝(类型不匹配 / 范围超)— 调用方应回滚 / 报警
+    enum class SetValueResult {
+        Accepted,   // 真改了
+        NoChange,   // 没改(死区 / 同值)
+        Rejected    // 拒绝(类型 / 范围)
+    };
+    Q_ENUM(SetValueResult)
+
     // setValue 自动更新 timestamp;quality 由调用方决定(因为可能是新值也可能是异常)
-    // ★ 阶段 4.x 范围检查(2026-07-28):返 true = 接受(改了),false = 拒绝(类型不匹配 / 范围超)
-    //   checkRange = false 给 PLC 读路径用(原始寄存器值可能超工程值范围,不查)
-    bool setValue(const QVariant& v, bool checkRange = true);
+    // checkRange = false 给 PLC 读路径用(原始寄存器值可能超工程值范围,不查)
+    SetValueResult setValue(const QVariant& v, bool checkRange = true);
     void setQuality(Quality q);
     void setTimestamp(const QDateTime& t);
 
@@ -101,6 +116,12 @@ public:
     void clearDirty()   { dirty_ = false; }
     bool isDirty() const { return dirty_; }
 
+    // ★ IMPROVE-A4(2026-07-29):写失败重试计数,达到上限清 dirty + 报警 + 标 Bad
+    //   防止 PLC 故障时反复写同一变量刷屏 + 打满总线
+    void incrementWriteFail() { writeFailCount_++; }
+    void clearWriteFail()     { writeFailCount_ = 0; }
+    int  writeFailCount() const { return writeFailCount_; }
+
     // ===== enum → 可读名字(给 qDebug / UI 显示用) =====
     // 用了 Q_ENUM 后,可以用 QMetaEnum 反射拿名字
     static QString dataTypeName(DataType t);
@@ -118,6 +139,7 @@ private:
 	int        pollIntervalMs_ = 1000;     // 阶段 3.3:轮询周期(ms),默认 1000
 	double     deadband_       = 0.0;      // 阶段 3.x:死区阈值,0 = 不启用;>0 = |新-旧| > deadband 才发信号
     bool        dirty_          = false;    // 阶段 4.3.0:写调度脏标志。true = 本地值待写 PLC
+    int         writeFailCount_ = 0;           // ★ IMPROVE-A4(2026-07-29):写失败累计,达上限触发报警
     QVariant    minValue_;                      // 阶段 4.x:范围下限(无效 QVariant = 未配)
     QVariant    maxValue_;                      // 阶段 4.x:范围上限
 };
