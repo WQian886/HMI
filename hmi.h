@@ -2,7 +2,7 @@
 
 #include <QtWidgets/QMainWindow>
 #include <QTimer>  // 阶段 0 第 1 练:加 QTimer 头
-#include <QPair>   // 阶段 2-1 第 2 步:连接建立后待发的读请求
+//#include <QPair>   // 阶段 2-1 第 2 步:连接建立后待发的读请求
 #include "TcpClient.h"  // 阶段 1 第 1 练:TCP 客户端封装
 #include "ModbusMaster.h" // 阶段 2 第 3 练:手写 ModbusMaster 接入 UI
 #include "VariableManager.h"  // 阶段 3.2:把 VariableManager 接入主工程
@@ -42,7 +42,7 @@ private slots:
 
 
 private:
-    // 阶段 0 第 2 练:状态机雏形(业务)
+    // 阶段 0x 第 2 练:状态机雏形(业务)
     // [BUG #10] 原代码(已注释):enum class State { Stopped, Running, Reset };
     //           原因:Reset 跟 Qt 内部信号/方法名太像,容易混淆
     // [FIX #10] 改 Resetting(正在复位),语义更清晰
@@ -75,7 +75,7 @@ private:
 
     // 阶段 2-4 重设计:最近一次结果(由 updateUi() 推到 resultLabel)
     QString lastResultText_ = "--";
-    QDateTime lastResultTime_;
+    // QDateTime lastResultTime_;
 
     void updateUi();   // state + connState_ + modbusState_ → UI 同步函数(唯一的 UI 渲染入口)
 

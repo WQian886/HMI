@@ -159,9 +159,9 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
     body.append(static_cast<char>((count >> 8) & 0xFF));
     body.append(static_cast<char>(count & 0xFF));
 
-    // ★ IMPROVE-A1(2026-07-29):++ 前缀 + 跳过 0(quint32 也会回绕,只是更慢)
-    quint32 tid = ++nextTid_;
-    if (tid == 0) tid = ++nextTid_;  // 0 = 未分配标识,跳过
+    // ★ BUGFIX-A1(2026-07-30):改回 quint16,跟 buildFrame 形参对齐(防 0xFFFF+ 截断)
+    quint16 tid = ++nextTid_;
+    if (tid == 0) tid = ++nextTid_;  // 0 = MBAP 保留,跳过
     QByteArray frame = buildFrame(tid, serverAddress, fc, body);
 
     qint64 sent = tcp_->send(frame);
@@ -274,8 +274,8 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
         }
     }
 
-    // ★ IMPROVE-A1(2026-07-29):quint32 + 跳过 0
-    quint32 tid = ++nextTid_;
+    // ★ BUGFIX-A1(2026-07-30):改回 quint16,跟 buildFrame 形参对齐(防 0xFFFF+ 截断)
+    quint16 tid = ++nextTid_;
     if (tid == 0) tid = ++nextTid_;
     QByteArray frame = buildFrame(tid, serverAddress, fc, body);
 
@@ -315,8 +315,8 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
         if (recvBuf_.size() < 7) break;
 
         const quint8* p = reinterpret_cast<const quint8*>(recvBuf_.constData());
-        // ★ IMPROVE-A1(2026-07-29):tid 改 quint32 匹配 pending_ key(MBAP TID 仍 2 字节)
-        quint32 tid   = (quint32(p[0]) << 8) | quint32(p[1]);
+        // ★ BUGFIX-A1(2026-07-30):改回 quint16,跟 pending_ key 对齐(MBAP TID 标准 2 字节)
+        quint16 tid   = (quint16(quint8(p[0])) << 8) | quint16(quint8(p[1]));
         quint16 proto = (quint16(p[2]) << 8) | quint16(p[3]);
         quint16 len   = (quint16(p[4]) << 8) | quint16(p[5]);
         quint8  uid   = p[6];

@@ -73,6 +73,8 @@ Testing/
 *~
 *.tmp
 *.bak
+*.bak.*
+tmp_*.json
 *.cache
 
 # ===== OS =====

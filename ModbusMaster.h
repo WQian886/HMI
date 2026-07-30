@@ -127,10 +127,22 @@ public:
 private:
     TcpClient* tcp_ = nullptr;
     QByteArray recvBuf_;
-    // ★ IMPROVE-A1(2026-07-29):quint16 跑 7.6 天回绕,改 quint32 + 跳过 0
-    quint32 nextTid_ = 1;
+    // ★ BUGFIX-A1(2026-07-30):quint32 → quint16,防 buildFrame 形参截断
+    //   【背景】原 nextTid_ 用 quint32(防 7.6 天回绕),pending_ key 也是 quint32,
+    //          但 buildFrame 形参是 quint16,编译器静默截断高位。
+    //          TID > 0xFFFF 时发出去的 MBAP TID 是低 16 位,响应 echo 也是低 16 位,
+    //          但 pending_ key 存的是完整 quint32 → 响应永远匹配不上 → 循环超时。
+    //   【Bug 现象】Wqian 2026-07-30 报"运行几小时一直弹窗 Modbus 错误 TID=65543",
+    //          65543 = 0x10007,实际发出去是 0x0007,响应解析也是 0x0007,
+    //          pending_ key 是 0x10007 → find 失败 → 3 秒超时 → 循环。
+    //   【修法】nextTid_ + pending_ key + 响应解析 全改回 quint16,跟 buildFrame 一致。
+    //   【参照】MBAP 协议规定 TID 是 2 字节(uint16);之前 07-29 IMPROVE-A1 改过 quint32。
+    //   【取舍】quint16 跑 1.8 小时回绕一次,但 ModbusMaster 单 in-flight 设计
+    //          (pendingCount 限流)保证回绕时 pending_ 一定是空的,不会撞 key。
+    quint16 nextTid_ = 1;
 
-    QHash<quint32, Pending> pending_;
+    // ★ BUGFIX-A1(2026-07-30):key 类型从 quint32 改回 quint16(跟 buildFrame 一致)
+    QHash<quint16, Pending> pending_;
 
     QTimer* timeoutTimer_ = nullptr;
 };
