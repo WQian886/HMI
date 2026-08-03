@@ -357,20 +357,60 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
         });
 }
 
-// ==================== 阶段 0 第 2 练:业务三键槽 ====================
-// 只改 state(事实),然后调 updateUi() 推 UI —— 不直接动 UI
-void hmi::onStartClicked()  { state = State::Running; updateUi(); }
-void hmi::onStopClicked()   { state = State::Stopped; updateUi(); }
-void hmi::onResetClicked() {
-    state = State::Resetting;
+// ==================== 阶段 5.1(2026-08-03 Wqian 拍板):状态迁移表 + tryTransition ====================
+//   【背景】之前 3 个槽函数直接 state = State::xxx —— 任何态都能转任何态
+//   【改法】所有合法迁移写在这里,槽函数走 tryTransition(Trigger) 查表
+//   【取舍】多一处声明,但杜绝"非法迁移"和"重复状态设置"等混乱
+//   【参照】Wqian 2026-08-03 review #3(阶段 5.1 拍板)
+//   注:AlarmCritical / AlarmCleared 5.3 报警系统完成后再真实触发
+const QHash<QPair<hmi::State, hmi::Trigger>, hmi::State> hmi::kTransitionTable = {
+    // Stopped 初始 / 主动停止
+    {{State::Stopped,    Trigger::StartButton},        State::Running},
+    {{State::Stopped,    Trigger::StopButton},         State::Stopped},   // 重复按 stop,合法但无变化
+    {{State::Stopped,    Trigger::ResetButton},        State::Resetting}, // 启动 3s reset 定时器
+    {{State::Stopped,    Trigger::AlarmCritical},      State::Fault},
+    // Running
+    {{State::Running,    Trigger::StopButton},         State::Stopped},
+    {{State::Running,    Trigger::ResetButton},        State::Resetting}, // 启动 3s reset 定时器
+    {{State::Running,    Trigger::AlarmCritical},      State::Fault},
+    // Resetting 中按按钮无变化(等定时器),只能被报警打断
+    {{State::Resetting,  Trigger::ResetButton},        State::Resetting},
+    {{State::Resetting,  Trigger::ResetTimerFinished}, State::Stopped},   // 3s 定时器到点
+    {{State::Resetting,  Trigger::AlarmCritical},      State::Fault},
+    // Fault 只能复位清,且严重故障直接转 Stopped(不等定时器,避免长时间卡 Fault)
+    {{State::Fault,      Trigger::ResetButton},        State::Stopped},
+};
+
+// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):单一状态迁移入口
+//   返回 true=成功迁移(已 updateUi),false=非法迁移(原 state 不变)
+bool hmi::tryTransition(Trigger t) {
+    auto key = qMakePair(state, t);
+    auto it = kTransitionTable.find(key);
+    if (it == kTransitionTable.end()) {
+        // 非法迁移:不输出日志(避免噪音,5.3 报警触发时可能高频调用)
+        return false;
+    }
+    State newState = it.value();
+    state = newState;
     updateUi();
-    resetTimer_->start();  // 启动 3 秒单次定时器,到点 onResetFinished 自动转 Stopped
+    return true;
+}
+
+// ==================== 阶段 0 第 2 练:业务三键槽 ====================
+// 阶段 5.1 改造:槽函数只发"意图",实际状态变化走 tryTransition 查迁移表
+void hmi::onStartClicked()  { tryTransition(Trigger::StartButton); }
+void hmi::onStopClicked()   { tryTransition(Trigger::StopButton); }
+void hmi::onResetClicked() {
+    // 复位:Stopped/Running → Resetting(等 3s 定时器);Fault → Stopped(立即,不等定时器)
+    if (tryTransition(Trigger::ResetButton) && state == State::Resetting) {
+        resetTimer_->start();  // 启动 3 秒单次定时器,到点 onResetFinished 自动转 Stopped
+    }
 }
 
 void hmi::onResetFinished() {
-    // 复位 3 秒到,自动转 Stopped(用户可以再按 [启动] / [复位])
-    state = State::Stopped;
-    updateUi();
+    // 阶段 5.1 改造:3 秒定时器到,从 Resetting 触发转 Stopped(走 tryTransition)
+    // 注:Fault → Stopped 不经过 Resetting,所以不会触发 onResetFinished
+    tryTransition(Trigger::ResetTimerFinished);
 }
 
 void hmi::onTimerTick() 
@@ -518,6 +558,17 @@ void hmi::updateStateLabel() {
             "font-size: 18px; font-weight: bold;");
         counter = 0; // 复位时把 counter 也重置(保留原逻辑)
         break;
+    case State::Fault:
+        // 阶段 5.1(2026-08-03 Wqian 拍板):Fault 态 UI(严重报警触发)
+        //   timer 停(进入 Fault 不再跑 counter)
+        //   红底白字(跟 ConnState::Failed 一致风格)
+        //   注:5.3 接入报警系统后会加闪烁(QTimer 周期切背景色)
+        timer->stop();
+        ui.stateLabel->setText("状态:故障");
+        ui.stateLabel->setStyleSheet(
+            "background-color: red; color: white; "
+            "font-size: 18px; font-weight: bold;");
+        break;
     }
 }
 
@@ -560,6 +611,8 @@ void hmi::updateButtons() {
     bool isReconnecting = (connState_ == ConnState::Reconnecting);
 
     // 业务三键:必须 TCP 连上才能用(决策 1-B)
+    // 阶段 5.1:Fault 态时,startButton/stopButton 因为 state != Stopped/Running 自动灰,
+    //   resetButton 因为 state != Resetting 自动可用 —— 现有逻辑已正确,无需改
     ui.startButton->setEnabled(tcpReady && state == State::Stopped);
     ui.stopButton->setEnabled(tcpReady && state == State::Running);
     ui.resetButton->setEnabled(tcpReady && state != State::Resetting);

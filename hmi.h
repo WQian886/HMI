@@ -46,8 +46,24 @@ private:
     // [BUG #10] 原代码(已注释):enum class State { Stopped, Running, Reset };
     //           原因:Reset 跟 Qt 内部信号/方法名太像,容易混淆
     // [FIX #10] 改 Resetting(正在复位),语义更清晰
-	enum class State { Stopped, Running, Resetting };// 业务状态机
+    // ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):加 Fault 态,严重报警触发,只能 ResetButton 清
+	enum class State { Stopped, Running, Resetting, Fault };// 业务状态机
     State state = State::Stopped;   // 业务三键的"事实"
+
+	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):状态迁移触发源(单一迁移入口 tryTransition 的入参)
+	//   【背景】之前 3 个槽函数直接 state = State::xxx; updateUi(); —— 没有"非法迁移"概念
+	//   【改法】所有状态变化必须走 tryTransition(Trigger t),查迁移表决定新 state
+	//   【取舍】新增 1 个 enum + 1 个方法 + 1 个静态表,但杜绝了"任何态都能转任何态"的混乱
+	//   【参照】Wqian 2026-08-03 review #3(阶段 5.1 拍板)
+	enum class Trigger { StartButton, StopButton, ResetButton, ResetTimerFinished, AlarmCritical, AlarmCleared };
+
+	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):单一状态迁移入口
+	//   返回 true=成功迁移(已 updateUi),false=非法迁移(原 state 不变)
+	bool tryTransition(Trigger t);
+
+	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):状态迁移表(QHash<{from, trigger}> → newState)
+	//   5.1 阶段暂未接入报警系统,AlarmCritical 入口等 5.3 报警系统完成后才真实触发
+	static const QHash<QPair<State, Trigger>, State> kTransitionTable;
 
     // 阶段 1 第 2 练:网络状态(跟业务 state 平级,共同决定 UI)
 	enum class ConnState { Disconnected, Connecting, Connected, Failed, Reconnecting };// 连接状态机
@@ -75,7 +91,7 @@ private:
 
     // 阶段 2-4 重设计:最近一次结果(由 updateUi() 推到 resultLabel)
     QString lastResultText_ = "--";
-    // QDateTime lastResultTime_;
+     QDateTime lastResultTime_;
 
     void updateUi();   // state + connState_ + modbusState_ → UI 同步函数(唯一的 UI 渲染入口)
 
@@ -102,8 +118,8 @@ private:
     static constexpr int kResetIntervalMs   = 3000;  // 复位 QTimer 间隔(到点转 Stopped)
 
     // 2026-07-07 重设计:Modbus 通用请求入口
-    void executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int slaveId, int addr);
-    void executePendingModbus();
+	void executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int slaveId, int addr);// 统一入口:Modbus 读/写请求,由 ModbusMaster 调用
+	void executePendingModbus();// 阶段 2-4 重设计:连接建立后待发的请求(消除 500ms hack)
 
 	Ui::hmiClass ui;// UI 设计器生成的界面类成员
     QTimer *timer;  // 阶段 0 第 1 练:QTimer 成员变量(1 秒 counter)
