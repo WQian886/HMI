@@ -9,6 +9,8 @@
 #include "PollScheduler.h"  // 阶段 3.3:定时轮询调度器
 #include "WriteScheduler.h" // 阶段 4.3.0:写调度器(Variable.dirty_ → Modbus 写 PLC)
 #include "Binding.h"        // 阶段 4.1:变量↔UI 绑定框架(替 onVariableChanged)
+#include "AlarmManager.h"    // 阶段 5.2:报警管理器(集中管理所有 Checker + Alarm 生命周期)
+#include "ActionManager.h"   // 阶段 5.6:报警联动动作(关阀/停机)
 #include "ui_hmi.h"
 
 class hmi : public QMainWindow
@@ -25,6 +27,16 @@ private slots:
 	void onStopClicked();   // 点击了"断开"按钮槽函数
 	void onResetClicked();// 点击了"重置计数"按钮槽函数
     void onResetFinished();   // 阶段 1 第 2 练:复位 3 秒定时器到,自动转 Stopped
+
+    // 阶段 5.4:报警 UI 槽函数(替换 5.3 的 lambda)
+    void onAlarmTriggered(const Alarm& a);
+    void onAlarmRecovered(qint64 id);
+    void onAlarmBlinkTick();
+
+    // 阶段 5.5:右键菜单 + 确认 + 全清
+    void onAlarmContextMenu(const QPoint& pos);
+    void onAlarmAcknowledge();
+    void onAllAlarmsCleared();
 
     // 阶段 0 第 1 练:手写 connect 的 QTimer 槽函数
 	void onTimerTick();// 定时器 tick 了
@@ -124,10 +136,14 @@ private:
 	Ui::hmiClass ui;// UI 设计器生成的界面类成员
     QTimer *timer;  // 阶段 0 第 1 练:QTimer 成员变量(1 秒 counter)
     QTimer *resetTimer_ = nullptr;  // 阶段 1 第 2 练:复位定时器(3 秒单次,到点转 Stopped)
+    QTimer *alarmBlinkTimer_ = nullptr;  // 阶段 5.4:严重级报警闪烁定时器(500ms 切红/橙)
+    QMenu* alarmContextMenu_ = nullptr;  // 阶段 5.5:alarmTable 右键菜单(含"确认"动作)
     int counter = 0;  // 阶段 0 第 1 练:用成员变量存计数(修法 B,数据归程序)
     TcpClient* tcp_ = nullptr;  // 阶段 1 第 1 练:TCP 客户端(生命周期由 this 管)
     ModbusMaster* modbus_ = nullptr;  // 阶段 2 第 3 练:Modbus 客户端(手写版)
     VariableManager* varMgr_ = nullptr;  // 阶段 3.2:变量管理器(管理所有 Variable 生命周期)
     PollScheduler* pollScheduler_ = nullptr;  // 阶段 3.3:定时轮询调度器(替代 demoTimer,真 modbus 读)
     WriteScheduler* writeScheduler_ = nullptr; // 阶段 4.3.0:写调度器(Variable.dirty_ → modbus 写 PLC,与 PollScheduler 对称)
+    AlarmManager* alarmMgr_ = nullptr;  // 阶段 5.2:报警管理器(5.3 才注册 Checker 接 Variable)
+    ActionManager* actionMgr_ = nullptr;  // 阶段 5.6:报警联动动作(关阀/停机)
 };

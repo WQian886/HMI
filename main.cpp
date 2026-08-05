@@ -9,6 +9,7 @@ int main(int argc, char *argv[])
     //   设在 QApplication 之前,QSettings 自动用 C:/Users/<user>/AppData/Roaming/QianWei/HMI/
     QCoreApplication::setOrganizationName("QianWei");
     QCoreApplication::setApplicationName("HMI");
+
     QApplication app(argc, argv);
     hmi window;
     window.show();

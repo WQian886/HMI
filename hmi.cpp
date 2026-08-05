@@ -2,15 +2,30 @@
 #include "Variable.h"             // 阶段 3.2:Variable 数据模型
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
+#include "HighAlarmChecker.h"     // 阶段 5.3:HighAlarmChecker 子类(Temperature 超阈值触发)
+#include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include <QIntValidator>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QTableWidget>     // 阶段 4.x 写审计日志
 #include <QTableWidgetItem> // 阶段 4.x 写审计日志
+#include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
+#include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
 QVector<quint16> parseValueList(const QString& text, QString* errOut);
+
+// 阶段 5.4:AlarmLevel → 字符串(给 alarmTable 等级列用;内联避免头文件污染)2026-08-04
+static QString alarmLevelName(AlarmLevel l) {
+    switch (l) {
+        case AlarmLevel::Info:     return "信息";
+        case AlarmLevel::Warning:  return "警告";
+        case AlarmLevel::Critical: return "严重";
+        case AlarmLevel::Emergency: return "危急";
+    }
+    return "?";
+}
 
 hmi::hmi(QWidget *parent)
     : QMainWindow(parent)
@@ -234,6 +249,59 @@ hmi::hmi(QWidget *parent)
     writeScheduler_ = new WriteScheduler(varMgr_, modbus_, this);
     writeScheduler_->start();
 
+    // 阶段 5.2:报警管理器(空架子,5.3 才注册 Checker)
+    alarmMgr_ = new AlarmManager(this);
+
+    // 阶段 5.3(2026-08-04):HighAlarmChecker 最小版本 —— Temperature > 50℃ 触发 Critical 报警
+    //   5.3+ 后续才补:LowAlarmChecker / 死区协调 / 最小持续时间
+    auto* tempHighChecker = new HighAlarmChecker("温度高", temperature, 50.0, AlarmLevel::Critical);
+    alarmMgr_->addChecker(tempHighChecker);
+
+    // 阶段 5.4(2026-08-04):报警列表 UI 配置(5 列:时间/报警名/等级/值/状态)
+    ui.alarmTable->setColumnCount(5);
+    ui.alarmTable->setHorizontalHeaderLabels({"时间", "报警名", "等级", "值", "状态"});
+    ui.alarmTable->horizontalHeader()->setStretchLastSection(true);
+
+    // 阶段 5.4:接 AlarmManager 信号(槽函数实现见文件末尾)
+    connect(alarmMgr_, &AlarmManager::alarmTriggered, this, &hmi::onAlarmTriggered);
+    connect(alarmMgr_, &AlarmManager::alarmRecovered, this, &hmi::onAlarmRecovered);
+
+    // 阶段 5.5(2026-08-04):报警确认(右键菜单)
+    ui.alarmTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui.alarmTable, &QWidget::customContextMenuRequested,
+            this, &hmi::onAlarmContextMenu);
+
+    alarmContextMenu_ = new QMenu(this);
+    alarmContextMenu_->addAction("确认", this, &hmi::onAlarmAcknowledge);
+
+    // 阶段 5.5 BUGFIX:报警已确认 → 表格行"未确认"→"已确认"(停闪),用 ID 匹配避免同名报警错配
+    connect(alarmMgr_, &AlarmManager::alarmAcknowledged, this,
+        [this](qint64 id){
+            for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
+                auto* item = ui.alarmTable->item(row, 1);
+                if (item && item->data(Qt::UserRole).toLongLong() == id) {
+                    auto* statusItem = ui.alarmTable->item(row, 4);
+                    if (statusItem) statusItem->setText("已确认");
+                    break;
+                }
+            }
+        });
+
+    // 阶段 5.5:全部清除 → 清空 alarmTable + 停闪烁
+    connect(alarmMgr_, &AlarmManager::allCleared, this, &hmi::onAllAlarmsCleared);
+
+    // 阶段 5.4:严重级闪烁定时器(500ms 切红/橙)
+    alarmBlinkTimer_ = new QTimer(this);
+    alarmBlinkTimer_->setInterval(500);
+    connect(alarmBlinkTimer_, &QTimer::timeout, this, &hmi::onAlarmBlinkTick);
+
+    // 阶段 5.6(2026-08-04):报警联动动作 — 温度高时速度写 0(模拟停机)
+    //   配置写代码里,阶段 6 再做 JSON 配置文件
+    actionMgr_ = new ActionManager(this);
+    actionMgr_->addMapping("温度高", speed, 0);   // 温度 > 50 触发 → 速度 = 0(停机)
+    connect(alarmMgr_, &AlarmManager::alarmTriggered,
+            actionMgr_, &ActionManager::onAlarmTriggered);
+
     // 阶段 4.x 写审计日志(2026-07-28):配置 auditTable + 接 WriteScheduler 信号
     ui.auditTable->setColumnCount(4);
     ui.auditTable->setHorizontalHeaderLabels({"时间", "Variable", "新值", "结果/地址"});
@@ -398,13 +466,38 @@ bool hmi::tryTransition(Trigger t) {
 
 // ==================== 阶段 0 第 2 练:业务三键槽 ====================
 // 阶段 5.1 改造:槽函数只发"意图",实际状态变化走 tryTransition 查迁移表
-void hmi::onStartClicked()  { tryTransition(Trigger::StartButton); }
+// ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):报警值还在时禁止启动
+//   【背景】Wqian 反馈:条件还在超限时,启动马上又会触发报警,这是浪费 + 不安全
+//   【改法】StartButton 点击先检查 alarmMgr_->count(),>0 拒绝 + 弹窗
+//   【取舍】弹窗让用户知道原因;静默失败会让用户困惑
+void hmi::onStartClicked() {
+    if (alarmMgr_->count() > 0) {
+        QMessageBox::warning(this, "无法启动",
+            QString("还有 %1 条报警未恢复。\n请等条件消失后再启动。").arg(alarmMgr_->count()));
+        return;
+    }
+    tryTransition(Trigger::StartButton);
+}
 void hmi::onStopClicked()   { tryTransition(Trigger::StopButton); }
+// ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):报警值还在时禁止复位 + 复位只确认不删记录
+//   【背景】Wqian 反馈两点:
+//     1) 复位不应该把报警记录清除掉(事故追溯需要)
+//     2) 报警值还在(超限)时,既不能复位也不能启动
+//   【改法】count > 0 拒绝复位 + 弹窗;复位成功只调 acknowledgeAll()(保留记录)
+//   【取舍】acknowledgeAll 标记确认但不删;clearAll 留作工程师手动清
+//   【参照】Wqian 2026-08-04 反馈
 void hmi::onResetClicked() {
+    if (alarmMgr_->count() > 0) {
+        QMessageBox::warning(this, "无法复位",
+            QString("还有 %1 条报警未恢复。\n请等条件消失后再复位。").arg(alarmMgr_->count()));
+        return;
+    }
     // 复位:Stopped/Running → Resetting(等 3s 定时器);Fault → Stopped(立即,不等定时器)
     if (tryTransition(Trigger::ResetButton) && state == State::Resetting) {
         resetTimer_->start();  // 启动 3 秒单次定时器,到点 onResetFinished 自动转 Stopped
     }
+    // 阶段 5.5:复位联动 — 把所有 active 报警标记为"已确认"(保留记录,不删)
+    alarmMgr_->acknowledgeAll();
 }
 
 void hmi::onResetFinished() {
@@ -628,4 +721,127 @@ void hmi::updateButtons() {
 // Modbus 侧 modbusResultLabel(2026-07-08 收敛:统一用 lastResultText_)
 void hmi::updateModbusLabel() {
     ui.modbusResultLabel->setText(lastResultText_);
+}
+
+// ==================== 阶段 5.4(2026-08-04):报警 UI 槽函数实现 ====================
+
+// ★ IMPROVE-5.4(2026-08-04):报警触发 → qDebug + 推状态机 Fault + alarmTable 追加一行
+//   【背景】5.3 只做数据 + qDebug,UI 上看不到。5.4 给最小可视化
+//   【改法】槽函数内:qDebug + tryTransition(AlarmCritical) + insertRow + scrollToBottom + 启闪烁
+//   【取舍】tryTransition 不动 — 保持单一迁移入口的设计
+void hmi::onAlarmTriggered(const Alarm& a) {
+    qDebug() << "[Alarm 触发]" << a.name << "level=" << static_cast<int>(a.level)
+             << "value=" << a.triggerValue << "threshold=" << a.threshold;
+    tryTransition(Trigger::AlarmCritical);   // 推状态机进 Fault
+
+    int row = ui.alarmTable->rowCount();
+    ui.alarmTable->insertRow(row);
+    ui.alarmTable->setItem(row, 0, new QTableWidgetItem(a.triggeredAt.toString("HH:mm:ss")));
+    auto* nameItem = new QTableWidgetItem(a.name);
+    nameItem->setData(Qt::UserRole, a.id_);  // ★ 存 ID 给 ack lambda 匹配(5.5 BUGFIX)
+    ui.alarmTable->setItem(row, 1, nameItem);
+    ui.alarmTable->setItem(row, 2, new QTableWidgetItem(alarmLevelName(a.level)));
+    ui.alarmTable->setItem(row, 3, new QTableWidgetItem(a.triggerValue));
+    ui.alarmTable->setItem(row, 4, new QTableWidgetItem("未确认"));
+    ui.alarmTable->scrollToBottom();
+
+    if (!alarmBlinkTimer_->isActive()) alarmBlinkTimer_->start();
+}
+
+// ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):报警恢复 → 用 ID 匹配找原行
+//   【背景】原按 name 匹配会错配同名报警,改成 ID 唯一匹配
+//   【改法】Qt::UserRole 存 ID,scan alarmTable 按 ID 匹配,更新"状态"列文字 → "已恢复"
+//   【取舍】没用 model,直接扫行;5.5 数据量小(< 100 条)够用
+void hmi::onAlarmRecovered(qint64 id) {
+    qDebug() << "[Alarm 恢复]" << id;
+    // 恢复不直接转 Stopped — Fault 态只能 ResetButton 清(状态机规则)
+
+    for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
+        auto* item = ui.alarmTable->item(row, 1);
+        if (item && item->data(Qt::UserRole).toLongLong() == id) {
+            auto* statusItem = ui.alarmTable->item(row, 4);
+            if (statusItem) statusItem->setText("已恢复");
+            break;
+        }
+    }
+    if (alarmMgr_->count() == 0) alarmBlinkTimer_->stop();
+}
+
+// ★ IMPROVE-5.5(2026-08-04):严重级报警闪烁 + 统一背景管理
+//   【背景】5.5 BUGFIX(Wqian 反馈):"已恢复"/"已确认"的行偶尔还显示红色,残留闪烁背景
+//   【改法】blink tick 是背景唯一权威:
+//     - "未确认" + 严重/危急级 → 切红/橙
+//     - 其他(已确认/已恢复/信息/警告)→ 清背景(默认)
+//   【取舍】每 tick 都清非活动行的背景(浪费但轻量);保证任何代码路径改状态后,500ms 内清干净
+//   【参照】Wqian 2026-08-04 反馈
+void hmi::onAlarmBlinkTick() {
+    static bool blinkOn = false;
+    blinkOn = !blinkOn;
+    const QColor activeBg = blinkOn ? QColor(255, 80, 80) : QColor(255, 200, 100);  // 红/橙
+    for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
+        auto* levelItem = ui.alarmTable->item(row, 2);
+        auto* statusItem = ui.alarmTable->item(row, 4);
+        if (!levelItem || !statusItem) continue;
+        const QString status = statusItem->text();
+        const QString levelText = levelItem->text();
+
+        if (status == "未确认" && (levelText == "严重" || levelText == "危急")) {
+            // 未确认 + 严重级 → 切红/橙背景
+            for (int col = 0; col < ui.alarmTable->columnCount(); ++col) {
+                auto* item = ui.alarmTable->item(row, col);
+                if (item) item->setBackground(activeBg);
+            }
+        } else {
+            // 其他(已确认/已恢复/信息/警告)→ 清背景,不留残色
+            for (int col = 0; col < ui.alarmTable->columnCount(); ++col) {
+                auto* item = ui.alarmTable->item(row, col);
+                if (item) item->setData(Qt::BackgroundRole, QVariant());
+            }
+        }
+    }
+}
+
+// ★ IMPROVE-5.5(2026-08-04):alarmTable 右键菜单
+//   【背景】用户需要确认报警,但不能每行都点确认按钮(太繁琐)
+//   【改法】启用 alarmTable 的 Qt::CustomContextMenu,右键弹出"确认"菜单
+//   【取舍】只支持"确认"一个动作;5.5+ 后续可加"抑制""详情"等
+//   【参照】QTableWidget::setContextMenuPolicy Qt 官方
+void hmi::onAlarmContextMenu(const QPoint& pos) {
+    QTableWidgetItem* item = ui.alarmTable->itemAt(pos);
+    if (!item) return;
+    int row = item->row();
+    auto* statusItem = ui.alarmTable->item(row, 4);
+    // ★ 5.5:只有"未确认"才能确认(灰掉菜单项)
+    if (statusItem) {
+        bool canAck = (statusItem->text() == "未确认");
+        alarmContextMenu_->actions().first()->setEnabled(canAck);
+    }
+    // 选中当前行,菜单关闭后 onAlarmAcknowledge 用 currentRow() 拿
+    ui.alarmTable->setCurrentCell(row, 0);
+    alarmContextMenu_->exec(ui.alarmTable->viewport()->mapToGlobal(pos));
+}
+
+// ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):右键菜单"确认"槽 → 用 ID 调 acknowledge
+//   【背景】原按 name 调 acknowledge,但同名报警存在时多个 Alarm 共享 name,错配
+//   【改法】从 Qt::UserRole 读 ID → alarmMgr_->acknowledge(id)
+//   【取舍】每个 Alarm 唯一 ID(QDateTime::currentMSecsSinceEpoch()),保证不重不漏
+//   【参照】5.5 BUGFIX:AlarmManager.activeAlarms_ 改用 ID 索引
+void hmi::onAlarmAcknowledge() {
+    int row = ui.alarmTable->currentRow();
+    if (row < 0) return;
+    auto* nameItem = ui.alarmTable->item(row, 1);
+    if (!nameItem) return;
+    qint64 id = nameItem->data(Qt::UserRole).toLongLong();
+    alarmMgr_->acknowledge(id);
+    qDebug() << "[Alarm 确认]" << nameItem->text() << "id=" << id;
+}
+
+// ★ IMPROVE-5.5(2026-08-04):全部清除 → 清空表格 + 停闪烁
+//   【改法】alarmMgr clearAll → emit allCleared → 本槽清 alarmTable + 停 timer
+//   【取舍】AlarmManager 5.2 已实现 clearAll,本槽只管 UI 同步
+//   【参照】onAlarmTriggered 的反向操作
+void hmi::onAllAlarmsCleared() {
+    ui.alarmTable->setRowCount(0);
+    alarmBlinkTimer_->stop();
+    qDebug() << "[Alarm 全部清除]";
 }

@@ -97,4 +97,33 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <!-- 阶段 5.2:Alarm + AlarmManager 注册到过滤器 -->
+    <QtMoc Include="Alarm.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="AlarmManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="Alarm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AlarmManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <!-- 阶段 5.3:HighAlarmChecker 注册到过滤器 -->
+    <QtMoc Include="HighAlarmChecker.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="HighAlarmChecker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <!-- 阶段 5.6:ActionManager 注册到过滤器 -->
+    <QtMoc Include="ActionManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="ActionManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
 </Project>

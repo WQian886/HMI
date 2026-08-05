@@ -121,6 +121,17 @@
     <!-- 阶段 4.3.0:WriteScheduler 写调度器(Variable.dirty_ → Modbus 写 PLC;PollScheduler 对称) -->
     <QtMoc Include="WriteScheduler.h" />
     <ClCompile Include="WriteScheduler.cpp" />
+    <!-- 阶段 5.6:ActionManager 报警联动动作(关阀/停机) -->
+    <QtMoc Include="ActionManager.h" />
+    <ClCompile Include="ActionManager.cpp" />
+    <!-- 阶段 5.2:Alarm 数据结构 + AlarmChecker 基类 + AlarmManager 容器 -->
+    <QtMoc Include="Alarm.h" />
+    <QtMoc Include="AlarmManager.h" />
+    <ClCompile Include="Alarm.cpp" />
+    <ClCompile Include="AlarmManager.cpp" />
+    <!-- 阶段 5.3:HighAlarmChecker 子类(Temperature 超阈值触发) -->
+    <QtMoc Include="HighAlarmChecker.h" />
+    <ClCompile Include="HighAlarmChecker.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

@@ -259,6 +259,14 @@
       </property>
      </widget>
     </item>
+    <item>
+     <!-- 阶段 5.4:报警列表 UI(最小版本:5 列 + 严重级闪烁,留等级过滤下次) -->
+     <widget class="QTableWidget" name="alarmTable">
+      <property name="minimumSize">
+       <size><width>0</width><height>150</height></size>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menuBar">
