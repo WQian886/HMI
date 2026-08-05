@@ -118,6 +118,13 @@
     <ClCompile Include="HighAlarmChecker.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 4.3.x:WriteFailChecker 注册到过滤器 -->
+    <QtMoc Include="WriteFailChecker.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="WriteFailChecker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- 阶段 5.6:ActionManager 注册到过滤器 -->
     <QtMoc Include="ActionManager.h">
       <Filter>Header Files</Filter>

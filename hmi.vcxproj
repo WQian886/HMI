@@ -132,6 +132,9 @@
     <!-- 阶段 5.3:HighAlarmChecker 子类(Temperature 超阈值触发) -->
     <QtMoc Include="HighAlarmChecker.h" />
     <ClCompile Include="HighAlarmChecker.cpp" />
+    <!-- 阶段 4.3.x:WriteFailChecker 写失败转报警(2026-08-05 Bug #2 修复) -->
+    <QtMoc Include="WriteFailChecker.h" />
+    <ClCompile Include="WriteFailChecker.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

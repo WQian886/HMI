@@ -3,6 +3,7 @@
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
 #include "HighAlarmChecker.h"     // 阶段 5.3:HighAlarmChecker 子类(Temperature 超阈值触发)
+#include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include <QIntValidator>
 #include <QMessageBox>
@@ -256,6 +257,15 @@ hmi::hmi(QWidget *parent)
     //   5.3+ 后续才补:LowAlarmChecker / 死区协调 / 最小持续时间
     auto* tempHighChecker = new HighAlarmChecker("温度高", temperature, 50.0, AlarmLevel::Critical);
     alarmMgr_->addChecker(tempHighChecker);
+
+    // 阶段 4.3.x(2026-08-05 Bug #2 修复):写失败转 Critical 报警
+    //   WriteScheduler 重试到上限 → writeFailed → WriteFailChecker → 报警
+    //   写失败是持续故障,操作员手动 acknowledge 走 5.5 流程(Active → Acknowledged)
+    //   不接 recovered —— 不会自动恢复
+    auto* writeFailChecker = new WriteFailChecker(alarmMgr_);
+    alarmMgr_->addChecker(writeFailChecker);
+    connect(writeScheduler_, &WriteScheduler::writeFailed,
+            writeFailChecker, &WriteFailChecker::onWriteFailed);
 
     // 阶段 5.4(2026-08-04):报警列表 UI 配置(5 列:时间/报警名/等级/值/状态)
     ui.alarmTable->setColumnCount(5);
