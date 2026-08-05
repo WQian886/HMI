@@ -189,6 +189,9 @@ void PollScheduler::onModbusReply(quint32 requestId, QModbusDataUnit unit, bool 
         //   返 NoChange 时也继续推进 quality=Good + nextPollAt(只是没 emit valueChanged)
         v->setValue(val, false);
         v->setQuality(Variable::Quality::Good);
+        // ★ 阶段 5.3+ 修 Bug #3(2026-08-05):emit 原始 register 给 AlarmChecker
+        //   emit 在 setValue 之后,raw 还是原始 register(不是过滤后的 val)
+        emit rawRead(v, raw);
         nextPollAtMs_[v] = now + v->pollIntervalMs();
         regIdx++;
     }

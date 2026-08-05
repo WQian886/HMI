@@ -255,7 +255,9 @@ hmi::hmi(QWidget *parent)
 
     // 阶段 5.3(2026-08-04):HighAlarmChecker 最小版本 —— Temperature > 50℃ 触发 Critical 报警
     //   5.3+ 后续才补:LowAlarmChecker / 死区协调 / 最小持续时间
-    auto* tempHighChecker = new HighAlarmChecker("温度高", temperature, 50.0, AlarmLevel::Critical);
+    // ★ BUGFIX-3(2026-08-05):传 pollScheduler_ 让 Checker 订阅 rawRead(原始值,绕开 deadband)
+    auto* tempHighChecker = new HighAlarmChecker(
+        "温度高", temperature, pollScheduler_, 50.0, AlarmLevel::Critical);
     alarmMgr_->addChecker(tempHighChecker);
 
     // 阶段 4.3.x(2026-08-05 Bug #2 修复):写失败转 Critical 报警
