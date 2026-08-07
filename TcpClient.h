@@ -32,7 +32,11 @@ public:
     //           (后续想在 TcpClient 内 disconnect 信号会调到错的)
     // [FIX #9] 改名:close() —— 避免遮蔽 QObject 静态方法
     void close();                                      // 断开连接(优雅版)
-    bool isConnected() const;                          // 是否连接中
+    bool isConnected() const;
+
+    // ★ IMPROVE-6.2(2026-08-07):配置存读 getter(暴露最近一次连接目标给 saveToFile)
+    QString host() const { return lastHost_; }
+    quint16 port() const { return lastPort_; }                          // 是否连接中
     qint64 send(const QByteArray& data);               // 发送数据
 
 signals:

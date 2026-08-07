@@ -2,7 +2,7 @@
 #include "Variable.h"             // 阶段 3.2:Variable 数据模型
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
-#include "HighAlarmChecker.h"     // 阶段 5.3:HighAlarmChecker 子类(Temperature 超阈值触发)
+#include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include <QIntValidator>
@@ -253,12 +253,18 @@ hmi::hmi(QWidget *parent)
     // 阶段 5.2:报警管理器(空架子,5.3 才注册 Checker)
     alarmMgr_ = new AlarmManager(this);
 
-    // 阶段 5.3(2026-08-04):HighAlarmChecker 最小版本 —— Temperature > 50℃ 触发 Critical 报警
-    //   5.3+ 后续才补:LowAlarmChecker / 死区协调 / 最小持续时间
-    // ★ BUGFIX-3(2026-08-05):传 pollScheduler_ 让 Checker 订阅 rawRead(原始值,绕开 deadband)
-    auto* tempHighChecker = new HighAlarmChecker(
-        "温度高", temperature, pollScheduler_, 50.0, AlarmLevel::Critical);
+    // 阶段 5.3-收尾(2026-08-07):ThresholdAlarmChecker 合并 High/Low(DRY)+ 最小持续时间
+    //   High:温度 > 50℃ 持续 500ms → Critical
+    //   Low:  温度 < 10℃ 持续 500ms → Critical
+    CheckerConfig highCfg{AlarmLevel::Critical, Direction::Above, 50.0, 500};
+    auto* tempHighChecker = new ThresholdAlarmChecker(
+        "温度高", temperature, pollScheduler_, highCfg);
     alarmMgr_->addChecker(tempHighChecker);
+
+    CheckerConfig lowCfg{AlarmLevel::Critical, Direction::Below, 10.0, 500};
+    auto* tempLowChecker = new ThresholdAlarmChecker(
+        "温度低", temperature, pollScheduler_, lowCfg);
+    alarmMgr_->addChecker(tempLowChecker);
 
     // 阶段 4.3.x(2026-08-05 Bug #2 修复):写失败转 Critical 报警
     //   WriteScheduler 重试到上限 → writeFailed → WriteFailChecker → 报警
@@ -307,12 +313,24 @@ hmi::hmi(QWidget *parent)
     alarmBlinkTimer_->setInterval(500);
     connect(alarmBlinkTimer_, &QTimer::timeout, this, &hmi::onAlarmBlinkTick);
 
-    // 阶段 5.6(2026-08-04):报警联动动作 — 温度高时速度写 0(模拟停机)
-    //   配置写代码里,阶段 6 再做 JSON 配置文件
+    // 阶段 5.6(2026-08-04):报警联动动作 — 温度高/低时速度写 0(模拟停机)
+    //   ★ 5.6 收尾(2026-08-07):mapping 配置抽到 initActionManager(),为阶段 6 JSON 铺路
     actionMgr_ = new ActionManager(this);
-    actionMgr_->addMapping("温度高", speed, 0);   // 温度 > 50 触发 → 速度 = 0(停机)
+    initActionManager(speed);   // 阶段 5.6 收尾:集中 mapping 配置(speed 是构造函数局部变量)
     connect(alarmMgr_, &AlarmManager::alarmTriggered,
             actionMgr_, &ActionManager::onAlarmTriggered);
+
+    // ★ 阶段 6.2(2026-08-07):Project 类(saveToFile 入口)—— 等所有管理器都建好后才能 new
+    project_ = new Project(varMgr_, alarmMgr_, actionMgr_, tcp_, this);
+
+    // ★ 阶段 6.2(2026-08-07):UI 保存按钮 → onSaveClicked(手动 connect,
+    //   因为 onSaveClicked 不符合 on_<objectName>_<signal>() 自动连接命名)
+    connect(ui.saveButton, &QPushButton::clicked, this, &hmi::onSaveClicked);
+
+    // ★ 6.2 优化(2026-08-07):保存失败 → 弹错误消息框(loadError 信号接 UI)
+    connect(project_, &Project::loadError, this, [this](const QString& reason){
+        QMessageBox::warning(this, "保存失败", reason);
+    });
 
     // 阶段 4.x 写审计日志(2026-07-28):配置 auditTable + 接 WriteScheduler 信号
     ui.auditTable->setColumnCount(4);
@@ -741,6 +759,37 @@ void hmi::updateModbusLabel() {
 //   【背景】5.3 只做数据 + qDebug,UI 上看不到。5.4 给最小可视化
 //   【改法】槽函数内:qDebug + tryTransition(AlarmCritical) + insertRow + scrollToBottom + 启闪烁
 //   【取舍】tryTransition 不动 — 保持单一迁移入口的设计
+
+// ★ IMPROVE-5.6-收尾(2026-08-07):集中 ActionManager 配置
+//   【背景】原来 addMapping 散在 hmi 构造里,5.6 收尾抽成 init 函数集中管理
+//   【改法】把全部 addMapping 集中到这一处;阶段 6 上 JSON 时,init 函数体替换成 loadFromJson(file),hmi 构造一行不用动
+//   【取舍】当前还是"配置写代码"(5.6 最小版),但接口位置留好
+//   【参照】Wqian 2026-08-07 阶段 5.6 收尾拍板
+void hmi::initActionManager(Variable* speed) {
+    actionMgr_->addMapping("温度高", speed, 0);   // 温度 > 50 触发 → 速度 = 0(停机)
+    actionMgr_->addMapping("温度低", speed, 0);   // 温度 < 10 触发 → 速度 = 0(停机)
+}
+
+// ★ 阶段 6.2(2026-08-07):UI 保存按钮槽函数 → 调 project_->saveToFile
+//   【背景】测试 saveToFile 真能产生正确 JSON
+//   【改法】固定路径写到工程目录下的 test_save.json
+//   【取舍】6.4 阶段会用 QFileDialog 选路径,这里先固定路径试跑
+//   【参照】Wqian 2026-08-07 "在ui界面上做个保存按钮,先试一次"
+void hmi::onSaveClicked() {
+    if (!project_) {
+        QMessageBox::warning(this, "保存失败", "project_ 指针为空");
+        return;
+    }
+    // ★ 测试用固定路径,6.4 再换 QFileDialog
+    QString path = "E:/qianwie/hmi/hmi/test_save.json";
+    if (project_->saveToFile(path)) {
+        QMessageBox::information(this, "保存成功",
+            "JSON 已写入:\n" + path + "\n\n请用记事本打开看内容");
+    } else {
+        QMessageBox::warning(this, "保存失败", "写文件失败,看 qDebug");
+    }
+}
+
 void hmi::onAlarmTriggered(const Alarm& a) {
     qDebug() << "[Alarm 触发]" << a.name << "level=" << static_cast<int>(a.level)
              << "value=" << a.triggerValue << "threshold=" << a.threshold;

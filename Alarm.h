@@ -42,6 +42,26 @@ struct Alarm {
 };
 Q_DECLARE_METATYPE(Alarm)
 
+// ★ IMPROVE-5.3-收尾(2026-08-07):报警方向 + Checker 配置结构
+//   【背景】5.3 收尾:HighAlarmChecker / LowAlarmChecker 合并为 ThresholdAlarmChecker(DRY)
+//          把散在构造里的参数集中到 CheckerConfig,方便阶段 6 上 JSON 时反序列化
+//   【改法】加 Direction 枚举(Above / Below)+ CheckerConfig struct(集中 4 个参数)
+//   【取舍】Direction 只二元;区间报警(<a && >b)留阶段 7+ 再扩
+//   【参照】Wqian 2026-08-07 阶段 5.3 收尾拍板
+enum class Direction { Above, Below };
+
+// ★ IMPROVE-5.3-收尾(2026-08-07):Checker 配置(为阶段 6 JSON 铺路)
+//   【背景】原来 HighAlarmChecker 构造里 threshold / level 散着;5.6 收尾要扩到联动配置
+//   【改法】4 个字段集中在一个 struct,阶段 6 上 JSON 时反序列化成它 → new ThresholdAlarmChecker 不用动
+//   【取舍】4 个字段够 5.3 用;不加 hysteresis(滞回)/ ack_required(必确认)等高级特性
+//   【参照】Wqian 2026-08-07 阶段 5.3 收尾拍板
+struct CheckerConfig {
+    AlarmLevel level         = AlarmLevel::Warning;  // 报警等级
+    Direction  direction     = Direction::Above;     // 阈值方向
+    double     threshold     = 0.0;                   // 阈值(> / < 该值触发)
+    int        minDurationMs = 500;                   // 最小持续时间(防抖,抖 < 此值不报)
+};
+
 // ★ IMPROVE-5.2(2026-08-04):报警检测器基类(具体逻辑由 5.3 子类实现)
 //   【背景】5.2 先把基类定好,5.3 才有 HighAlarmChecker / LowAlarmChecker 子类
 //   【改法】基类只暴露 name/level getter + triggered/recovered 信号

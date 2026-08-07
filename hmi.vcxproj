@@ -129,9 +129,15 @@
     <QtMoc Include="AlarmManager.h" />
     <ClCompile Include="Alarm.cpp" />
     <ClCompile Include="AlarmManager.cpp" />
-    <!-- 阶段 5.3:HighAlarmChecker 子类(Temperature 超阈值触发) -->
-    <QtMoc Include="HighAlarmChecker.h" />
-    <ClCompile Include="HighAlarmChecker.cpp" />
+    <!-- 阶段 5.3-收尾(2026-08-07):ThresholdAlarmChecker 合并 High/Low + 最小持续时间 -->
+    <QtMoc Include="ThresholdAlarmChecker.h" />
+    <ClCompile Include="ThresholdAlarmChecker.cpp" />
+    <!-- 阶段 6.2(2026-08-07):JSON 序列化 helper -->
+    <QtMoc Include="JsonSerializer.h" />
+    <ClCompile Include="JsonSerializer.cpp" />
+    <!-- 阶段 6.2(2026-08-07):Project 类 saveToFile -->
+    <QtMoc Include="Project.h" />
+    <ClCompile Include="Project.cpp" />
     <!-- 阶段 4.3.x:WriteFailChecker 写失败转报警(2026-08-05 Bug #2 修复) -->
     <QtMoc Include="WriteFailChecker.h" />
     <ClCompile Include="WriteFailChecker.cpp" />

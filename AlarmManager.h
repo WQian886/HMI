@@ -28,6 +28,9 @@ public:
     int  count() const;                                  // active 报警数
     QList<Alarm> activeAlarms() const;                   // 给 5.4 UI 用
 
+    // ★ IMPROVE-6.2(2026-08-07):配置存读访问器(返回所有 Checker 给 saveToFile 用)
+    QList<AlarmChecker*> checkers() const { return checkers_.values(); }
+
     // 5.5 阶段接:用户点确认按钮(用 ID 唯一标识,避免同名报警匹配错误)
     void acknowledge(qint64 id);
 

@@ -11,6 +11,7 @@
 #include "Binding.h"        // 阶段 4.1:变量↔UI 绑定框架(替 onVariableChanged)
 #include "AlarmManager.h"    // 阶段 5.2:报警管理器(集中管理所有 Checker + Alarm 生命周期)
 #include "ActionManager.h"   // 阶段 5.6:报警联动动作(关阀/停机)
+#include "Project.h"          // ★ 阶段 6.2:JSON 配置存读
 #include "ui_hmi.h"
 
 class hmi : public QMainWindow
@@ -50,6 +51,12 @@ private slots:
 	void onTcpReadyRead(const QByteArray& data);// TCP 收到数据了槽函数
 	void onTcpError(const QString& msg);// TCP 错误槽函数
 	void appendRecv(const QByteArray& data, const QString& prefix);// 辅助函数:把收到的数据追加到文本框,加个前缀区分收/发
+
+	// ★ 阶段 5.6 收尾(2026-08-07):集中 ActionManager mapping 配置(为阶段 6 JSON 铺路)
+	void initActionManager(Variable* speed);
+
+	// ★ 阶段 6.2(2026-08-07):UI 保存按钮 → 调 project_->saveToFile
+	void onSaveClicked();
 
 
 
@@ -146,4 +153,5 @@ private:
     WriteScheduler* writeScheduler_ = nullptr; // 阶段 4.3.0:写调度器(Variable.dirty_ → modbus 写 PLC,与 PollScheduler 对称)
     AlarmManager* alarmMgr_ = nullptr;  // 阶段 5.2:报警管理器(5.3 才注册 Checker 接 Variable)
     ActionManager* actionMgr_ = nullptr;  // 阶段 5.6:报警联动动作(关阀/停机)
+    Project*       project_    = nullptr;  // ★ 阶段 6.2:JSON 配置存读入口
 };

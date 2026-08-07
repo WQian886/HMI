@@ -9,7 +9,30 @@ ActionManager::~ActionManager() = default;
 
 void ActionManager::addMapping(const QString& alarmName, Variable* variable, const QVariant& value) {
     if (!variable || alarmName.isEmpty()) return;
-    mappings_[alarmName] = {variable, value};
+    // ★ IMPROVE-6.2(2026-08-07):Mapping 加 alarmName 字段,改用 explicit 赋值
+    Mapping m;
+    m.alarmName = alarmName;
+    m.variable  = variable;
+    m.value     = value;
+    mappings_[alarmName] = m;
+}
+
+// ★ IMPROVE-6.2(2026-08-07):返回所有 mappings(给 saveToFile 用)
+//   【背景】JsonSerializer 需要 alarmName + variable + value 三个字段
+//   【改法】遍历 QHash,拷贝到 QList(避免直接暴露内部容器 + 给调用方独立副本)
+//   【取舍】拷贝有 O(n) 开销,但 mappings 数量通常 < 10,可忽略
+//   【参照】Wqian 2026-08-07 阶段 6.2 开干
+QList<ActionManager::Mapping> ActionManager::mappings() const {
+    QList<Mapping> list;
+    list.reserve(mappings_.size());
+    for (auto it = mappings_.constBegin(); it != mappings_.constEnd(); ++it) {
+        Mapping m;
+        m.alarmName = it.key();
+        m.variable  = it.value().variable;
+        m.value     = it.value().value;
+        list.append(m);
+    }
+    return list;
 }
 
 void ActionManager::clear() {
