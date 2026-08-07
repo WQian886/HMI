@@ -6,6 +6,7 @@
 #include "AlarmManager.h"
 #include "Alarm.h"
 #include "ActionManager.h"
+#include "ThresholdAlarmChecker.h"   // ★ 6.3 需要:loadFromFile 构造 Checker
 #include "ThresholdAlarmChecker.h"   // ★ 6.2 需要:dynamic_cast 用
 #include "TcpClient.h"
 #include "JsonSerializer.h"
@@ -22,12 +23,14 @@
 Project::Project(VariableManager* varMgr,
                  AlarmManager* alarmMgr,
                  ActionManager* actionMgr,
+                 PollScheduler* pollScheduler,
                  TcpClient* tcp,
                  QObject* parent)
     : QObject(parent),
       varMgr_(varMgr),
       alarmMgr_(alarmMgr),
       actionMgr_(actionMgr),
+      pollScheduler_(pollScheduler),
       tcp_(tcp) {}
 
 Project::~Project() = default;
@@ -128,9 +131,108 @@ bool Project::saveToFile(const QString& path) {
     return true;
 }
 
-// ===== loadFromFile 空壳(6.3 阶段实现)=====
+// ===== loadFromFile 主实现(6.3)=====
+//   【背景】Q4-A 拍板:JSON = 唯一真理,加载后内存 = JSON(全删干净 + 重建)
+//   【流程】读文件 → 解析 JSON → 校验 schema_version → 清空现有状态 → 重建 4 类 → 失败 abort
+//   【取舍】失败严格:任何引用错误(variables 不存在)立即 abort,不留半成品状态
+//   【参照】Wqian 2026-08-07 阶段 6.3 开干;inventory/HMI_阶段6_schema_design.md
 bool Project::loadFromFile(const QString& path) {
-    Q_UNUSED(path);
-    emit loadError("loadFromFile 6.3 阶段实现,目前未支持");
-    return false;
+    if (!varMgr_ || !alarmMgr_ || !actionMgr_ || !pollScheduler_) {
+        emit loadError("管理器指针为空,loadFromFile 中止");
+        return false;
+    }
+
+    // 1. 读文件
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        emit loadError(QString("打开文件失败: %1").arg(f.errorString()));
+        return false;
+    }
+    QByteArray data = f.readAll();
+    f.close();
+
+    // 2. 解析 JSON
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+    if (err.error != QJsonParseError::NoError) {
+        emit loadError(QString("JSON 解析失败: %1 (offset %2)").arg(err.errorString()).arg(err.offset));
+        return false;
+    }
+    if (!doc.isObject()) {
+        emit loadError("JSON 顶层不是 object");
+        return false;
+    }
+    QJsonObject root = doc.object();
+
+    // 3. 校验 schema_version(只接受 1.x)
+    QString schemaVer = root["schema_version"].toString();
+    if (schemaVer.isEmpty() || !schemaVer.startsWith("1.")) {
+        emit loadError(QString("schema_version \"%1\" 不支持,需要 1.x").arg(schemaVer));
+        return false;
+    }
+
+    // 4. 清空现有状态(Q4-A 全删干净)
+    varMgr_->clear();
+    alarmMgr_->clearAll();
+    actionMgr_->clear();
+
+    // 5. 解析 variables(variables 必须先建好,因为 alarms/actions 引用它们)
+    QJsonArray variablesArr = root["variables"].toArray();
+    for (const QJsonValue& v : variablesArr) {
+        Variable* var = JsonSerializer::fromJsonVariable(v.toObject(), varMgr_);
+        if (!var) {
+            emit loadError("variable 字段缺失或类型错误");
+            return false;
+        }
+        if (!varMgr_->addVariable(var)) {
+            delete var;   // addVariable 失败,name 重复,清理资源
+            emit loadError(QString("variable \"%1\" 重复或非法").arg(var->name()));
+            return false;
+        }
+    }
+
+    // 6. 解析 alarms(依赖 variables 已建好)
+    QJsonArray alarmsArr = root["alarms"].toArray();
+    for (const QJsonValue& a : alarmsArr) {
+        QJsonObject aObj = a.toObject();
+        QString alarmName = aObj["name"].toString();
+        QString varName   = aObj["variable"].toString();
+
+        Variable* var = varMgr_->findVariable(varName);
+        if (!var) {
+            emit loadError(QString("alarm \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
+            return false;
+        }
+        CheckerConfig cfg = JsonSerializer::checkerConfigFromJson(aObj);
+        auto* checker = new ThresholdAlarmChecker(alarmName, var, pollScheduler_, cfg, alarmMgr_);
+        if (!alarmMgr_->addChecker(checker)) {
+            delete checker;
+            emit loadError(QString("alarm \"%1\" 重复或 addChecker 失败").arg(alarmName));
+            return false;
+        }
+    }
+
+    // 7. 解析 actions(依赖 variables + alarms 都已建好)
+    QJsonArray actionsArr = root["actions"].toArray();
+    for (const QJsonValue& ac : actionsArr) {
+        QJsonObject acObj = ac.toObject();
+        QString alarmName = acObj["alarm_name"].toString();
+        QString varName   = acObj["variable"].toString();
+        QVariant writeValue = acObj["write_value"].toVariant();
+
+        Variable* var = varMgr_->findVariable(varName);
+        if (!var) {
+            emit loadError(QString("action \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
+            return false;
+        }
+        // action 可以引用还没存在的 alarm(只是永远不触发),不强制检查
+        actionMgr_->addMapping(alarmName, var, writeValue);
+    }
+
+    // 8. 通讯字段(Q1-A:暂存不应用,等 6.4 接 TcpClient)
+    // TODO:6.4 阶段把 communications.host/port 真正应用到 tcp_->connectTo()
+
+    qDebug() << "[Project] loaded from" << path;
+    emit loaded(path);   // ★ 6.3:load 成功(hmi 收到后重绑 UI)
+    return true;
 }

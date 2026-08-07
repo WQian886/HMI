@@ -38,9 +38,23 @@ void AlarmManager::acknowledge(qint64 id) {
     emit alarmAcknowledged(id);
 }
 
+// ★ 阶段 6.3 FIX(2026-08-07):clearAll 必须真清一切 —— 不光清 activeAlarms_,也要清 checkers_
+//   【背景】原来只清 active alarms → loadFromFile 调 clearAll 后,代码默认加的 checker(温度高/低)还在
+//          → addChecker "温度高" 名字冲突 → 返回 false → emit loadError → 整个 loadFromFile 中止
+//   【改法】delete 每个 checker(checkers_ 裸指针,addChecker 内部 setParent(this),delete 自动从 QObject 树移除)
+//   【取舍】clearAll 名字模糊,严格说应该拆成 clearActiveAlarms() + clearCheckers(),
+//          但 6.3 阶段先最小改动(合并清),6.4 阶段再考虑拆(影响面可控)
+//   【参照】Wqian 2026-08-07 阶段 6.3 调试过程;Q4-A 拍板(内存 = JSON)
 void AlarmManager::clearAll() {
-    if (activeAlarms_.isEmpty()) return;
-    activeAlarms_.clear();
+    if (!activeAlarms_.isEmpty()) {
+        activeAlarms_.clear();
+    }
+    if (!checkers_.isEmpty()) {
+        for (auto it = checkers_.begin(); it != checkers_.end(); ++it) {
+            delete it.value();   // setParent(this) 后 delete 会从 QObject 树自动移除
+        }
+        checkers_.clear();
+    }
     emit allCleared();
 }
 

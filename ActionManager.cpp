@@ -35,6 +35,16 @@ QList<ActionManager::Mapping> ActionManager::mappings() const {
     return list;
 }
 
+// ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 mappings_ 里的 Variable* 指针
+//   旧 Variable 被 delete,新 Variable 同名替换;由 hmi.cpp connect varMgr_->variableReplaced 触发
+void ActionManager::onVariableReplaced(Variable* oldVar, Variable* newVar) {
+    for (auto& m : mappings_) {
+        if (m.variable == oldVar) {
+            m.variable = newVar;  // 可能是 nullptr(被 clear)
+        }
+    }
+}
+
 void ActionManager::clear() {
     mappings_.clear();
 }
@@ -48,6 +58,8 @@ void ActionManager::onAlarmTriggered(const Alarm& a) {
     auto it = mappings_.find(a.name);
     if (it == mappings_.end()) return;
 
+    // ★ 6.3 FIX:旧 Variable 已死,清空指针(联动不写)避免 dangling
+    if (!it->variable) return;
     it->variable->setValue(it->value);  // 改本地值
     it->variable->markDirty();          // 标记 dirty → WriteScheduler 写 PLC
 

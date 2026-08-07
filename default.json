@@ -1,0 +1,84 @@
+{
+    "actions": [
+        {
+            "alarm_name": "温度高",
+            "variable": "Speed",
+            "write_value": 0
+        },
+        {
+            "alarm_name": "温度低",
+            "variable": "Speed",
+            "write_value": 0
+        }
+    ],
+    "alarms": [
+        {
+            "direction": "Above",
+            "level": "Critical",
+            "min_duration_ms": 500,
+            "name": "温度高",
+            "threshold": 50,
+            "variable": "Temperature"
+        },
+        {
+            "direction": "Below",
+            "level": "Critical",
+            "min_duration_ms": 500,
+            "name": "温度低",
+            "threshold": 10,
+            "variable": "Temperature"
+        }
+    ],
+    "communications": {
+        "host": "127.0.0.1",
+        "modbus": {
+            "max_retries": 5,
+            "poll_interval_ms": 100,
+            "timeout_ms": 3000
+        },
+        "port": 502,
+        "protocol": "modbus_tcp"
+    },
+    "created_at": "2026-08-07T17:34:08",
+    "project_name": "HMI Demo Project",
+    "schema_version": "1.0",
+    "updated_at": "2026-08-07T17:34:08",
+    "variables": [
+        {
+            "access": "ReadOnly",
+            "address": 1,
+            "data_type": "Int16",
+            "deadband": 0,
+            "name": "Temperature",
+            "poll_interval_ms": 1000,
+            "range": {
+                "max": 200,
+                "min": -100
+            }
+        },
+        {
+            "access": "ReadOnly",
+            "address": 0,
+            "data_type": "Int16",
+            "deadband": 0,
+            "name": "Pressure",
+            "poll_interval_ms": 1000,
+            "range": {
+                "max": 1000,
+                "min": -1000
+            }
+        },
+        {
+            "access": "ReadWrite",
+            "address": 2,
+            "data_type": "UInt16",
+            "deadband": 0,
+            "name": "Speed",
+            "poll_interval_ms": 1000,
+            "range": {
+                "max": 65535,
+                "min": 0
+            }
+        }
+    ]
+}

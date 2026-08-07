@@ -35,6 +35,9 @@ private slots:
     // v 可能是 PollScheduler 监控的任何 Variable,Checker 只关心 variable_
     void onRawRead(Variable* v, quint16 rawValue);
 
+    // ★ 阶段 6.3(2026-08-07):监听 varMgr->variableReplaced,旧 Variable 死了换新 Variable
+    void onVariableReplaced(Variable* oldVar, Variable* newVar);
+
 private:
     Variable*       variable_;        // 不 delete(VariableManager 管)
     PollScheduler*  pollScheduler_;   // 不 delete(hmi 管)

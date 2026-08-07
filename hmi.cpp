@@ -12,6 +12,7 @@
 #include <QTableWidget>     // 阶段 4.x 写审计日志
 #include <QTableWidgetItem> // 阶段 4.x 写审计日志
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
+#include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
@@ -320,17 +321,41 @@ hmi::hmi(QWidget *parent)
     connect(alarmMgr_, &AlarmManager::alarmTriggered,
             actionMgr_, &ActionManager::onAlarmTriggered);
 
+    // ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 ActionManager::Mapping 里失效的 Variable*
+    connect(varMgr_, &VariableManager::variableReplaced,
+            actionMgr_, &ActionManager::onVariableReplaced);
+
     // ★ 阶段 6.2(2026-08-07):Project 类(saveToFile 入口)—— 等所有管理器都建好后才能 new
-    project_ = new Project(varMgr_, alarmMgr_, actionMgr_, tcp_, this);
+    project_ = new Project(varMgr_, alarmMgr_, actionMgr_, pollScheduler_, tcp_, this);
+
+    // ★ 阶段 6.3(2026-08-07):loadFromFile 完成后重绑 UI(Binding 持的是旧 Variable*)
+    connect(project_, &Project::loaded, this, [this](const QString&){
+        // 重绑 3 个 label(Variable* 重建后,旧绑定死了)
+        Binding::bind(ui.pressureLabel,    varMgr_->findVariable("Pressure"),    "压力(bar): %1");
+        Binding::bind(ui.temperatureLabel, varMgr_->findVariable("Temperature"), "温度(℃): %1");
+        Binding::bind(ui.speedLabel,       varMgr_->findVariable("Speed"),       "转速(rpm): %1");
+        // ★ 阶段 6.3(2026-08-07):bindEdit 也持旧 Variable*,load 后必须重绑(否则 UI 改值写到死指针)
+        Binding::bindEdit(ui.speedWriteEdit, varMgr_->findVariable("Speed"));
+    });
+
+    // ★ 阶段 6.3 FIX(2026-08-07):把 connect 提前到 project_ 实例化之后(loadFromFile 之前)
+    //   原来 connect 在 DEBUG block 之后,loadFromFile emit loadError 时还没连 → lambda 不触发
+    connect(project_, &Project::loadError, this, [this](const QString& reason){
+        QMessageBox::warning(this, "加载失败", reason);
+    });
+
+    // ★ 阶段 6.3(2026-08-07):启动默认读 default.json(开箱即用,失败静默回退)
+    if (!project_->loadFromFile("E:/qianwie/hmi/hmi/default.json")) {
+        qDebug() << "[hmi] default.json 加载失败(用代码默认配置)";
+    } else {
+        qDebug() << "[hmi] default.json 加载成功";
+    }
 
     // ★ 阶段 6.2(2026-08-07):UI 保存按钮 → onSaveClicked(手动 connect,
     //   因为 onSaveClicked 不符合 on_<objectName>_<signal>() 自动连接命名)
     connect(ui.saveButton, &QPushButton::clicked, this, &hmi::onSaveClicked);
 
-    // ★ 6.2 优化(2026-08-07):保存失败 → 弹错误消息框(loadError 信号接 UI)
-    connect(project_, &Project::loadError, this, [this](const QString& reason){
-        QMessageBox::warning(this, "保存失败", reason);
-    });
+
 
     // 阶段 4.x 写审计日志(2026-07-28):配置 auditTable + 接 WriteScheduler 信号
     ui.auditTable->setColumnCount(4);

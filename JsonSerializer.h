@@ -14,9 +14,11 @@
 #include <QVariant>
 #include <QList>
 
+#include "VariableManager.h"  // ★ 6.3 修正:用 include 替前向声明(VariableManager 是 QObject 子类,需要完整定义才能隐式 upcast)
+#include "Alarm.h"             // ★ 6.3 修正:AlarmLevel / Direction 是 Alarm.h 嵌套类型,前向声明看不到
+
 class Variable;
 struct CheckerConfig;
-struct Alarm;          // 前向声明,AlarmManager.h 已经定义
 
 class JsonSerializer {
 public:
@@ -38,4 +40,17 @@ public:
     //   AlarmLevel / Direction 没有 Q_ENUM,手写 switch;以后 5.x 加 Q_ENUM 可删
     static QString alarmLevelToString(int level);
     static QString directionToString(int direction);
+
+    // ===== 阶段 6.3 反向(读 JSON 路径)=====
+
+    // Variable:构造 new Variable*(caller 用 varMgr_->addVariable 接管)
+    //   【设计】不调 varMgr_->addVariable,留给 caller 决定(成功才加)
+    static Variable* fromJsonVariable(const QJsonObject& obj, VariableManager* parent);
+
+    // CheckerConfig:纯数据,无父对象
+    static CheckerConfig checkerConfigFromJson(const QJsonObject& obj);
+
+    // enum string → enum(失败 fallback 中间档,避免崩溃)
+    static AlarmLevel alarmLevelFromString(const QString& s);
+    static Direction  directionFromString(const QString& s);
 };

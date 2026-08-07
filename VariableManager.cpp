@@ -19,7 +19,17 @@ bool VariableManager::addVariable(Variable* v) {
     if (!v)                       return false;  // 空指针
     const QString name = v->name();
     if (name.isEmpty())           return false;  // name 为空
-    if (vars_.contains(name))     return false;  // name 重复
+    if (vars_.contains(name)) {
+        // ★ 6.3 FIX:同 name 替换时,emit variableReplaced 让监听者更新 Variable* 指针
+        //   emit 在 delete 之前,让监听者能读 old 的字段做最后处理
+        Variable* old = vars_.value(name);
+        vars_.remove(name);
+        v->setParent(this);
+        vars_.insert(name, v);
+        emit variableReplaced(old, v);
+        delete old;
+        return true;
+    }
 
     // ★ IMPROVE-A5(2026-07-29,hotfix):检查 v->parent()
     //   【bug 复盘】原版“直接拒绝”导致变量进了 hash 但 manager 不管 — PollScheduler
@@ -65,6 +75,23 @@ Variable* VariableManager::findVariable(const QString& name) const {
 
 QList<Variable*> VariableManager::allVariables() const {
     return vars_.values();
+}
+
+// ★ 阶段 6.3(2026-08-07):加载前清空所有 variables(Q4-A 全删干净)
+//   【背景】loadFromFile 要"内存 = JSON",先 clear 再 addVariable
+//   【改法】遍历 + removeVariable(已经 delete + erase)
+//   【取舍】O(n) 但 variables 数量通常 < 20,可忽略
+//   【参照】Wqian 2026-08-07 阶段 6.3 开干;Q4-A 拍板
+// ★ 阶段 6.3 FIX(2026-08-07):clear 时每个旧 var emit variableReplaced(old, nullptr)
+//   监听者据此把 Variable* 置 nullptr(防 dangling)
+void VariableManager::clear() {
+    if (vars_.isEmpty()) return;
+    QList<Variable*> oldVars = vars_.values();
+    vars_.clear();
+    for (Variable* old : oldVars) {
+        emit variableReplaced(old, nullptr);
+        delete old;
+    }
 }
 
 QList<Variable*> VariableManager::variablesByAddress() const {

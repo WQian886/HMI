@@ -85,3 +85,67 @@ QString JsonSerializer::directionToString(int direction) {
     }
     return "Above";   // fallback
 }
+
+// ===== 阶段 6.3 反向实现 =====
+
+// Variable:从 JSON 构造 new Variable*(需要 VariableManager 作 parent,负责 setParent)
+//   【背景】saveToFile 不存 runtime 字段(value/quality/timestamp/dirty),load 也不恢复这些
+//   【改法】读 JSON 字段 → 用 QMetaEnum::keyToValue 反向解析 enum → 构造 Variable → 设 deadband/poll/range
+//   【取舍】失败返回 nullptr(QMetaEnum 找不到 enum value);caller 决定怎么处理
+//   【参照】Wqian 2026-08-07 阶段 6.3 开干
+Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj, VariableManager* parent) {
+    QString name = obj["name"].toString();
+    quint16 address = static_cast<quint16>(obj["address"].toInt());
+    if (name.isEmpty()) return nullptr;
+
+    // DataType 反向:QMetaEnum::keyToValue("Int16") → Variable::DataType::Int16
+    QMetaEnum dataTypeEnum = QMetaEnum::fromType<Variable::DataType>();
+    int dataTypeVal = dataTypeEnum.keyToValue(obj["data_type"].toString().toLatin1().data());
+    if (dataTypeVal < 0) return nullptr;
+    auto dataType = static_cast<Variable::DataType>(dataTypeVal);
+
+    // Access 反向:同上
+    QMetaEnum accessEnum = QMetaEnum::fromType<Variable::Access>();
+    int accessVal = accessEnum.keyToValue(obj["access"].toString().toLatin1().data());
+    if (accessVal < 0) return nullptr;
+    auto access = static_cast<Variable::Access>(accessVal);
+
+    // ★ 6.3 修正:Variable 构造第 5 参数是 QObject*,VariableManager* 要 static_cast
+    //   即使 include 了 VariableManager.h,有些编译器还是要求显式转换(保险)
+    Variable* v = new Variable(name, address, dataType, access, static_cast<QObject*>(parent));
+    v->setDeadband(obj["deadband"].toDouble());
+    v->setPollIntervalMs(obj["poll_interval_ms"].toInt(1000));  // 默认 1000ms
+
+    // Range(Q2-B):对象形式 {min, max}
+    if (obj.contains("range")) {
+        QJsonObject range = obj["range"].toObject();
+        v->setRange(range["min"].toVariant(), range["max"].toVariant());
+    }
+    return v;
+}
+
+// CheckerConfig:从 JSON 构造(纯数据,无父对象)
+CheckerConfig JsonSerializer::checkerConfigFromJson(const QJsonObject& obj) {
+    CheckerConfig cfg;
+    cfg.level         = alarmLevelFromString(obj["level"].toString());
+    cfg.direction     = directionFromString(obj["direction"].toString());
+    cfg.threshold     = obj["threshold"].toDouble();
+    cfg.minDurationMs = obj["min_duration_ms"].toInt(500);  // 默认 500ms
+    return cfg;
+}
+
+// alarmLevel string → enum(失败 fallback Warning 中间档)
+AlarmLevel JsonSerializer::alarmLevelFromString(const QString& s) {
+    if (s == "Info")      return AlarmLevel::Info;
+    if (s == "Warning")   return AlarmLevel::Warning;
+    if (s == "Critical")  return AlarmLevel::Critical;
+    if (s == "Emergency") return AlarmLevel::Emergency;
+    return AlarmLevel::Warning;  // fallback:中间档,避免 UI 误判
+}
+
+// direction string → enum(失败 fallback Above)
+Direction JsonSerializer::directionFromString(const QString& s) {
+    if (s == "Above") return Direction::Above;
+    if (s == "Below") return Direction::Below;
+    return Direction::Above;  // fallback
+}

@@ -73,6 +73,10 @@ private slots:
     void onTick();
     void onWriteReply(quint32 requestId, bool success);
 
+    // ★ 阶段 6.3(2026-08-07):监听 varMgr_->variableReplaced,更新 pending_ 里的失效指针
+    //   防止 loadFromFile 时 in-flight 写请求的 reply 触发 UAF(v 已被 delete)
+    void onVariableReplaced(Variable* oldVar, Variable* newVar);
+
 private:
     // ★ IMPROVE-A4(2026-07-29):写失败重试上限(超过报警 + 清 dirty)
     static constexpr int kMaxWriteRetries = 3;

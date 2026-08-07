@@ -16,6 +16,7 @@
 class VariableManager;
 class AlarmManager;
 class ActionManager;
+class PollScheduler;   // ★ 6.3 新增:ThresholdAlarmChecker 构造需要 PollScheduler*
 class TcpClient;
 
 class Project : public QObject {
@@ -24,6 +25,7 @@ public:
     explicit Project(VariableManager* varMgr,
                      AlarmManager* alarmMgr,
                      ActionManager* actionMgr,
+                     PollScheduler* pollScheduler,   // ★ 6.3 新增
                      TcpClient* tcp,
                      QObject* parent = nullptr);
     ~Project() override;
@@ -37,11 +39,13 @@ public:
 
 signals:
     void saved(const QString& path);
+    void loaded(const QString& path);   // ★ 6.3:loadFromFile 成功(给 hmi 重绑 UI 用)
     void loadError(const QString& reason);
 
 private:
     VariableManager* varMgr_;
     AlarmManager*    alarmMgr_;
     ActionManager*   actionMgr_;
+    PollScheduler*   pollScheduler_;
     TcpClient*       tcp_;
 };

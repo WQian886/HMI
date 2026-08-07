@@ -57,6 +57,14 @@ ThresholdAlarmChecker::ThresholdAlarmChecker(const QString& alarmName,
 
 ThresholdAlarmChecker::~ThresholdAlarmChecker() = default;
 
+// ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 variable_ 指针
+//   旧 Variable 被 delete,新 Variable 同名替换;由 hmi.cpp connect varMgr_->variableReplaced 触发
+void ThresholdAlarmChecker::onVariableReplaced(Variable* oldVar, Variable* newVar) {
+    if (oldVar == variable_) {
+        variable_ = newVar;  // 可能是 nullptr(被 clear)
+    }
+}
+
 void ThresholdAlarmChecker::onRawRead(Variable* v, quint16 rawValue) {
     if (v != variable_) return;                       // ★ 只关心自己监控的 Variable
     if (!variable_) return;

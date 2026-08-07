@@ -34,6 +34,15 @@ public:
     // 按地址升序返回(3.3 轮询分组:连续地址合并成一次读请求)
     QList<Variable*> variablesByAddress() const;
 
+    // ★ 阶段 6.3(2026-08-07):加载前清空所有 variables(Q4-A 全删干净)
+    void clear();
+
+signals:
+    // ★ 阶段 6.3(2026-08-07):变量替换信号
+    //   触发场景:1) addVariable 同名替换:old=旧,new=新 2) clear 删除:old=旧,new=nullptr
+    //   监听者(ThresholdAlarmChecker / ActionManager / Binding)据此更新 Variable* 指针
+    void variableReplaced(Variable* oldVar, Variable* newVar);
+
 private:
     QHash<QString, Variable*> vars_;  // name → Variable*
 };

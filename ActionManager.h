@@ -35,6 +35,9 @@ public slots:
     // 接收 AlarmManager::alarmTriggered(5.2 已有信号)
     void onAlarmTriggered(const Alarm& a);
 
+    // ★ 阶段 6.3(2026-08-07):监听 varMgr_->variableReplaced,更新 mappings_ 里失效的 Variable*
+    void onVariableReplaced(Variable* oldVar, Variable* newVar);
+
 public:
     // ★ IMPROVE-6.2(2026-08-07):暴露 Mapping 给 saveToFile
     //   【背景】原来私有,JsonSerializer 拿不到 alarmName + variable + value

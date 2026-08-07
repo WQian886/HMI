@@ -16,6 +16,12 @@ WriteScheduler::WriteScheduler(VariableManager* mgr, ModbusMaster* modbus, QObje
 {
     timer_.setInterval(100);   // 100ms tick,跟 PollScheduler 节奏对齐
     connect(&timer_, &QTimer::timeout, this, &WriteScheduler::onTick);
+
+    // ★ 阶段 6.3(2026-08-07):监听 varMgr_->variableReplaced,更新 pending_ 里失效的 Variable*
+    if (varMgr_) {
+        connect(varMgr_, &VariableManager::variableReplaced,
+                this, &WriteScheduler::onVariableReplaced);
+    }
 }
 
 void WriteScheduler::start() {
@@ -142,4 +148,15 @@ void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
     e.resultText   = success ? QStringLiteral("OK") : (QStringLiteral("FAIL") + failSuffix);
     auditLog_.append(e);
     emit auditAppended(e);
+}
+
+// ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 pending_ 里的 Variable* 指针
+//   旧 Variable 被 delete,新 Variable 同名替换;防 in-flight 写请求 reply 触发 UAF
+//   newVar 为 nullptr 表示 Variable 被 clear(pending_ 那条等下 reply 会被 onWriteReply 当 unknown reqId 处理)
+void WriteScheduler::onVariableReplaced(Variable* oldVar, Variable* newVar) {
+    for (auto it = pending_.begin(); it != pending_.end(); ++it) {
+        if (it.value() == oldVar) {
+            it.value() = newVar;
+        }
+    }
 }
