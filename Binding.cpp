@@ -174,3 +174,23 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
             setDirtyStyle(edit, false);
         });
 }
+
+// ★ 6.5 收尾(2026-08-08 BugFix #1):断开 label 接收的所有 connection
+//   【背景】bind 内部用 connect(v, ..., label, ...) 累计不清理,切工程会内存泄漏
+//   【改法】disconnect 0 0 0 0 模式断 widget 所有接收的 connection
+//   【理由】label 在本工程里只被 Binding::bind 接一次,无其他 source,安全
+//   【参照】Wqian 2026-08-08 review 6.4 修复 #1
+void Binding::unbind(QLabel* label) {
+    if (!label) return;
+    QObject::disconnect(label, nullptr, nullptr, nullptr);
+}
+
+// ★ 6.5 收尾(2026-08-08 BugFix #1):断开 edit 接收的所有 connection
+//   【背景】bindEdit 内部 connect(textEdited / returnPressed / QShortcut / valueChanged)
+//          4 个 connection,切工程时全断并重绑
+//   【取舍】用户已输入的脏状态会丢(edit 边框从橙→默认),可接受
+//   【参照】Wqian 2026-08-08 review 6.4 修复 #1
+void Binding::unbindEdit(QLineEdit* edit) {
+    if (!edit) return;
+    QObject::disconnect(edit, nullptr, nullptr, nullptr);
+}

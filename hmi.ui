@@ -11,54 +11,71 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>HMI 学习项目 - 阶段 4</string>
+   <string>HMI 学习项目 - 阶段 6(工程文件)</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="centralLayout">
     <item>
-     <widget class="QPushButton" name="startButton">
-      <property name="minimumSize">
-       <size><width>120</width><height>40</height></size>
-      </property>
-      <property name="text"><string>启动</string></property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QPushButton" name="stopButton">
-      <property name="minimumSize">
-       <size><width>120</width><height>40</height></size>
-      </property>
-      <property name="text"><string>停止</string></property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QPushButton" name="resetButton">
-      <property name="enabled"><bool>true</bool></property>
-      <property name="text"><string>复位</string></property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QPushButton" name="saveButton">
-      <property name="minimumSize">
-       <size><width>120</width><height>40</height></size>
-      </property>
-      <property name="text"><string>保存工程</string></property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QLineEdit" name="numberLineEdit">
-      <property name="minimumSize">
-       <size><width>200</width><height>60</height></size>
-      </property>
-      <property name="readOnly"><bool>true</bool></property>
-      <property name="text"><string>0</string></property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignCenter</set>
-      </property>
-      <property name="styleSheet">
-       <string>font-size: 28px; font-weight: bold; color: black; background-color: white;</string>
-      </property>
-     </widget>
+     <!-- ★ 阶段 6.4 加强(2026-08-08):5 按钮 + 计时 6 个元素横排,80x32 紧凑布局(替代原 5 行竖排) -->
+     <layout class="QHBoxLayout" name="buttonRowLayout">
+      <item>
+       <widget class="QPushButton" name="startButton">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>启动</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="stopButton">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>停止</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="resetButton">
+        <property name="enabled"><bool>true</bool></property>
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>复位</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="saveButton">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>保存工程</string></property>
+       </widget>
+      </item>
+      <item>
+       <!-- ★ 阶段 6.4:UI 打开工程按钮(跟 saveButton 对称) -->
+       <widget class="QPushButton" name="openButton">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>打开工程</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="numberLineEdit">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="readOnly"><bool>true</bool></property>
+        <property name="text"><string>0</string></property>
+        <property name="alignment">
+         <set>Qt::AlignmentFlag::AlignCenter</set>
+        </property>
+        <property name="styleSheet">
+         <string>font-size: 18px; font-weight: bold; color: black; background-color: white;</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
     <item>
      <layout class="QHBoxLayout" name="stateConnLayout">

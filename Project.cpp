@@ -229,8 +229,23 @@ bool Project::loadFromFile(const QString& path) {
         actionMgr_->addMapping(alarmName, var, writeValue);
     }
 
-    // 8. 通讯字段(Q1-A:暂存不应用,等 6.4 接 TcpClient)
-    // TODO:6.4 阶段把 communications.host/port 真正应用到 tcp_->connectTo()
+    // 8. 通讯字段应用(★ 6.5 收尾:communications.host/port 真正应用到 TcpClient)
+    //   【背景】6.3 拍板保留字段、6.4 拍板不应用,问题是切工程后内存 = 新 JSON 但 TCP 还连着旧 IP
+    //   【改法】loadFromFile 调 tcp_->connectTo(host, port) 触发重连,emit loaded 让 hmi 同步 modbus
+    //   ★ 6.5 收尾(2026-08-08 BugFix #3):host/port 跟当前相同 → 跳过重连,避免状态闪烁 / in-flight UAF
+    //   【取舍】正在通讯时 loadFromFile 会短暂断连,但用户主动打开工程 = 期望切换,合理
+    //   【参照】Wqian 2026-08-08 review 6.4 修复 #2
+    QJsonObject comm = root["communications"].toObject();
+    QString host = comm["host"].toString();
+    int port = comm["port"].toInt();
+    if (tcp_ && !host.isEmpty() && port > 0 && port < 65536) {
+        if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
+            qDebug() << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
+        } else {
+            tcp_->connectTo(host, static_cast<quint16>(port));
+            qDebug() << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
+        }
+    }
 
     qDebug() << "[Project] loaded from" << path;
     emit loaded(path);   // ★ 6.3:load 成功(hmi 收到后重绑 UI)

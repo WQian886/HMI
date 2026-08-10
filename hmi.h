@@ -58,6 +58,9 @@ private slots:
 	// ★ 阶段 6.2(2026-08-07):UI 保存按钮 → 调 project_->saveToFile
 	void onSaveClicked();
 
+	// ★ 阶段 6.4(2026-08-08):UI 打开工程按钮 → 弹 QFileDialog 选 .json → loadFromFile(6.3 已实现)
+	void onOpenClicked();
+
 
 
 private:

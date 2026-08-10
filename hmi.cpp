@@ -13,6 +13,7 @@
 #include <QTableWidgetItem> // 阶段 4.x 写审计日志
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
+#include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
 #include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
@@ -330,12 +331,30 @@ hmi::hmi(QWidget *parent)
 
     // ★ 阶段 6.3(2026-08-07):loadFromFile 完成后重绑 UI(Binding 持的是旧 Variable*)
     connect(project_, &Project::loaded, this, [this](const QString&){
+        // ★ 6.5 收尾(2026-08-08 BugFix #1):先断开旧 binding,避免 connection 累积泄漏
+        Binding::unbind(ui.pressureLabel);
+        Binding::unbind(ui.temperatureLabel);
+        Binding::unbind(ui.speedLabel);
+        Binding::unbindEdit(ui.speedWriteEdit);
+
         // 重绑 3 个 label(Variable* 重建后,旧绑定死了)
         Binding::bind(ui.pressureLabel,    varMgr_->findVariable("Pressure"),    "压力(bar): %1");
         Binding::bind(ui.temperatureLabel, varMgr_->findVariable("Temperature"), "温度(℃): %1");
         Binding::bind(ui.speedLabel,       varMgr_->findVariable("Speed"),       "转速(rpm): %1");
         // ★ 阶段 6.3(2026-08-07):bindEdit 也持旧 Variable*,load 后必须重绑(否则 UI 改值写到死指针)
         Binding::bindEdit(ui.speedWriteEdit, varMgr_->findVariable("Speed"));
+
+        // ★ 6.5 收尾(2026-08-08 BugFix #2):auditTable 切工程时清空,避免老数据残留
+        ui.auditTable->setRowCount(0);
+
+        // ★ 6.5 收尾(2026-08-08):loadFromFile 后同步 modbus 用新 host/port
+        //   【背景】6.3 改了 host/port 字段,但没真正应用 — 切工程后 TCP 已切,modbus 还连着旧 IP
+        //   【改法】loaded 信号后从 tcp_ 拿 host/port,主动 connectTo 同步
+        //   【取舍】正在通讯时 loadFromFile 会短暂断连,但用户主动打开工程 = 期望切换,合理
+        if (tcp_ && modbus_) {
+            modbus_->connectTo(tcp_->host(), tcp_->port());
+            qDebug() << "[hmi] loadFromFile 同步 modbus →" << tcp_->host() << ":" << tcp_->port();
+        }
     });
 
     // ★ 阶段 6.3 FIX(2026-08-07):把 connect 提前到 project_ 实例化之后(loadFromFile 之前)
@@ -345,15 +364,36 @@ hmi::hmi(QWidget *parent)
     });
 
     // ★ 阶段 6.3(2026-08-07):启动默认读 default.json(开箱即用,失败静默回退)
-    if (!project_->loadFromFile("E:/qianwie/hmi/hmi/default.json")) {
-        qDebug() << "[hmi] default.json 加载失败(用代码默认配置)";
+    //   ★ 6.4 收尾(2026-08-08):用 applicationDirPath() 拼路径,挪工程位置也能找到
+    //   【背景】exe 在 x64/Debug/,default.json 在工程根——往上找 3 级,适配 MSBuild / 发布 / Qrc 各种布局
+    //   【取舍】找不到就静默回退到代码默认(hmi 构造函数手动 new 的 3 个 var + 2 checker),不弹错
+    //   【参照】Wqian 2026-08-08 review 6.4 修复 #1
+    QStringList defaultPathCandidates;
+    QDir appDir(QCoreApplication::applicationDirPath());
+    defaultPathCandidates << appDir.absoluteFilePath("default.json");
+    for (int i = 0; i < 3; ++i) {
+        if (appDir.cdUp()) defaultPathCandidates << appDir.absoluteFilePath("default.json");
+    }
+    QString defaultPath;
+    for (const QString& p : defaultPathCandidates) {
+        if (QFile::exists(p)) { defaultPath = p; break; }
+    }
+    if (!defaultPath.isEmpty()) {
+        if (project_->loadFromFile(defaultPath)) {
+            qDebug() << "[hmi] default.json 加载成功;path=" << defaultPath;
+        } else {
+            qDebug() << "[hmi] default.json 加载失败,用代码默认配置;path=" << defaultPath;
+        }
     } else {
-        qDebug() << "[hmi] default.json 加载成功";
+        qDebug() << "[hmi] default.json 找不到,候选路径:" << defaultPathCandidates;
     }
 
     // ★ 阶段 6.2(2026-08-07):UI 保存按钮 → onSaveClicked(手动 connect,
     //   因为 onSaveClicked 不符合 on_<objectName>_<signal>() 自动连接命名)
     connect(ui.saveButton, &QPushButton::clicked, this, &hmi::onSaveClicked);
+
+    // ★ 阶段 6.4(2026-08-08):UI 打开工程按钮 → onOpenClicked(对称 saveButton)
+    connect(ui.openButton, &QPushButton::clicked, this, &hmi::onOpenClicked);
 
 
 
@@ -805,14 +845,39 @@ void hmi::onSaveClicked() {
         QMessageBox::warning(this, "保存失败", "project_ 指针为空");
         return;
     }
-    // ★ 测试用固定路径,6.4 再换 QFileDialog
-    QString path = "E:/qianwie/hmi/hmi/test_save.json";
+    // ★ 阶段 6.4 加强(2026-08-08):QFileDialog 选保存路径(跟 openButton 对称)
+    //   【背景】6.2 写死到 test_save.json,6.4 改成用户选路径(实际工业 HMI 用法)
+    //   【取舍】getSaveFileName 跟 getOpenFileName 对称,过滤器一致
+    //   【参照】Wqian 2026-08-08 "把'保存工程'也改成 QFileDialog 选路径"
+    QString path = QFileDialog::getSaveFileName(
+        this, "保存工程", QString(),
+        "HMI 工程文件 (*.json);;所有文件 (*.*)");
+    if (path.isEmpty()) return;     // 用户按"取消"
     if (project_->saveToFile(path)) {
         QMessageBox::information(this, "保存成功",
-            "JSON 已写入:\n" + path + "\n\n请用记事本打开看内容");
+            "JSON 已写入:\n" + path +
+            "\n\n提示:用记事本打开可看 4 类配置(通讯/变量/报警/联动)");
     } else {
         QMessageBox::warning(this, "保存失败", "写文件失败,看 qDebug");
     }
+}
+
+// ★ 阶段 6.4(2026-08-08):UI 打开工程按钮槽函数 → 弹 QFileDialog 选 .json → loadFromFile
+//   【背景】6.4 把"打开工程"这条 UI 入口补上,跟 saveButton 对称
+//   【流程】QFileDialog → 选文件 → project_->loadFromFile()(6.3 已实现,失败走 loadError 弹窗)
+//   【取舍】启动默认读 default.json 已经在构造函数里(6.3 修 Bug #3 时写好的),此 slot 只供用户手动切工程
+//   【参照】Wqian 2026-08-08 阶段 6.4 拍板
+void hmi::onOpenClicked() {
+    if (!project_) {
+        QMessageBox::warning(this, "打开失败", "project_ 指针为空");
+        return;
+    }
+    // QFileDialog:父窗口/标题/默认路径(空=上次目录)/过滤器
+    QString path = QFileDialog::getOpenFileName(
+        this, "打开工程", QString(),
+        "HMI 工程文件 (*.json);;所有文件 (*.*)");
+    if (path.isEmpty()) return;     // 用户按"取消"
+    project_->loadFromFile(path);   // 6.3 已实现,失败由 loadError 信号弹窗
 }
 
 void hmi::onAlarmTriggered(const Alarm& a) {

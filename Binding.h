@@ -34,6 +34,14 @@ public:
     // 校验/转换失败:回滚(从变量重读)+ qDebug
     static void bindEdit(QLineEdit* edit, Variable* v);
 
+    // ★ 6.5 收尾(2026-08-08 BugFix #1):断开旧 binding,避免切工程时 connection 累积
+    //   【背景】bind/bindEdit 内部 connect(v, ..., label, ...) 每次调都新增 connection,旧的不 disconnect
+    //   【修法】loaded lambda 重绑前先 unbind,清空 widget 接收的 connection(Binding 唯一 source)
+    //   【取舍】unbindEdit 断 edit 全部 connection(textEdited/returnPressed/QShortcut/valueChanged),重绑后重新注册
+    //   【参照】Wqian 2026-08-08 review 6.4 修复 #1
+    static void unbind(QLabel* label);
+    static void unbindEdit(QLineEdit* edit);
+
 private:
     // 内部:bind 调一次立刻把当前 var 值推到 label(防启动空白 1-2 秒)
     static void applyNow(QLabel* label, Variable* v, const Formatter& fmt);
