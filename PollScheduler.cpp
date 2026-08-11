@@ -48,6 +48,39 @@ void PollScheduler::resetAll() {
     pending_.clear();     // 顺手清掉 pending reqId(旧的不会影响新的,清掉更干净)
 }
 
+// ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询策略 C —— UI 注册接口实现
+//   背景:UI 屏幕切换时调 add/removeActiveVariable(未来多屏幕)
+//   单窗口场景:hmi 构造后调 setAllActive(),所有 var 默认激活
+//   onTick 中检查:不在 activeVariables_ 且 alwaysPoll=false → 跳过这个 var
+void PollScheduler::addActiveVariable(Variable* v) {
+    if (v && !activeVariables_.contains(v)) {
+        activeVariables_.insert(v);
+        qDebug() << "[PollScheduler] addActiveVariable:" << v->name()
+                 << " active.size=" << activeVariables_.size();
+    }
+}
+
+void PollScheduler::removeActiveVariable(Variable* v) {
+    if (v && activeVariables_.remove(v)) {
+        qDebug() << "[PollScheduler] removeActiveVariable:" << v->name()
+                 << " active.size=" << activeVariables_.size();
+    }
+}
+
+void PollScheduler::setAllActive() {
+    // 单窗口场景初始化用:把所有 var 都加入激活集合
+    activeVariables_.clear();
+    for (Variable* v : varMgr_->allVariables()) {
+        activeVariables_.insert(v);
+    }
+    qDebug() << "[PollScheduler] setAllActive():" << activeVariables_.size() << "vars";
+}
+
+void PollScheduler::clearActiveVariables() {
+    activeVariables_.clear();
+    qDebug() << "[PollScheduler] clearActiveVariables()";
+}
+
 void PollScheduler::onTick() {
     // 2026-07-21 防御:modbus 未连就别 poll,避免连环弹错
     if (!modbus_->isConnected()) return;
@@ -81,6 +114,9 @@ void PollScheduler::onTick() {
     // nextPollAtMs[v] < now → 已到期,再发
     QList<Variable*> due;
     for (Variable* v : varMgr_->allVariables()) {
+        // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询 —— 不在 activeVariables_ 且 alwaysPoll=false → 跳过
+        //   alwaysPoll=true 的变量(报警关键)不受 activeVariables_ 限制 —— 报警不漏
+        if (!v->alwaysPoll() && !activeVariables_.contains(v)) continue;
         if (inFlight_.contains(v)) continue;  // ★ IMPROVE-A7:in-flight 用 QSet 替 -1
         qint64 next = nextPollAtMs_.value(v, 0);
         if (now >= next) {

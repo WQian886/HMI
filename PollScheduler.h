@@ -34,6 +34,15 @@ public:
 	//   让所有 Variable 下一帧 tick 立即可发(否则某些 Variable 可能永久卡 in-flight 永远不读)
 	void resetAll();
 
+	// ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询策略 C —— UI 注册基础设施
+	//   UI 在屏幕切换时调 addActiveVariable / removeActiveVariable
+	//   PollScheduler 保持当前显示变量集合,只 poll 这些
+	//   单窗口场景:hmi 构造后调 setAllActive() —— 所有 var 都默认激活
+	void addActiveVariable(Variable* v);
+	void removeActiveVariable(Variable* v);
+	void setAllActive();  // 初始化用:把所有 var 都加入激活集合
+	void clearActiveVariables();
+
 signals:
 	// ★ 阶段 5.3+ 修 Bug #3(2026-08-05):原始 PLC 值(死区过滤前)给 AlarmChecker 用
 	//   【背景】Variable.deadband_ 吞掉小波动,Checker 订阅 valueChanged 看不到
@@ -55,6 +64,10 @@ private:
     //   原代码 nextPollAtMs_[v] = -1 表示 in-flight,但 -1 跟"下次时间"语义混一起
     //   现在:nextPollAtMs_ 只存时间,inFlight_ 单独表达"请求已发,等 reply"
     QSet<Variable*> inFlight_;
+    // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询 —— 当前显示变量集合
+    //   UI 切屏幕时调 add/removeActiveVariable,此处 PollScheduler 保持
+    //   onTick 检查:v 不在集合且 alwaysPoll=false → 跳过
+    QSet<Variable*> activeVariables_;
     // ★ IMPROVE-A2(2026-07-29):quint32 防回绕(int 跑 2^31 次也会爆)
     quint32 nextReqId_ = 1;
     QHash<quint32, QList<Variable*>> pending_;         // reqId → 待更新变量列表(合并读用)

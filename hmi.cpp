@@ -247,6 +247,10 @@ hmi::hmi(QWidget *parent)
     // 阶段 3.3:启动定时轮询(替代 demoTimer 的 random 数据,真 modbus 读 PLC)
     pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);
     pollScheduler_->start();
+    // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询 —— 单窗口场景初始化
+    //   单窗口场景:所有 var 都在 UI 中,所以全部激活
+    //   未来多屏幕(主窗口 / 趋势页 / 报警页)可ef调 addActiveVariable/removeActiveVariable
+    pollScheduler_->setAllActive();
 
     // 阶段 4.3.0:启动写调度(与 PollScheduler 对称,处理 Variable.dirty_ → Modbus 写 PLC)
     writeScheduler_ = new WriteScheduler(varMgr_, modbus_, this);
