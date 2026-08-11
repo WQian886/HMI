@@ -116,6 +116,10 @@ public:
     void clearDirty()   { dirty_ = false; }
     bool isDirty() const { return dirty_; }
 
+    // ===== 阶段 6.x.1:分级轮询标记 —— 未来 PollScheduler 用此判断筛选 =====
+    bool alwaysPoll() const { return alwaysPoll_; }
+    void setAlwaysPoll(bool v) { alwaysPoll_ = v; }
+
     // ★ IMPROVE-A4(2026-07-29):写失败重试计数,达到上限清 dirty + 报警 + 标 Bad
     //   防止 PLC 故障时反复写同一变量刷屏 + 打满总线
     void incrementWriteFail() { writeFailCount_++; }
@@ -139,6 +143,10 @@ private:
 	int        pollIntervalMs_ = 1000;     // 阶段 3.3:轮询周期(ms),默认 1000
 	double     deadband_       = 0.0;      // 阶段 3.x:死区阈值,0 = 不启用;>0 = |新-旧| > deadband 才发信号
     bool        dirty_          = false;    // 阶段 4.3.0:写调度脏标志。true = 本地值待写 PLC
+    // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板):分级轮询策略 C —— 关键变量(报警/安全)标记
+    //   背景:Weintek 多变量场景最佳实践;未来阶段 7 可用于"筛选纵轮询"
+    //   取舍:默认 false 不影响现有配置;JSON 里加 "alwaysPoll": true 启用
+    bool        alwaysPoll_     = false;
     int         writeFailCount_ = 0;           // ★ IMPROVE-A4(2026-07-29):写失败累计,达上限触发报警
     QVariant    minValue_;                      // 阶段 4.x:范围下限(无效 QVariant = 未配)
     QVariant    maxValue_;                      // 阶段 4.x:范围上限

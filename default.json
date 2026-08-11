@@ -63,6 +63,7 @@
             "deadband": 0,
             "name": "Temperature",
             "poll_interval_ms": 1000,
+            "alwaysPoll": true,
             "range": {
                 "max": 200,
                 "min": -100

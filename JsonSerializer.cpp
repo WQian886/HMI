@@ -26,6 +26,8 @@ QJsonObject JsonSerializer::toJson(const Variable& v) {
 
     obj["deadband"]         = v.deadband();
     obj["poll_interval_ms"] = v.pollIntervalMs();
+    // ★ 阶段 6.x.1(2026-08-11):分级轮询 —— 写 JSON 时也输出 alwaysPoll
+    obj["alwaysPoll"] = v.alwaysPoll();
 
     // Range(Q2-B):对象形式,只在 hasRange() 为真时存
     if (v.hasRange()) {
@@ -115,6 +117,9 @@ Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj, VariableManag
     Variable* v = new Variable(name, address, dataType, access, static_cast<QObject*>(parent));
     v->setDeadband(obj["deadband"].toDouble());
     v->setPollIntervalMs(obj["poll_interval_ms"].toInt(1000));  // 默认 1000ms
+    // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板):分级轮询 —— 从 JSON 读 alwaysPoll
+    //   默认 false 兼容旧配置(没写 alwaysPoll 字段也能跳)
+    v->setAlwaysPoll(obj["alwaysPoll"].toBool(false));
 
     // Range(Q2-B):对象形式 {min, max}
     if (obj.contains("range")) {
