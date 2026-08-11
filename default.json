@@ -39,47 +39,49 @@
         "port": 502,
         "protocol": "modbus_tcp"
     },
-    "created_at": "2026-08-10T18:10:29",
+    "created_at": "2026-08-11T14:36:05",
     "project_name": "HMI Demo Project",
     "schema_version": "1.0",
-    "updated_at": "2026-08-10T18:10:29",
+    "updated_at": "2026-08-11T14:36:05",
     "variables": [
-        {
-            "access": "ReadWrite",
-            "address": 2,
-            "data_type": "UInt16",
-            "deadband": 0,
-            "name": "Speed",
-            "poll_interval_ms": 1000,
-            "range": {
-                "max": 65535,
-                "min": 0
-            }
-        },
         {
             "access": "ReadOnly",
             "address": 1,
+            "alwaysPoll": true,
             "data_type": "Int16",
             "deadband": 0,
             "name": "Temperature",
             "poll_interval_ms": 1000,
-            "alwaysPoll": true,
             "range": {
                 "max": 200,
                 "min": -100
             }
         },
-        {
-            "access": "ReadOnly",
-            "address": 0,
-            "data_type": "Int16",
-            "deadband": 0,
-            "name": "Pressure",
-            "poll_interval_ms": 1000,
-            "range": {
-                "max": 1000,
-                "min": -1000
-            }
+      {
+        "access": "ReadOnly",
+        "address": 0,
+        "alwaysPoll": true,
+        "data_type": "Int16",
+        "deadband": 0,
+        "name": "Pressure",
+        "poll_interval_ms": 1000,
+        "range": {
+          "max": 1000,
+          "min": -1000
         }
+      },
+      {
+        "access": "ReadWrite",
+        "address": 2,
+        "alwaysPoll": true,
+        "data_type": "UInt16",
+        "deadband": 0,
+        "name": "Speed",
+        "poll_interval_ms": 1000,
+        "range": {
+          "max": 65535,
+          "min": 0
+        }
+      }
     ]
 }
