@@ -1,63 +1,4 @@
 {
-    "schema_version": "1.0",
-    "project_name": "HMI Demo Project",
-    "communications": {
-        "host": "127.0.0.1",
-        "port": 502,
-        "protocol": "modbus_tcp",
-        "modbus": {
-            "timeout_ms": 3000,
-            "max_retries": 5,
-            "poll_interval_ms": 100
-        }
-    },
-    "variables": [
-        {
-            "name": "Pressure",
-            "address": 0,
-            "data_type": "Int16",
-            "access": "ReadOnly",
-            "deadband": 0,
-            "poll_interval_ms": 1000,
-            "range": {"min": -1000, "max": 1000}
-        },
-        {
-            "name": "Temperature",
-            "address": 1,
-            "data_type": "Int16",
-            "access": "ReadOnly",
-            "deadband": 0,
-            "poll_interval_ms": 1000,
-            "range": {"min": -100, "max": 200}
-        },
-        {
-            "name": "Speed",
-            "address": 2,
-            "data_type": "UInt16",
-            "access": "ReadWrite",
-            "deadband": 0,
-            "poll_interval_ms": 1000,
-            "range": {"min": 0, "max": 65535}
-        }
-    ],
-    "alarms": [
-        {
-            "name": "温度高",
-            "variable": "Temperature",
-            "level": "Critical",
-            "direction": "Above",
-            "threshold": 50,
-            "min_duration_ms": 500
-        },
-        {
-            "name": "温度低",
-            "variable": "Temperature",
-            "level": "Critical",
-            "direction": "Below",
-            "threshold": 10,
-            "min_duration_ms": 500
-        }
-    ],
     "actions": [
         {
             "alarm_name": "温度高",
@@ -68,6 +9,76 @@
             "alarm_name": "温度低",
             "variable": "Speed",
             "write_value": 0
+        }
+    ],
+    "alarms": [
+        {
+            "direction": "Above",
+            "level": "Critical",
+            "min_duration_ms": 50,
+            "name": "温度高",
+            "threshold": 50,
+            "variable": "Temperature"
+        },
+        {
+            "direction": "Below",
+            "level": "Critical",
+            "min_duration_ms": 50,
+            "name": "温度低",
+            "threshold": 10,
+            "variable": "Temperature"
+        }
+    ],
+    "communications": {
+        "host": "127.0.0.1",
+        "modbus": {
+            "max_retries": 5,
+            "poll_interval_ms": 100,
+            "timeout_ms": 3000
+        },
+        "port": 502,
+        "protocol": "modbus_tcp"
+    },
+    "created_at": "2026-08-10T18:10:29",
+    "project_name": "HMI Demo Project",
+    "schema_version": "1.0",
+    "updated_at": "2026-08-10T18:10:29",
+    "variables": [
+        {
+            "access": "ReadWrite",
+            "address": 2,
+            "data_type": "UInt16",
+            "deadband": 0,
+            "name": "Speed",
+            "poll_interval_ms": 1000,
+            "range": {
+                "max": 65535,
+                "min": 0
+            }
+        },
+        {
+            "access": "ReadOnly",
+            "address": 1,
+            "data_type": "Int16",
+            "deadband": 0,
+            "name": "Temperature",
+            "poll_interval_ms": 1000,
+            "range": {
+                "max": 200,
+                "min": -100
+            }
+        },
+        {
+            "access": "ReadOnly",
+            "address": 0,
+            "data_type": "Int16",
+            "deadband": 0,
+            "name": "Pressure",
+            "poll_interval_ms": 1000,
+            "range": {
+                "max": 1000,
+                "min": -1000
+            }
         }
     ]
 }
