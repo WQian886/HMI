@@ -1,0 +1,2616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能工厂学习计划 · 24 周 · Wqian</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --border: #e4e6eb;
+    --text: #1d1d1f;
+    --text-light: #6e6e73;
+    --accent: #0066cc;
+    --accent-light: #e3f2fd;
+    --phase1: #3b82f6;
+    --phase2: #10b981;
+    --phase3: #f59e0b;
+    --warning: #ef4444;
+    --success: #22c55e;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 30px 24px;
+  }
+
+  /* ===== Header ===== */
+  header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+    color: white;
+    padding: 40px 0;
+    margin-bottom: 30px;
+    border-radius: 12px;
+  }
+  header .container { padding: 0 40px; }
+  header h1 {
+    font-size: 32px;
+    margin-bottom: 10px;
+  }
+  header .subtitle {
+    font-size: 16px;
+    opacity: 0.9;
+    margin-bottom: 20px;
+  }
+  header .meta {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+    font-size: 14px;
+  }
+  header .meta span { opacity: 0.95; }
+  header .meta strong { font-weight: 600; }
+
+  /* ===== Phase cards ===== */
+  .phases-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  .phase-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    border-top: 4px solid var(--accent);
+  }
+  .phase-card.p1 { border-top-color: var(--phase1); }
+  .phase-card.p2 { border-top-color: var(--phase2); }
+  .phase-card.p3 { border-top-color: var(--phase3); }
+  .phase-card h3 {
+    font-size: 18px;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .phase-card .weeks {
+    font-size: 13px;
+    color: var(--text-light);
+    margin-bottom: 12px;
+  }
+  .phase-card p {
+    font-size: 14px;
+    color: var(--text-light);
+  }
+
+  /* ===== AI 协作 ===== */
+  .ai-guide {
+    background: linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%);
+    border: 2px solid #f59e0b;
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin-bottom: 30px;
+    page-break-inside: avoid;
+  }
+  .ai-guide h2 { color: #92400e; margin-bottom: 12px; }
+  .ai-guide h3 { color: #b45309; margin: 14px 0 8px; font-size: 17px; }
+  .ai-guide h4 { color: #b45309; margin: 10px 0 6px; font-size: 14px; }
+  .ai-guide ol, .ai-guide ul { padding-left: 22px; }
+  .ai-guide li { margin-bottom: 6px; }
+
+  .ai-collab {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-left: 4px solid #0ea5e9;
+    padding: 14px 18px;
+    border-radius: 4px;
+    margin-top: 14px;
+    font-size: 14px;
+  }
+  .ai-collab h4 {
+    color: #0369a1;
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+  .ai-collab .ai-tip {
+    background: white;
+    border: 1px dashed #93c5fd;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+  .ai-collab .ai-save {
+    display: inline-block;
+    background: #dcfce7;
+    color: #15803d;
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+
+  /* ===== Week section ===== */
+  .week {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+    page-break-inside: avoid;
+  }
+
+  .week-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .week-header h2 {
+    font-size: 22px;
+    color: var(--accent);
+  }
+
+  .week-tag {
+    font-size: 12px;
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
+  .week-tag.p1 { background: #dbeafe; color: var(--phase1); }
+  .week-tag.p2 { background: #d1fae5; color: var(--phase2); }
+  .week-tag.p3 { background: #fef3c7; color: var(--phase3); }
+
+  .week .theme {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    color: var(--text);
+  }
+
+  .week-section {
+    margin-bottom: 14px;
+  }
+  .week-section h4 {
+    font-size: 14px;
+    color: var(--text-light);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .week-section ul, .week-section ol {
+    padding-left: 22px;
+    color: var(--text);
+  }
+  .week-section li {
+    margin-bottom: 4px;
+  }
+  .week-section p {
+    color: var(--text);
+  }
+
+  .goal-box {
+    background: var(--accent-light);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+
+  .deliverable-box {
+    background: #f0fdf4;
+    border-left: 3px solid var(--success);
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+
+  .resources-box {
+    background: #fafafa;
+    border: 1px dashed var(--border);
+    padding: 12px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .resources-box a {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+  }
+  .resources-box a:hover { text-decoration: underline; }
+
+  .time-est {
+    display: inline-block;
+    background: #fff7ed;
+    color: #c2410c;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .selfcheck {
+    background: #fef9c3;
+    border-left: 3px solid #ca8a04;
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-top: 14px;
+    font-size: 14px;
+  }
+  .selfcheck h4 { color: #854d0e; margin-bottom: 6px; }
+
+  /* ===== Milestone ===== */
+  .milestone {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border: 2px solid #f59e0b;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 30px 0;
+    page-break-inside: avoid;
+  }
+  .milestone h3 {
+    color: #92400e;
+    margin-bottom: 8px;
+  }
+
+  /* ===== Footer ===== */
+  footer {
+    margin-top: 50px;
+    padding: 20px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    text-align: center;
+    color: var(--text-light);
+    font-size: 13px;
+  }
+
+  /* ===== Print ===== */
+  @media print {
+    body { background: white; font-size: 12px; }
+    .container { max-width: none; padding: 10px; margin-left: 0; }
+    .sidebar { display: none; }
+    header { background: white; color: black; border: 2px solid black; }
+    header h1, header .subtitle, header .meta { color: black; }
+    .week { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid; }
+    .week-header h2 { color: black; }
+  }
+
+  /* ===== Layout with sidebar ===== */
+  .layout {
+    display: flex;
+    max-width: 1400px;
+    margin: 0 auto;
+    gap: 24px;
+  }
+
+  .container {
+    flex: 1;
+    max-width: 1100px;
+    min-width: 0;
+  }
+
+  /* ===== Sidebar Navigation ===== */
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 20px;
+    align-self: flex-start;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    font-size: 13px;
+  }
+
+  .sidebar h3 {
+    font-size: 15px;
+    margin-bottom: 12px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+
+  .sidebar .progress-summary {
+    background: linear-gradient(135deg, #dbeafe 0%, #d1fae5 100%);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 14px;
+    text-align: center;
+  }
+  .sidebar .progress-summary .num {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .sidebar .progress-summary .label {
+    font-size: 11px;
+    color: var(--text-light);
+  }
+  .sidebar .progress-bar {
+    height: 6px;
+    background: white;
+    border-radius: 3px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .sidebar .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #10b981);
+    transition: width 0.3s;
+    width: 0%;
+  }
+
+  .nav-phase {
+    margin-bottom: 12px;
+  }
+
+  .nav-phase-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    user-select: none;
+    border-left: 3px solid;
+  }
+  .nav-phase.p1 .nav-phase-header { border-left-color: var(--phase1); }
+  .nav-phase.p2 .nav-phase-header { border-left-color: var(--phase2); }
+  .nav-phase.p3 .nav-phase-header { border-left-color: var(--phase3); }
+
+  .nav-phase-header:hover {
+    background: var(--accent-light);
+  }
+
+  .nav-phase-header .arrow {
+    transition: transform 0.2s;
+    font-size: 10px;
+  }
+  .nav-phase.collapsed .arrow {
+    transform: rotate(-90deg);
+  }
+
+  .nav-phase.collapsed .nav-week-list {
+    display: none;
+  }
+
+  .nav-phase-meta {
+    font-size: 11px;
+    color: var(--text-light);
+    font-weight: normal;
+    margin-left: 4px;
+  }
+
+  .nav-week-list {
+    list-style: none;
+    padding: 4px 0 4px 12px;
+    margin: 4px 0 0 0;
+    border-left: 1px dashed var(--border);
+  }
+
+  .nav-week-list li {
+    margin: 2px 0;
+  }
+
+  .nav-week-list a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--text);
+    font-size: 12px;
+    transition: background 0.15s;
+  }
+  .nav-week-list a:hover {
+    background: var(--accent-light);
+  }
+
+  .nav-week-list a.active {
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+  }
+
+  .nav-week-list .check {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-radius: 3px;
+    flex-shrink: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: white;
+    transition: all 0.15s;
+  }
+  .nav-week-list .check:hover {
+    border-color: var(--accent);
+  }
+  .nav-week-list .check.done {
+    background: var(--success);
+    border-color: var(--success);
+    color: white;
+  }
+  .nav-week-list .check.done::before {
+    content: "✓";
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .nav-week-list .week-num {
+    font-weight: 600;
+    color: var(--text-light);
+    min-width: 30px;
+  }
+  .nav-week-list a.active .week-num {
+    color: white;
+  }
+
+  .sidebar-footer {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-light);
+    text-align: center;
+  }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; }
+    .sidebar {
+      width: 100%;
+      position: static;
+      max-height: none;
+    }
+    .nav-week-list { columns: 2; }
+  }
+
+  /* ===== Scroll-to-top button ===== */
+  .to-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 40px;
+    height: 40px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 100;
+  }
+  .to-top.show { opacity: 1; }
+  .to-top:hover { background: #0055aa; }
+
+  /* ===== TOC ===== */
+  .toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 30px;
+  }
+  .toc h3 { margin-bottom: 12px; }
+  .toc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 6px;
+  }
+  .toc-grid a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-align: center;
+  }
+  .toc-grid a:hover {
+    background: var(--accent-light);
+  }
+  .toc-grid a.p1 { border-left: 3px solid var(--phase1); }
+  .toc-grid a.p2 { border-left: 3px solid var(--phase2); }
+  .toc-grid a.p3 { border-left: 3px solid var(--phase3); }
+
+  code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 13px;
+    margin: 8px 0;
+  }
+
+  /* ===== Progress tracker ===== */
+  .progress-tracker {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 30px;
+  }
+  .progress-tracker h3 { margin-bottom: 12px; }
+  .progress-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .progress-row:last-child { border-bottom: none; }
+  .progress-row .label { flex: 1; font-size: 14px; }
+  .progress-row .box {
+    width: 22px; height: 22px;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <h1>智能工厂学习计划 · 24 周路线图</h1>
+    <p class="subtitle">从 PLC + HMI 到"懂工业的开发者"——6 个月 / 每周 8-12 小时</p>
+    <div class="meta">
+      <span><strong>起点：</strong>已掌握 Qt + 6 层 HMI 框架</span>
+      <span><strong>目标：</strong>Level 3 数据采集 + Level 4 监控分析</span>
+      <span><strong>总时长：</strong>~200 小时（半年）</span>
+      <span><strong>成本：</strong>0 元（全免费工具）</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+
+<!-- ============ Sidebar Navigation ============ -->
+<aside class="sidebar">
+  <h3>🧭 导航</h3>
+
+  <div class="progress-summary">
+    <div><span class="num" id="doneCount">0</span><span class="num">/24</span></div>
+    <div class="label">完成周数</div>
+    <div class="progress-bar"><div class="progress-bar-fill" id="progressBarFill"></div></div>
+  </div>
+
+  <div class="nav-phase p1" data-phase="1">
+    <div class="nav-phase-header" onclick="togglePhase(this)">
+      <span>Phase 1 · 协议 <span class="nav-phase-meta">(8 周)</span></span>
+      <span class="arrow">▼</span>
+    </div>
+    <ul class="nav-week-list">
+      <li><a href="#w01"><span class="check" data-week="w01"></span><span class="week-num">W01</span><span>环境搭建</span></a></li>
+      <li><a href="#w02"><span class="check" data-week="w02"></span><span class="week-num">W02</span><span>OPC UA 概念</span></a></li>
+      <li><a href="#w03"><span class="check" data-week="w03"></span><span class="week-num">W03</span><span>Qt 集成</span></a></li>
+      <li><a href="#w04"><span class="check" data-week="w04"></span><span class="week-num">W04</span><span>订阅实战</span></a></li>
+      <li><a href="#w05"><span class="check" data-week="w05"></span><span class="week-num">W05</span><span>MQTT 深入</span></a></li>
+      <li><a href="#w06"><span class="check" data-week="w06"></span><span class="week-num">W06</span><span>桥接</span></a></li>
+      <li><a href="#w07"><span class="check" data-week="w07"></span><span class="week-num">W07</span><span>协议选型</span></a></li>
+      <li><a href="#w08"><span class="check" data-week="w08"></span><span class="week-num">W08</span><span>复盘</span></a></li>
+    </ul>
+  </div>
+
+  <div class="nav-phase p2" data-phase="2">
+    <div class="nav-phase-header" onclick="togglePhase(this)">
+      <span>Phase 2 · 数据 <span class="nav-phase-meta">(8 周)</span></span>
+      <span class="arrow">▼</span>
+    </div>
+    <ul class="nav-week-list">
+      <li><a href="#w09"><span class="check" data-week="w09"></span><span class="week-num">W09</span><span>InfluxDB</span></a></li>
+      <li><a href="#w10"><span class="check" data-week="w10"></span><span class="week-num">W10</span><span>Flux 查询</span></a></li>
+      <li><a href="#w11"><span class="check" data-week="w11"></span><span class="week-num">W11</span><span>Grafana</span></a></li>
+      <li><a href="#w12"><span class="check" data-week="w12"></span><span class="week-num">W12</span><span>大屏设计</span></a></li>
+      <li><a href="#w13"><span class="check" data-week="w13"></span><span class="week-num">W13</span><span>报警接入</span></a></li>
+      <li><a href="#w14"><span class="check" data-week="w14"></span><span class="week-num">W14</span><span>历史策略</span></a></li>
+      <li><a href="#w15"><span class="check" data-week="w15"></span><span class="week-num">W15</span><span>集成 Grafana</span></a></li>
+      <li><a href="#w16"><span class="check" data-week="w16"></span><span class="week-num">W16</span><span>复盘</span></a></li>
+    </ul>
+  </div>
+
+  <div class="nav-phase p3" data-phase="3">
+    <div class="nav-phase-header" onclick="togglePhase(this)">
+      <span>Phase 3 · 边缘 <span class="nav-phase-meta">(8 周)</span></span>
+      <span class="arrow">▼</span>
+    </div>
+    <ul class="nav-week-list">
+      <li><a href="#w17"><span class="check" data-week="w17"></span><span class="week-num">W17</span><span>边缘概念</span></a></li>
+      <li><a href="#w18"><span class="check" data-week="w18"></span><span class="week-num">W18</span><span>Python</span></a></li>
+      <li><a href="#w19"><span class="check" data-week="w19"></span><span class="week-num">W19</span><span>异常检测</span></a></li>
+      <li><a href="#w20"><span class="check" data-week="w20"></span><span class="week-num">W20</span><span>MES 概念</span></a></li>
+      <li><a href="#w21"><span class="check" data-week="w21"></span><span class="week-num">W21</span><span>自动报表</span></a></li>
+      <li><a href="#w22"><span class="check" data-week="w22"></span><span class="week-num">W22</span><span>24h 长跑</span></a></li>
+      <li><a href="#w23"><span class="check" data-week="w23"></span><span class="week-num">W23</span><span>性能优化</span></a></li>
+      <li><a href="#w24"><span class="check" data-week="w24"></span><span class="week-num">W24</span><span>复盘规划</span></a></li>
+    </ul>
+  </div>
+
+  <div class="nav-phase">
+    <div class="nav-phase-header" onclick="togglePhase(this)" style="border-left-color:#f59e0b">
+      <span>🎯 快速跳转 <span class="nav-phase-meta">附录</span></span>
+      <span class="arrow">▼</span>
+    </div>
+    <ul class="nav-week-list">
+      <li><a href="#ai-guide"><span class="week-num">📖</span><span>AI 指南</span></a></li>
+      <li><a href="#top"><span class="week-num">⬆</span><span>回到顶部</span></a></li>
+    </ul>
+  </div>
+
+  <div class="sidebar-footer">
+    💾 进度自动保存到浏览器
+  </div>
+</aside>
+
+<!-- ============ Main Content ============ -->
+<div class="container">
+
+  <!-- ============ Phase Overview ============ -->
+  <div class="phases-overview">
+    <div class="phase-card p1">
+      <h3>Phase 1 · 协议基础</h3>
+      <div class="weeks">Week 1 ~ 8 · 80h</div>
+      <p>OPC UA + MQTT 入门，搭出第一个"OPC UA 客户端 + Qt 订阅" 的最小系统。目标：从"懂 Modbus" 到"懂工业通用协议"。</p>
+    </div>
+    <div class="phase-card p2">
+      <h3>Phase 2 · 数据可视化</h3>
+      <div class="weeks">Week 9 ~ 16 · 80h</div>
+      <p>InfluxDB + Grafana，搭出第一个能看趋势 + 大屏 + 报警的系统。目标：从"控件级 UI" 到"数据级可视化"。</p>
+    </div>
+    <div class="phase-card p3">
+      <h3>Phase 3 · 边缘 + 分析</h3>
+      <div class="weeks">Week 17 ~ 24 · 80h</div>
+      <p>Python + 异常检测 + 报表自动生成，搭出第一个"能自我告警"的边缘网关。目标：从"展示"到"洞察"。</p>
+    </div>
+  </div>
+
+  <!-- ============ AI 协作指南 ============ -->
+  <div class="ai-guide">
+    <h2>🤖 AI 协作使用指南 · 先读这一节</h2>
+    <p><strong>核心理念：</strong>AI 是你的<strong>结对编程伙伴 + 私人教练 + 代码审查员</strong>，不是"答案机器"。<br>
+       错误用法："帮我写完这个" → 正确用法："<strong>教我完成这个</strong>"。<br>
+       每周学习时间因此从 8-12 小时压缩到 <strong>5-8 小时</strong>（AI 节省 30-40% 时间），省下来的时间用来做 AI 帮你出的题。</p>
+
+  <h3>📌 5 种 AI 使用模式</h3>
+  <ol>
+    <li><strong>🎯 出题官</strong>—— 让 AI 出 3-5 道题，<em>先做题再看答案</em>。比看书更高效，比看视频更聚焦。</li>
+    <li><strong>🧑‍🏫 教练</strong>—— 卡住时让 AI 用<strong>苏格拉底式提问</strong>引导，<em>不直接给答案</em>。</li>
+    <li><strong>🔍 审查员</strong>—— 把代码贴给 AI，从<em>正确性 / 可读性 / 性能 / 可维护性</em>4 维度打分。</li>
+    <li><strong>🎭 模拟器</strong>—— 让 AI 扮 OPC UA 服务器 / 面试官 / 用户 / 客户，<em>无成本练习</em>。</li>
+    <li><strong>🌉 概念翻译器</strong>—— 让 AI 用你熟悉的工业场景类比解释陌生概念（如把"微服务"比作"车间流水线"）。</li>
+  </ol>
+
+  <h3>🚫 红线（不该用 AI 的场景）</h3>
+  <ul>
+    <li>❌ <strong>跳过基础练习</strong>直接让 AI 写完 —— 练习是为了你会，不是为了"有"</li>
+    <li>❌ <strong>盲信 AI 输出</strong> —— AI 会编造 API / 编造协议细节（最常错的是版本号和参数），必须查文档</li>
+    <li>❌ <strong>用 AI 跳过调试</strong> —— 调试是核心能力，AI 帮你找 bug ≠ 你会调试</li>
+    <li>❌ <strong>用 AI 写关键控制代码</strong>（急停 / 安全联锁） —— 必须自己懂每一行</li>
+  </ul>
+
+  <h3>✅ 评估 AI 输出的 3 问</h3>
+  <ol>
+    <li>这段代码我能<strong>逐行解释</strong>给同事听吗？</li>
+    <li>跟<strong>官方文档</strong>对得上吗？（不放心就查）</li>
+    <li><strong>边界情况</strong>处理了吗？（空指针 / 超时 / 异常输入 / 资源释放）</li>
+  </ol>
+
+  <h3>📋 每周使用 AI 的固定流程（15 分钟）</h3>
+  <ol>
+    <li><strong>周初</strong>（5 分钟）：让 AI 出本周主题的 3-5 道题，存起来周末做</li>
+    <li><strong>周中</strong>（按需）：遇到不会的，先查文档 → 搜错误 → 仍不懂才问 AI（且要"<strong>教我</strong>"不是"<strong>给我答案</strong>"）</li>
+    <li><strong>周末</strong>（10 分钟）：把本周交付物代码贴给 AI 做 code review，记录 Top 3 改进点</li>
+  </ol>
+
+  <h3>🎁 配套资源</h3>
+  <p>见 <a href="AI_提示词库.html" style="color: #b45309;"><strong>AI_提示词库.html</strong></a> —— 8 大类 25+ 个<strong>可直接复制的提示词模板</strong>（出题 / 教练 / 审查 / 模拟 / 翻译 / 调试 / 面试 / 重构）。</p>
+
+  <h3>💡 每个阶段 AI 使用侧重不同</h3>
+  <ul>
+    <li><strong>Phase 1（协议）</strong>：多用"模拟器"（让 AI 扮 OPC UA 服务器给你喂数据）+ "教练"（调试 IPC/线程）</li>
+    <li><strong>Phase 2（数据）</strong>：多用"翻译器"（解释 InfluxDB / Flux 概念）+ "出题官"（Flux 查询练习）</li>
+    <li><strong>Phase 3（边缘）</strong>：多用"审查员"（你的 Python 脚本）+ "模拟器"（扮用户反馈报表格式）</li>
+  </ul>
+  </div>
+
+  <!-- ============ TOC ============ -->
+  <div class="toc">
+    <h3>📋 目录 · 每周快速跳转</h3>
+    <div class="toc-grid">
+      <a href="#w01" class="p1">W01 环境</a>
+      <a href="#w02" class="p1">W02 概念</a>
+      <a href="#w03" class="p1">W03 集成</a>
+      <a href="#w04" class="p1">W04 订阅</a>
+      <a href="#w05" class="p1">W05 MQTT</a>
+      <a href="#w06" class="p1">W06 桥接</a>
+      <a href="#w07" class="p1">W07 选型</a>
+      <a href="#w08" class="p1">W08 复盘</a>
+      <a href="#w09" class="p2">W09 Influx</a>
+      <a href="#w10" class="p2">W10 查询</a>
+      <a href="#w11" class="p2">W11 Grafana</a>
+      <a href="#w12" class="p2">W12 大屏</a>
+      <a href="#w13" class="p2">W13 报警</a>
+      <a href="#w14" class="p2">W14 历史</a>
+      <a href="#w15" class="p2">W15 集成</a>
+      <a href="#w16" class="p2">W16 复盘</a>
+      <a href="#w17" class="p3">W17 边缘</a>
+      <a href="#w18" class="p3">W18 Python</a>
+      <a href="#w19" class="p3">W19 检测</a>
+      <a href="#w20" class="p3">W20 MES</a>
+      <a href="#w21" class="p3">W21 报表</a>
+      <a href="#w22" class="p3">W22 长跑</a>
+      <a href="#w23" class="p3">W23 优化</a>
+      <a href="#w24" class="p3">W24 复盘</a>
+    </div>
+  </div>
+
+  <!-- ============ Progress Tracker ============ -->
+  <div class="progress-tracker">
+    <h3>✅ 进度追踪 · 每周打勾</h3>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 1 · 环境搭建，跑通 3 个 demo</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 2 · OPC UA 概念扫盲</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 3 · Qt 集成 open62541</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 4 · Qt OPC UA 订阅实战</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 5 · MQTT 深入</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 6 · OPC UA → MQTT 桥接</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 7 · 协议选型判断</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 8 · Phase 1 复盘</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 9 · InfluxDB 入门</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 10 · Flux 查询</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 11 · Grafana 入门</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 12 · 工业大屏设计</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 13 · 报警系统接入</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 14 · 历史数据策略</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 15 · Qt 集成 Grafana</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 16 · Phase 2 复盘</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 17 · 边缘计算概念</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 18 · Python 数据分析</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 19 · 异常检测</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 20 · MES 概念</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 21 · 自动报表</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 22 · 24h 长跑测试</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 23 · 性能优化</span></div>
+    <div class="progress-row"><div class="box"></div><span class="label">Week 24 · Phase 3 复盘 + 规划下一阶段</span></div>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- =================== PHASE 1 =============================== -->
+  <!-- =========================================================== -->
+
+  <section id="w01" class="week">
+    <div class="week-header">
+      <h2>Week 1 · 环境搭建</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：装好 4 个工具，跑通 3 个独立 demo</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>本周零代码，纯装软件 + 跑通 demo。结束这周你应该能在自己电脑上看到 3 个工具都在运行。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>理解 OPC UA 是什么（5 分钟概念，剩余时间动手）</li>
+        <li>理解 MQTT 是什么（5 分钟概念，剩余时间动手）</li>
+        <li>理解 InfluxDB 是什么（暂时只装，先不深入）</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>下载安装 <strong>Prosys OPC UA Simulation Server</strong>（Windows 桌面版免费）：<a href="https://prosysopc.com/products/opc-ua-simulation-server/">prosysopc.com</a></li>
+        <li>下载安装 <strong>Mosquitto MQTT Broker</strong>（Windows 安装包）：<a href="https://mosquitto.org/download/">mosquitto.org</a></li>
+        <li>下载安装 <strong>InfluxDB OSS v2</strong>：<a href="https://docs.influxdata.com/influxdb/v2/install/">docs.influxdata.com</a></li>
+        <li>下载安装 <strong>Grafana OSS</strong>：<a href="https://grafana.com/grafana/download">grafana.com</a></li>
+        <li>启动 Prosys，默认端口 53520，浏览器访问 <code>opc.tcp://localhost:53520</code> 验证</li>
+        <li>启动 Mosquitto，默认端口 1883，命令行 <code>mosquitto_sub -h localhost -t test</code> 验证</li>
+        <li>浏览器访问 <code>http://localhost:8086</code>（InfluxDB UI）</li>
+        <li>浏览器访问 <code>http://localhost:3000</code>（Grafana，默认账号 admin/admin）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>4 张截图（Prosys 客户端 / Mosquitto 终端 / InfluxDB UI / Grafana 登录页），存到一个文件夹命名为 <code>week01_screenshots/</code>。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>OPC UA 5 分钟简介：<a href="https://prosysopc.com/blog/opc-ua-in-5-minutes/">prosysopc.com/blog/opc-ua-in-5-minutes</a></li>
+        <li>MQTT 5 分钟简介：<a href="https://www.hivemq.com/blog/mqtt-essentials-part-1-introducing-mqtt/">hivemq.com</a></li>
+        <li>B 站搜 "OPC UA 入门" 找 1 个看着顺眼的视频扫一遍</li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 6-8 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>能在命令行 <code>mosquitto_pub -h localhost -t test -m "hello"</code> 发一条消息，另一个终端 <code>mosquitto_sub</code> 收到吗？</li>
+        <li>Prosys 启动后，能不能在它的 UI 里看到几个模拟节点（如 <code>Sinusoid</code>、<code>Counter</code>）？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 1）</h4>
+      <div class="ai-tip"><strong>🎯 出题官：</strong>让 AI 扮新手给你出题：
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我刚装好 Prosys + Mosquitto + InfluxDB + Grafana。我是个 PLC 电工 + Qt 老手，但没碰过工业协议。出 5 道判断题 + 2 道动手题测试我对这些工具的理解，由易到难。<strong>不要直接给答案</strong>，先给题目。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎭 模拟器：</strong>让 AI 扮 Prosys 服务器：
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演 OPC UA 服务器。给我 3 个假节点描述（节点名、数据类型、当前值）。我会用 UA Expert 连你并尝试读取，你判断我读得对不对。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时（不用挨个试装软件的坑）</span>
+    </div>
+  </section>
+
+  <section id="w02" class="week">
+    <div class="week-header">
+      <h2>Week 2 · OPC UA 概念扫盲</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：把 OPC UA 的核心概念搞懂——节点、属性、订阅、安全</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>不写代码，但要能在白板上画出 OPC UA 信息模型。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>OPC UA 信息模型：<strong>节点（Node）+ 引用（Reference）</strong>，万物皆节点</li>
+        <li>节点类型：Object、Variable、Method、ObjectType、VariableType</li>
+        <li>Variable 节点的属性：Value、DataType、ValueRank、AccessLevel</li>
+        <li>地址空间（AddressSpace）—— 树形结构，每个节点有 <code>NodeId</code>（如 <code>ns=1;s=Sinusoid</code>）</li>
+        <li>三种通信模式：Read/Write（请求-响应）、Subscribe（发布-订阅）、Method 调用</li>
+        <li>安全概念：None / Sign / SignAndEncrypt，证书管理</li>
+        <li>跟 Modbus 对比：Modbus 是"寄存器地址"思维，OPC UA 是"对象模型"思维</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>读完 <strong>Prosys OPC UA Tutorial Part 1-3</strong>：<a href="https://prosysopc.com/blog/opc-ua-tutorial/">prosysopc.com/blog/opc-ua-tutorial</a></li>
+        <li>打开 Prosopec 官方客户端 <strong>UA Expert</strong>（免费），连接你的 Prosys Server</li>
+        <li>在 UA Expert 里浏览地址空间，找到 <code>Objects/Simulation/Sinusoid</code> 节点</li>
+        <li>右键节点 → Monitor → 看 Value 怎么变化</li>
+        <li>尝试 Read 节点 → 看返回的 DataType、ValueRank、AccessLevel</li>
+        <li>画一张图：把你看到的节点结构画下来（树形），标注每个节点的 NodeId</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张手绘或工具画的 OPC UA 地址空间图 + 1 段笔记（200 字总结 OPC UA 跟 Modbus 的 3 个本质区别）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Prosys OPC UA Tutorial（必读 Part 1-3）：<a href="https://prosysopc.com/blog/opc-ua-tutorial/">prosysopc.com/blog/opc-ua-tutorial</a></li>
+        <li>UA Expert 下载（免费客户端）：<a href="https://www.unified-automation.com/products/development-tools/uaexpert.html">unified-automation.com</a></li>
+        <li>OPC UA 规范官方文档（选读）：<a href="https://reference.opcfoundation.org/">reference.opcfoundation.org</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>能解释什么是 <code>NodeId</code>？<code>ns=1;s=Sinusoid</code> 各部分含义？</li>
+        <li>Variable 节点的 Value、DataType、AccessLevel 分别表示什么？</li>
+        <li>OPC UA 跟 Modbus 在"数据建模方式"上的本质区别是什么？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 2）</h4>
+      <div class="ai-tip"><strong>🌉 概念翻译器：</strong>用工业场景类比解释 OPC UA：
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我是 PLC 电工出身。请用 1 个我熟悉的工业场景（如车间 / 工位 / 仓库）类比 OPC UA 的"节点 / 引用 / 地址空间"。要求：1) 类比必须真懂 PLC 的人也能秒懂；2) 不要超过 300 字；3) 末尾给 1 个"反例"说明类比的局限。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题官：</strong>测试你对 OPC UA 信息模型的理解：
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我刚读完 OPC UA Tutorial Part 1-3。出 5 道概念题：2 道填空（NodeId 格式、节点类型）、2 道对比（OPC UA vs Modbus 3 个差异）、1 道画图题（地址空间树形结构）。<strong>不要给答案</strong>。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（不用看 3 篇长文就能抓住核心）</span>
+    </div>
+  </section>
+
+  <section id="w03" class="week">
+    <div class="week-header">
+      <h2>Week 3 · Qt 集成 open62541</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：在你的 Qt 项目里跑通 OPC UA 客户端最小 demo</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>在你的 Qt 工程里加 OPC UA 客户端能力，能连接到 Prosys 并读取 1 个节点。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li><strong>open62541</strong>：C 语言写的 OPC UA 库，开源、轻量、可嵌入</li>
+        <li>Qt 项目集成 C 库的两种方式：源码编译 vs 动态库</li>
+        <li>CMake <code>add_subdirectory</code> + <code>target_link_libraries</code> 基础</li>
+        <li>OPC UA 客户端基本流程：<code>UA_Client_connect → UA_Client_readValue → UA_Client_disconnect</code></li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>克隆 open62541：<code>git clone https://github.com/open62541/open62541.git</code></li>
+        <li>用 CMake 编译 open62541（生成 <code>open62541.c</code> / <code>.h</code> + 可选动态库）</li>
+        <li>在你的 HMI 项目 <code>CMakeLists.txt</code> 里加：
+          <pre>add_subdirectory(third_party/open62541)
+target_link_libraries(hmi PRIVATE open62541)</pre>
+        </li>
+        <li>新建 <code>OpcUaClient.h/.cpp</code>，封装成类似你 <code>ModbusMaster</code> 的 Qt 类</li>
+        <li>实现 <code>connectTo(endpoint)</code> + <code>readNode(nodeId, callback)</code></li>
+        <li>在 <code>hmi.cpp</code> 里加按钮"读 OPC UA"，读 <code>Sinusoid</code> 的值打到 qDebug</li>
+        <li>（HMI_PLAN 里规划的：这一步接续你已有的 6 层架构，不推倒重来）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个能在你 Qt 项目里跑的 OPC UA 读取 demo，qDebug 输出节点值 + 截图。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>open62541 官方文档：<a href="https://open62541.org/">open62541.org</a></li>
+        <li>open62541 教程（推荐）：<a href="https://open62541.org/docs/tutorial.html">open62541.org/docs/tutorial.html</a></li>
+        <li>open62541 示例代码：<code>examples/tutorial_client.c</code></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 10-12 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>你新建的 <code>OpcUaClient</code> 跟你已有的 <code>ModbusMaster</code> 在 API 风格上是不是很像？（这是适配器模式）</li>
+        <li>open62541 的 <code>UA_Client_readValue</code> 返回什么类型？怎么转成 Qt 的 QVariant？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 3）</h4>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（编译报错时）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我用 Qt 6.8 + CMake 集成 open62541，遇到报错：[粘贴报错]。我已尝试：1) [你的尝试]；2) [你的尝试]。<strong>不要直接给答案</strong>，用苏格拉底式提问引导我：先问我 2 个澄清问题（CMake 怎么写的、库是源码还是预编译）。</pre>
+      </div>
+      <div class="ai-tip"><strong>🔍 审查员（集成后）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演严格的 C 库集成专家，审查我的 open62541 集成：[粘贴 CMakeLists.txt + OpcUaClient.h 关键代码]。从这 4 维度打分（1-10）：CMake 写法、资源释放、错误处理、Qt 命名规范。先说 Top 3 问题，再给具体修复建议。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：4 小时（编译问题是最耗时的，AI 帮你绕坑）</span>
+    </div>
+  </section>
+
+  <section id="w04" class="week">
+    <div class="week-header">
+      <h2>Week 4 · Qt OPC UA 订阅实战</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：写真正的订阅——值变了自动通知到 Qt 槽</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>OPC UA 节点变化时，Qt 自动收到信号更新 UI——这正是工业实时显示的核心场景。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>OPC UA <strong>订阅（Subscription）</strong>：跟 Modbus 轮询相反，服务器主动推</li>
+        <li>MonitoredItem + PublishingInterval + SamplingInterval</li>
+        <li>open62541 的订阅回调 <code>UA_Client_DataChangeNotificationCallback</code></li>
+        <li>把 C 风格回调包装成 Qt 信号（用 <code>QMetaObject::invokeMethod</code> 跨线程）</li>
+        <li>对比：你 HMI 项目里的 <code>PollScheduler</code> 是"客户端主动轮询"，订阅是"服务器主动推送"</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>扩展你的 <code>OpcUaClient</code>：加 <code>subscribe(nodeIds, intervalMs)</code> 方法</li>
+        <li>在 <code>hmi.cpp</code> 里订阅 Prosys 的 3 个节点（<code>Sinusoid</code>、<code>Counter</code>、<code>Square</code>）</li>
+        <li>把这 3 个节点值映射到 3 个 QLabel，跟你 HMI 里的 <code>Binding::bind</code> 联动</li>
+        <li>打开 Prosys UI 改 Sinusoid 的频率，观察 QLabel 是否实时变化</li>
+        <li>（进阶）尝试同时挂掉 Prosys，重启，Qt 端能否自动重连？用 qDebug 验证</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个能实时显示 OPC UA 订阅数据的 Qt 窗口 + 1 段 30 秒的录屏。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>open62541 订阅教程：<a href="https://open62541.org/docs/tutorial.html#subscriptions">open62541.org/docs/tutorial.html</a></li>
+        <li>OPC UA Pub/Sub 概念：<a href="https://prosysopc.com/blog/opc-ua-part-6-pubsub/">prosysopc.com/blog/opc-ua-part-6-pubsub</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 10-12 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>OPC UA 订阅 vs Modbus 轮询，各自适用什么场景？</li>
+        <li>你的 <code>OpcUaClient</code> 现在能不能跑通"断线重连"？这是不是 F2 目标？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 4）</h4>
+      <div class="ai-tip"><strong>🎭 模拟器（多线程边界条件）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演严格的 Qt 线程模型考试官。我的 OpcUaClient 在 open62541 C 回调里收到数据，要转发到 Qt 主线程的 signal（绑 UI）。出 3 道多线程题测我：1) 为什么不能直接在 C 回调里 emit；2) QMetaObject::invokeMethod 该用 QueuedConnection 还是 DirectConnection；3) 怎么测"回调被调用时 vPtr 已经被 delete"。</pre>
+      </div>
+      <div class="ai-tip"><strong>🔍 审查员（断线重连）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演熟悉工业协议的 Qt 架构师。审查我的 OpcUaClient::onDisconnected 重连实现：[粘贴代码]。重点看：1) 重连是否有限流（防止网络抖动时狂连）；2) 是否会泄漏订阅句柄；3) 跟 ModbusMaster 的重连思路有什么异同。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（线程问题调试极耗时）</span>
+    </div>
+  </section>
+
+  <section id="w05" class="week">
+    <div class="week-header">
+      <h2>Week 5 · MQTT 深入</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：把 MQTT 玩明白——主题、QoS、保留消息</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>能用 Qt MQTT 模块做一个能发布+订阅的 demo，理解 MQTT 设计哲学。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>MQTT 设计目标：低带宽、不稳定网络、电池供电设备</li>
+        <li><strong>三大概念</strong>：Broker、Topic、Publish/Subscribe</li>
+        <li>Topic 命名规范（工厂场景）：<code>factory/area1/line3/temperature</code></li>
+        <li>QoS 0/1/2：at most once / at least once / exactly once</li>
+        <li>Retain 消息：最后一个值会被新订阅者立即收到</li>
+        <li>Last Will and Testament（LWT）：设备意外掉线通知</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>读完 <strong>HiveMQ MQTT Essentials Part 1-5</strong>：<a href="https://www.hivemq.com/mqtt-essentials/">hivemq.com/mqtt-essentials</a></li>
+        <li>命令行练：
+    <pre>mosquitto_sub -h localhost -t 'factory/#' -v
+mosquitto_pub -h localhost -t 'factory/area1/temp' -m '25.5'
+mosquitto_pub -h localhost -t 'factory/area1/temp' -m '26.0' -r</pre>
+        </li>
+        <li>在你的 Qt 工程里加 <code>Qt6::Mqtt</code> 模块依赖</li>
+        <li>写一个 <code>MqttPublisher</code>：每 1 秒发一次模拟温度数据到 <code>factory/area1/temp</code></li>
+        <li>写一个 <code>MqttSubscriber</code>：订阅 <code>factory/#</code>，把收到的消息打到 UI</li>
+        <li>测 QoS 0/1/2 行为差异：故意杀掉 publisher，看 subscriber 多久收到 LWT</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个 Qt MQTT 收发 demo（订阅界面 + QoS 选择下拉框）+ 1 张 QoS 行为对比笔记。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>HiveMQ MQTT Essentials（必读）：<a href="https://www.hivemq.com/mqtt-essentials/">hivemq.com/mqtt-essentials</a></li>
+        <li>Qt MQTT 官方文档：<a href="https://doc.qt.io/qt-6/qtmqtt-index.html">doc.qt.io/qt-6/qtmqtt-index.html</a></li>
+        <li>EMQX 中文文档（国内最常用 broker）：<a href="https://www.emqx.io/docs/zh/">emqx.io/docs/zh</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>QoS 1 和 QoS 2 的区别是什么？工业场景一般用哪个？</li>
+        <li>Retain 消息在 PLC 掉电重启后能恢复最后的值吗？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 5）</h4>
+      <div class="ai-tip"><strong>🎯 出题官（QoS 行为对比）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我刚装好 Mosquitto + Qt MQTT。出 6 道场景题测我 QoS 选择：1) 报警推送该用 0/1/2？2) 设备状态上报该用哪个？3) 控制指令下发该用哪个？每题给出具体场景，<strong>不要给答案</strong>，让我选。</pre>
+      </div>
+      <div class="ai-tip"><strong>🌉 概念翻译器：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我是 PLC + 工业总线出身。把 MQTT 的 Topic、Broker、QoS、LWT 这 4 个概念，分别对应到工业里我熟的东西（如 Topic = 测点路径 / QoS = 通讯可靠性等级）。用 200 字 + 1 张对照表说清楚。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w06" class="week">
+    <div class="week-header">
+      <h2>Week 6 · OPC UA → MQTT 桥接</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：把第一周装的工具串起来——一个真实的工业数据流</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>搭出你第一个"边缘网关"雏形：OPC UA 服务器 → 你的 Qt → MQTT → 另一个 MQTT 订阅者。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li><strong>数据桥接模式</strong>：工业现场典型数据流</li>
+        <li>JSON 序列化在桥接中的作用（你已有 <code>JsonSerializer</code> 的复用机会）</li>
+        <li>Topic 命名设计（按工厂 → 车间 → 设备 → 测点的层级）</li>
+        <li>Payload 格式：JSON Schema 的简化版（key/value 对）</li>
+        <li>时间戳统一：用 ISO8601，避免时区混乱</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>用 Week 4 的 <code>OpcUaClient</code> 订阅 Prosys 的 3 个节点</li>
+        <li>节点变化时，构造 JSON：<code>{"name": "Sinusoid", "value": 0.85, "timestamp": "2026-..."}</code></li>
+        <li>通过 <code>MqttPublisher</code> 发到 <code>factory/sim/sensor/Sinusoid</code></li>
+        <li>开 3 个终端同时订阅：
+    <pre>mosquitto_sub -h localhost -t 'factory/#' -v  # 全部
+mosquitto_sub -h localhost -t 'factory/sim/sensor/+'  # 所有传感器
+mosquitto_sub -h localhost -t 'factory/sim/sensor/Sinusoid'  # 单个</pre>
+        </li>
+        <li>在 Prosys UI 里改节点值，观察 MQTT 消息是否实时到达</li>
+        <li>关掉 Prosys 一会儿，再打开，看消息是否恢复（测试 LWT）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个截图或录屏：Prosys UI 改值 → 多个终端同时收到 MQTT 消息的画面 + 1 段技术博客草稿（500 字）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Sparkplug B 规范（工业 MQTT 增强版）：<a href="https://sparkplug.eclipse.org/">sparkplug.eclipse.org</a></li>
+        <li>HiveMQ Sparkplug 介绍：<a href="https://www.hivemq.com/sparkplug/">hivemq.com/sparkplug</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 10-12 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>你这个"边缘网关"现在能 24h 跑吗？要不要先放一晚上看看？</li>
+        <li>如果 MQTT 消息格式将来要改（比如加 quality 字段），代码要改几个地方？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 6）</h4>
+      <div class="ai-tip"><strong>🔍 审查员（架构）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演工业 IoT 架构师。审查我的"OPC UA → MQTT"桥接：[粘贴代码 + Topic 设计 + JSON 格式]。重点看：1) Topic 命名是否预留扩展（加新传感器要改多少地方）；2) JSON schema 是否稳定；3) 错值重传场景怎么处理。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎭 模拟器（断网测试）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演测试工程师。我现在要把 Prosys 故意关掉 1 分钟，再开起来。你扮演 OPC UA 服务器的角色，写出这 1 分钟里我的 Qt 端应该看到的 4 个关键日志（断连 / 重连 / 重新订阅 / 数据恢复）。我对一下我的日志，看顺序对不对。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w07" class="week">
+    <div class="week-header">
+      <h2>Week 7 · 协议选型判断</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：理解"什么时候用哪个协议"——工业现场不是只有 OPC UA</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>能在同事/客户面前说出"这个场景该用 X 协议"，而不是只会一种。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>主流工业协议对比表：Modbus / OPC UA / MQTT / Profinet / EtherNetIP / S7</li>
+        <li>按"数据流向"分类：
+          <ul>
+            <li>设备 ↔ 设备（现场总线）：Profinet、EtherNetIP</li>
+            <li>设备 ↔ 上位机（监控）：Modbus、OPC UA、S7</li>
+            <li>上位机 ↔ 云平台（IIoT）：MQTT、HTTP/REST、AMQP</li>
+            <li>跨系统（集成）：OPC UA、REST API</li>
+          </ul>
+        </li>
+        <li>西门子生态：S7 → OPC UA → MQTT 的典型路径</li>
+        <li>施耐德生态：Modbus → OPC UA</li>
+        <li>国内常见：很多老 PLC 还是 Modbus + 自己写的网关</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>读 1 篇中文综述：搜"工业通信协议对比 OPC UA Modbus"找 1 篇高质量的</li>
+        <li>画一张思维导图：把"场景 → 推荐协议"列出来（10+ 场景）</li>
+        <li>尝试装 <strong>S7-PLCSIM</strong>（西门子官方免费 PLC 模拟器）+ 用 Python <code>snap7</code> 库读 S7 协议（不深写，先 demo 跑通）</li>
+        <li>用同样的 Modbus 数据，对比 Modbus / OPC UA / MQTT 三种发布方式的代码量</li>
+        <li>写一份 1 页的"协议选型 checklist"（场景 + 关键考量 + 推荐）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张协议选型 checklist + 1 张思维导图。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>HiveMQ 工业协议综述：<a href="https://www.hivemq.com/blog/iiot-protocols-mqtt-sparkplug-vs-opc-ua/">hivemq.com/blog/iiot-protocols-...</a></li>
+        <li>西门子 S7-PLCSIM（免费）：<a href="https://support.industry.siemens.com/cs/document/109760303">siemens.com</a></li>
+        <li>snap7 Python 库：<a href="https://python-snap7.readthedocs.io/">python-snap7.readthedocs.io</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 6-8 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>能说清楚 OPC UA 和 MQTT 在定位上的本质区别吗？</li>
+        <li>新接一个西门子 S7-1500 PLC，你会怎么规划接入路径？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 7）</h4>
+      <div class="ai-tip"><strong>🎯 出题官（场景判断）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我刚学完 Modbus / OPC UA / MQTT 三种协议。出 8 道场景题让我选协议，每题描述 1 个工业场景（如"老 PLC 改造""新工厂全自研""上云""跨厂商集成"），<strong>不要给答案</strong>。我选完后你再评判。</pre>
+      </div>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（S7-PLCSIM 卡住）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我装好 S7-PLCSIM + Python snap7，运行 sample 后报错 [粘贴报错]。我已经确认 PLC SIM 启动且端口 102 监听。<strong>不要直接给答案</strong>，先问我 3 个问题让我自己排查。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w08" class="week">
+    <div class="week-header">
+      <h2>Week 8 · Phase 1 复盘</h2>
+      <span class="week-tag p1">Phase 1 · 协议</span>
+    </div>
+    <div class="theme">主题：把前 7 周的成果整理成可对外展示的文档</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>Phase 1 收尾，写一份"我学会了什么 + 还能做什么"的总结。这是你未来面试 / 跟客户聊天的素材。
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>把 Week 1-7 的所有截图、demo、笔记整理到一个文件夹 <code>phase1_portfolio/</code></li>
+        <li>写 1 篇 1500 字博客："我学 OPC UA + MQTT 的 8 周"，内容包括：
+          <ul>
+            <li>为什么学？背景（PLC 电工 + Qt 基础）</li>
+            <li>每周关键收获</li>
+            <li>踩过的 3 个坑</li>
+            <li>现在的能力清单</li>
+            <li>下一阶段想做什么</li>
+          </ul>
+        </li>
+        <li>把 <code>OpcUaClient</code> / <code>MqttPublisher</code> / <code>MqttSubscriber</code> 整理成可复用的 Qt 模块，单独建 git 仓库</li>
+        <li>在你的 HMI 项目里加 1 个"协议切换"下拉框：Modbus / OPC UA / MQTT（至少前两个能切换）</li>
+        <li>写 1 份 24h 长跑测试报告：跑 OPC UA 订阅看是否稳定（被动等）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 篇博客 + 1 个 git 仓库（可复用的 Qt OPC UA/MQTT 模块）。
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>能不能用 3 句话说清楚"OPC UA 是什么 + 你用它做了什么"？</li>
+        <li>这一阶段的最大收获和最大遗憾分别是什么？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 8）</h4>
+      <div class="ai-tip"><strong>📝 博客共创：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我要写一篇 1500 字博客"我学 OPC UA + MQTT 的 8 周"。扮演资深技术编辑，先给我列 1 个博客大纲（5-7 个章节），每章给 1 句引导。然后我写完后你帮我改标题 + 改错别字 + 提 3 条结构建议。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 复盘测试（替代自检）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演面试官。问 8 个 OPC UA + MQTT 相关问题，由浅入深。我答错时先指出哪里错，再问我是否需要提示。这是 Phase 1 复盘，能答对 6/8 算过关。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（写作 + 复盘极费时）</span>
+    </div>
+  </section>
+
+  <div class="milestone">
+    <h3>🎯 Phase 1 里程碑 · Week 8 末</h3>
+    <p><strong>你现在能做什么：</strong></p>
+    <ul>
+      <li>✅ 理解 OPC UA / MQTT 协议的核心概念</li>
+      <li>✅ 用 Qt 写 OPC UA 客户端，能连接任意 OPC UA 服务器并订阅数据</li>
+      <li>✅ 用 Qt MQTT 模块做发布订阅</li>
+      <li>✅ 搭出"OPC UA → MQTT"桥接（边缘网关雏形）</li>
+      <li>✅ 知道什么场景用什么协议</li>
+    </ul>
+    <p><strong>距离 Level 3 还差：</strong>把数据存起来 + 长期可视化（这就是 Phase 2）</p>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- =================== PHASE 2 =============================== -->
+  <!-- =========================================================== -->
+
+  <section id="w09" class="week">
+    <div class="week-header">
+      <h2>Week 9 · InfluxDB 入门</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：把 Week 6 的 MQTT 数据存进时序数据库</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>理解时序数据库跟关系数据库的本质区别，能用 InfluxDB 写入和查询。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>时序数据（time-series）vs 关系数据：append-only、时间为主键、压缩存储</li>
+        <li>InfluxDB 三大概念：<strong>Bucket / Measurement / Tag vs Field</strong></li>
+        <li>Line Protocol 写入格式：<code>measurement,tag1=v1 field1=0.5 1690000000000000000</code></li>
+        <li>对比：你 HMI 里的 <code>Variable</code> 是按"字段"组织的，InfluxDB 是按"时间点"组织的</li>
+        <li>数据保留策略（Retention Policy）：原始数据保留 7 天，降采样后保留 5 年</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>InfluxDB UI（<code>http://localhost:8086</code>）创建 Bucket：<code>factory_data</code>，保留期 7 天</li>
+        <li>生成 API Token 保存好</li>
+        <li>命令行写入测试数据：
+          <pre>curl -XPOST 'http://localhost:8086/api/v2/write?org=qianwei&bucket=factory_data' \
+  -H 'Authorization: Token YOUR_TOKEN' \
+  --data-binary 'temperature,area=area1 value=25.5'
+</pre>
+        </li>
+        <li>Data Explorer 里看刚才写入的数据</li>
+        <li>在你的 Qt 项目里加 InfluxDB 写入：把 Week 6 的 MQTT 订阅到的值也写到 InfluxDB</li>
+        <li>看 1 个小时内 InfluxDB 收到了多少条数据</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个 InfluxDB Data Explorer 截图（显示真实数据曲线）+ Qt 代码（OPC UA → MQTT → InfluxDB 完整链路）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>InfluxDB v2 入门：<a href="https://docs.influxdata.com/influxdb/v2/get-started/">docs.influxdata.com/influxdb/v2/get-started</a></li>
+        <li>Line Protocol 参考：<a href="https://docs.influxdata.com/influxdb/v2/reference/syntax/line-protocol/">docs.influxdata.com</a></li>
+        <li>InfluxDB C++ 客户端：<a href="https://github.com/influxdata/influxdb-cxx">github.com/influxdata/influxdb-cxx</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>Tag 和 Field 的区别是什么？为什么不能都用 Field？</li>
+        <li>你的数据 1 分钟大概产生多少条？7 天会占多少磁盘空间？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 9）</h4>
+      <div class="ai-tip"><strong>🎭 模拟器（数据喂入）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演 PLC 数据源。生成 100 条测试数据（Line Protocol 格式）：3 个传感器（温度/压力/流量）× 24 小时 × 每小时 1 个点。要求：1) 包含正常波动；2) 注入 3 个明显的异常点（注释说明）；3) 时间戳用 2026 年 8 月某天。</pre>
+      </div>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（Line Protocol 报错）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我用 curl 写 InfluxDB 报错 422：[粘贴报错]。<strong>不要直接给答案</strong>，用 3 个引导问题帮我定位：是 timestamp 格式问题？还是 tag 类型问题？还是字符转义问题？</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（InfluxDB 早期踩坑多）</span>
+    </div>
+  </section>
+
+  <section id="w10" class="week">
+    <div class="week-header">
+      <h2>Week 10 · Flux 查询</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：学会查数据——平均、最大、最小、聚合</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>能用 Flux 写出 5 种典型查询（5 分钟均值、日峰值、异常点等）。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>Flux 查询语言（InfluxDB 2.0+）：管道式 <code>|&gt;</code></li>
+        <li>常用函数：<code>mean()</code>、<code>max()</code>、<code>min()</code>、<code>last()</code>、<code>count()</code></li>
+        <li>窗口函数 <code>aggregateWindow()</code>：把原始数据按 1 分钟聚合</li>
+        <li>时间范围过滤 <code>range(start: -1h)</code></li>
+        <li>对比：Flux vs SQL——Flux 更接近"管道数据流"，SQL 更接近"声明式查询"</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>InfluxDB Data Explorer 跑 10 个查询：
+          <pre>// 最近 1 小时均值
+from(bucket: "factory_data")
+  |&gt; range(start: -1h)
+  |&gt; filter(fn: (r) =&gt; r._measurement == "temperature")
+  |&gt; mean()</pre>
+        </li>
+        <li>每个查询截图保存</li>
+        <li>尝试：1 分钟窗口的最大值 + 异常点（<code>derivative()</code>）</li>
+        <li>把你 HMI 项目的 <code>ThresholdAlarmChecker</code> 改成查 InfluxDB 而不是直接查 Variable（验证查询逻辑）</li>
+        <li>写 1 个 query cheatsheet 笔记（10 个最常用查询）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 份 Flux 查询 cheatsheet（10 条）+ 10 张查询截图。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Flux 入门：<a href="https://docs.influxdata.com/influxdb/v2/query-data/get-started/">docs.influxdata.com</a></li>
+        <li>Flux 函数列表：<a href="https://docs.influxdata.com/influxdb/v2/reference/flux/stdlib/">docs.influxdata.com</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 6-8 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>怎么查"过去 24 小时每 5 分钟的最大值"？</li>
+        <li>Tag 字段能不能做 <code>group by</code>？Field 能不能？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 10）</h4>
+      <div class="ai-tip"><strong>🎯 出题官（Flux 查询练习）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我刚学完 Flux 基础。出 8 道 Flux 查询题，由易到难：1) 简单 mean（1 行）；2) 多 sensor 对齐（join）；3) 异常检测（derivative）；4) 移动平均（movingAverage）。<strong>只给题目和期望输出格式</strong>，不给我答案。我写完后你对。</pre>
+      </div>
+      <div class="ai-tip"><strong>🌉 翻译器（Flux vs SQL）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我用过 SQL。把下面 3 条 Flux 查询改写成"懂 SQL 也能读懂"的伪代码 + 注释：[粘贴你的 Flux]。同时给 1 个对比表（Flux vs SQL 在 5 个维度的差异：思维模型、聚合、管道 vs 子查询、null 处理、性能）。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时</span>
+    </div>
+  </section>
+
+  <section id="w11" class="week">
+    <div class="week-header">
+      <h2>Week 11 · Grafana 入门</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：把 InfluxDB 数据画到 Grafana 上</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>做出你的第一个 Grafana 仪表板，能显示 3 个传感器曲线 + 1 个统计面板。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>Grafana 数据源（Data Source）概念</li>
+        <li>面板（Panel）类型：Time series、Stat、Gauge、Table</li>
+        <li>查询编辑器：直接写 Flux / 让 Grafana 自动构建</li>
+        <li>时间范围、刷新间隔、变量（Variable）</li>
+        <li>对比：你 HMI 里的 <code>Binding::bind</code> 是控件级 UI，Grafana 是数据级可视化</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>Grafana UI（<code>http://localhost:3000</code>）加 InfluxDB 数据源（用你的 API Token）</li>
+        <li>新建 Dashboard "Factory Line 1"</li>
+        <li>加 4 个 Panel：
+          <ul>
+            <li>Pressure（Time series，折线图）</li>
+            <li>Temperature（Time series，折线图）</li>
+            <li>Speed（Time series + Stat，最新值 + 曲线）</li>
+            <li>系统健康（Stat，绿/红点）</li>
+          </ul>
+        </li>
+        <li>调时间范围为 Last 5 minutes，设刷新间隔 5s</li>
+        <li>在你的 Qt 应用里加 HTTP 调用，让 Qt 程序能"推送" Grafana dashboard URL 给浏览器（让操作员能一键打开大屏）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张 Grafana dashboard 截图（4 个 panel 都有数据）+ Qt 应用能"打开 Grafana"的代码。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Grafana 入门：<a href="https://grafana.com/docs/grafana/latest/getting-started/">grafana.com/docs</a></li>
+        <li>Grafana + InfluxDB 集成：<a href="https://grafana.com/docs/grafana/latest/datasources/influxdb/">grafana.com/docs</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 6-8 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>Grafana 跟 Qt QChart 比，有什么优势？</li>
+        <li>操作员想"放大看某一时刻的数据"，Grafana 怎么做？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 11）</h4>
+      <div class="ai-tip"><strong>🎭 模拟器（操作员反馈）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演工厂操作员。我给你看我的 Grafana dashboard 截图（描述布局），你用操作员口吻反馈 5 条："这块看不清""那个指标我想看 24 小时趋势""按钮放错地方了"。我用你的反馈改 dashboard。</pre>
+      </div>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（Panel 查询失败）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">Grafana 加 Time series panel，查询：[粘贴 Flux]。报错：[粘贴]。面板显示"No data"。我已经确认 InfluxDB 里确实有数据。<strong>不要直接给答案</strong>，问我 3 个问题：测量名对吗？字段名对吗？时间范围够吗？</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w12" class="week">
+    <div class="week-header">
+      <h2>Week 12 · 工业大屏设计</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：把 Grafana 排版成"工业控制室大屏"风格</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>做出一个 1920x1080 大屏，操作员坐电脑前能一眼看清所有关键指标。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>大屏设计原则：KPI 上方、曲线居中、报警醒目、深色背景</li>
+        <li>Grafana 排版技巧：Row、Panel positioning、Grid</li>
+        <li>常用 Panel 模式：Stat（大数字）、Gauge（仪表盘）、Bar gauge（柱状）、Heatmap（热力图）</li>
+        <li>国内大屏案例（参观免费）：阿里云 DataV、华为云 IoT 平台</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>Grafana 加 Row "KPI Overview"：3 个 Stat 显示 Pressure/Temperature/Speed 最新值</li>
+        <li>加 Row "实时曲线"：3 个 Time series 滚动显示</li>
+        <li>加 Row "今日统计"：最大值、最小值、平均值、达标率</li>
+        <li>加 Row "设备状态"：6 个 Stat 显示 6 个"设备运行/停止/故障"</li>
+        <li>配色改深色背景（适合工厂 24h 监控）</li>
+        <li>（可选）Grafana TV Mode：<code>?kiosk</code> 参数让 dashboard 全屏 + 自动刷新</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张 1920x1080 大屏截图（你能想象把它挂在车间的样子）+ 1 段 30 秒录屏。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Grafana Dashboard 案例库：<a href="https://grafana.com/grafana/dashboards/">grafana.com/grafana/dashboards</a></li>
+        <li>Grafana Kiosk Mode：<a href="https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/view-dashboard/#kiosk-mode">grafana.com/docs</a></li>
+        <li>国内参考：阿里云 DataV（不深入，看样式）：<a href="https://datav.aliyun.com/portal/school">datav.aliyun.com</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>大屏 vs 单机 HMI，定位上有什么本质区别？</li>
+        <li>如果操作员在车间，5 米外看不清 Grafana 怎么办？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 12）</h4>
+      <div class="ai-tip"><strong>🎨 设计评审（截图描述）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演大屏设计顾问。我给你描述我的 Grafana 大屏布局（4 行 × 4 列：KPI 上 / 曲线中 / 报警下 / 设备状态右）。<strong>挑 3 个最严重的设计问题</strong>，按"问题→影响→怎么改"格式给建议。不要客套。</pre>
+      </div>
+      <div class="ai-tip"><strong>🌉 翻译器（找灵感）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">给我 10 个公开 Grafana 工业大屏 dashboard URL（按场景分：化工厂 / 电网 / 水处理 / 数据中心），并用 1 句话总结每个 dashboard 的亮点（配色 / 布局 / 交互）。我去模仿。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（设计靠自己琢磨极慢）</span>
+    </div>
+  </section>
+
+  <section id="w13" class="week">
+    <div class="week-header">
+      <h2>Week 13 · 报警系统接入</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：用 Grafana Alert + Webhook 桥接到你的 Qt 报警系统</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>InfluxDB 数据超阈值 → Grafana 报警 → Webhook → 你的 Qt 弹窗。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>Grafana Alerting：基于查询的告警规则</li>
+        <li>告警状态：OK / Pending / Alerting / No Data / Error</li>
+        <li>Contact Point：Email / Slack / Webhook / 钉钉 / 微信</li>
+        <li>Webhook 格式：Grafana → JSON POST → 你的 HTTP 服务</li>
+        <li>对比：你 HMI 里的 <code>AlarmManager</code> 是基于单变量实时值；Grafana 是基于时序聚合</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>Grafana 加 Alert Rule："Temperature > 60°C 持续 1 分钟"</li>
+        <li>加 Contact Point：Webhook，URL 指向 <code>http://localhost:9999/alert</code></li>
+        <li>在你的 Qt 应用里加 1 个简易 HTTP server（用 <code>QHttpServer</code> Qt 6.4+），监听 9999</li>
+        <li>收到 Webhook → 解析 JSON → 显示 Qt QMessageBox + 写入你的 <code>AlarmManager</code></li>
+        <li>（进阶）让 <code>AlarmManager</code> 的报警同时往 InfluxDB 写一条事件日志</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个 Qt HTTP server demo + 1 张截图：Grafana 触发报警 → Qt 弹窗的完整链路。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Grafana Alerting 文档：<a href="https://grafana.com/docs/grafana/latest/alerting/">grafana.com/docs</a></li>
+        <li>Qt HTTP Server：<a href="https://doc.qt.io/qt-6/qhttpserver.html">doc.qt.io/qt-6/qhttpserver.html</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>你现在的报警架构有 3 个入口（Variable / Grafana / 写失败），将来怎么避免重复报警？</li>
+        <li>Grafana 报警 + 你 <code>AlarmManager</code> + 钉钉/微信推送，能否组成完整的报警链？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 13）</h4>
+      <div class="ai-tip"><strong>🔍 审查员（报警防重复）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演工业报警架构师。我现在报警有 3 个入口（HMI 实时阈值 / Grafana 时序 / 写失败）。[粘贴 3 处触发代码]。帮我设计 1 个"统一报警协调层"，避免同一事件触发多次报警。给 1 张架构图（ASCII 即可）+ 伪代码。</pre>
+      </div>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（Webhook 调试）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">Grafana Webhook 配置好了但 Qt 收不到：[粘贴 Qt HTTP server 代码 + Grafana 截图]。我已经测过本地 curl POST 能收到。<strong>不要直接给答案</strong>，先问我 3 个排查问题。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（HTTP/JSON 调试极坑）</span>
+    </div>
+  </section>
+
+  <section id="w14" class="week">
+    <div class="week-header">
+      <h2>Week 14 · 历史数据策略</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：数据保留 + 降采样——工业数据不能"无限堆"</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>设计一个"近细远粗"的存储策略，让数据既能查最近细节，又能查 5 年趋势。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>工业数据典型量级：1 个传感器 1 秒 1 条 → 1 天 86,400 条 → 1 年 3,150 万条</li>
+        <li>数据生命周期：原始数据（保留 7-30 天）→ 1 分钟聚合（保留 1 年）→ 1 小时聚合（保留 5+ 年）</li>
+        <li>InfluxDB Tasks（替代 v1 的 Continuous Queries）：自动执行 Flux 脚本</li>
+        <li>磁盘规划：1 个工厂 100 个传感器 × 1 秒 1 条 × 30 天 = ~25 亿条数据</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>在 InfluxDB 里加 Task：每 5 分钟把原始数据聚合成"5 分钟均值"写回新 measurement</li>
+        <li>加 Task：每小时把 5 分钟均值再聚合成"小时均值"写回</li>
+        <li>在 Grafana 里对比：原始数据 vs 5 分钟聚合 vs 小时均值的曲线（5 年时间范围看效果）</li>
+        <li>估算你的工厂 100 个传感器 5 年的存储需求（粗算）</li>
+        <li>写 1 份"数据保留策略文档"，包含 3 个数据层级 + 各自的保留期</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 份数据保留策略文档 + 1 张三层数据对比图（曲线 + 存储量）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>InfluxDB Tasks 文档：<a href="https://docs.influxdata.com/influxdb/v2/process-data/">docs.influxdata.com/influxdb/v2/process-data</a></li>
+        <li>存储容量估算工具：<a href="https://docs.influxdata.com/influxdb/v2/reference/internals/storage/">docs.influxdata.com</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 6-8 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>原始数据保留 7 天够吗？事故分析一般要查多久的数据？</li>
+        <li>如果传感器突然 1 秒发 1000 条（故障），你的存储会不会爆？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 14）</h4>
+      <div class="ai-tip"><strong>🌉 翻译器（存储规划概念）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我是 PLC 电工出身，没接触过"数据保留"概念。用 1 个工业场景类比"原始数据 7 天 → 5 分钟聚合 1 年 → 小时聚合 5 年"这套三级存储策略。要求：1) 类比成工厂里我懂的东西；2) 解释为什么不能都保留原始数据（成本+性能）；3) 200 字。</pre>
+      </div>
+      <div class="ai-tip"><strong>🔍 审查员（容量估算）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演 DBA。我的工厂：100 个传感器 × 1 秒 1 条 × Float 类型 × 5 年。我算出来 [粘贴你的计算]。指出 3 个最容易估错的地方（重复字段、tag 数量、压缩率）。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w15" class="week">
+    <div class="week-header">
+      <h2>Week 15 · Qt 集成 Grafana</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：在你 HMI 里加"大屏模式"按钮 + 嵌入式 Grafana</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>你 HMI 跟 Grafana 双向打通，操作员一处登录全可用。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>Grafana Embedding：iframe + URL 参数（kiosk / theme / from / to）</li>
+        <li>Grafana API：API Key + REST API</li>
+        <li>Qt 内嵌浏览器：<code>QWebEngineView</code>（Chromium 内核）</li>
+        <li>对比：你 HMI 现在的 <code>QTableWidget</code> 是控件级 UI，QWebEngineView + Grafana 是"应用内嵌"</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>在你的 <code>hmi.cpp</code> 加按钮"打开大屏"</li>
+        <li>点击按钮 → 用 <code>QWebEngineView</code> 加载 Grafana dashboard URL（加 kiosk 参数全屏）</li>
+        <li>Qt 主窗口加菜单栏：文件 / 编辑 / 视图（含 Grafana 大屏入口）</li>
+        <li>（进阶）用 Grafana API + Qt 程序生成 URL（带时间范围）</li>
+        <li>（进阶）Qt 接收 Grafana Webhook + 反向调用 Grafana API 标注告警已确认</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个升级版 HMI（点按钮开 Grafana）+ 1 张截图。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Grafana Embedding：<a href="https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/view-dashboard/">grafana.com/docs</a></li>
+        <li>Grafana HTTP API：<a href="https://grafana.com/docs/grafana/latest/http-api/">grafana.com/docs</a></li>
+        <li>Qt WebEngine：<a href="https://doc.qt.io/qt-6/qtwebengine-index.html">doc.qt.io/qt-6/qtwebengine-index.html</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 10-12 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>你 HMI 现在是"控件级 UI"，加了 Grafana 后是"应用级平台"——这意味着什么？</li>
+        <li>如果客户要"全部用我们的界面不用 Grafana"，你怎么把 Grafana 嵌入到你的 UI 里？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 15）</h4>
+      <div class="ai-tip"><strong>🔍 审查员（集成代码）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演 Qt + Web 集成专家。审查我 QWebEngineView 加载 dashboard 的代码：[粘贴代码]。重点看：1) 安全（不能让用户随便输任意 URL）；2) 跨域问题；3) 性能（WebEngineView 启动慢）；4) 跟原生 Qt 控件的事件互通。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题（双向通信）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我要 Qt 跟内嵌 Grafana 双向通信（Qt 推数据给 Grafana / Grafana 事件给 Qt）。出 3 道方案选择题：1) URL 参数 vs JS Bridge vs HTTP API；2) 实时数据走哪种；3) 事件走哪种。<strong>不要给答案</strong>。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时</span>
+    </div>
+  </section>
+
+  <section id="w16" class="week">
+    <div class="week-header">
+      <h2>Week 16 · Phase 2 复盘</h2>
+      <span class="week-tag p2">Phase 2 · 数据</span>
+    </div>
+    <div class="theme">主题：把数据层完整跑通 + 文档化</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>你现在有完整的"采集 → 存储 → 可视化 → 报警"链路。整理 + 文档化。
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>完整跑一遍：Prosys → OPC UA 客户端 → MQTT → InfluxDB → Grafana</li>
+        <li>画 1 张完整的系统架构图（5 层 + 数据流向）</li>
+        <li>写 1 篇 1500 字博客："我搭的工业数据管道"</li>
+        <li>把 InfluxDB + Grafana + Mosquitto 配置写成 docker-compose.yml（让任何人 5 分钟部署你的环境）</li>
+        <li>给你的 HMI 项目加 1 个 <code>README.md</code> "Smart Edition"，展示完整链路</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张架构图 + 1 篇博客 + 1 个 docker-compose.yml + 1 个 README.md。
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>如果客户问"你这个系统比 WinCC 好在哪"，你怎么答？</li>
+        <li>你现在的系统跟"真 SCADA"比还差什么？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 16）</h4>
+      <div class="ai-tip"><strong>📝 README 共创：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演资深技术博主。我要写 GitHub README（标题"工业 HMI + 数据管道"）。先帮我列 8 个章节大纲，每章给 1 句话定位。然后我写完后你帮改：1) 标题党化；2) 加 emoji；3) 删客套话。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎭 模拟器（客户提问）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演不懂技术的工厂老板。我给你讲我的系统 3 分钟，你作为老板提 5 个最关心的问题（成本/可靠性/培训难度/数据安全/扩展性）。我答完后你给我 5 条改进建议。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时</span>
+    </div>
+  </section>
+
+  <div class="milestone">
+    <h3>🎯 Phase 2 里程碑 · Week 16 末</h3>
+    <p><strong>你现在能做什么：</strong></p>
+    <ul>
+      <li>✅ OPC UA / MQTT 数据实时写入时序数据库</li>
+      <li>✅ Grafana 大屏 + 报警 + 历史数据查询</li>
+      <li>✅ 数据保留策略 + 降采样</li>
+      <li>✅ Qt + Grafana 双向打通</li>
+      <li>✅ 完整的"采集 → 存储 → 可视化"链路</li>
+    </ul>
+    <p><strong>距离 Level 4 完整能力还差：</strong>让数据"自己说话"（异常检测、自动分析）</p>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- =================== PHASE 3 =============================== -->
+  <!-- =========================================================== -->
+
+  <section id="w17" class="week">
+    <div class="week-header">
+      <h2>Week 17 · 边缘计算概念</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：理解"边缘网关"在工业里的定位</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>搞清楚边缘网关和云平台的分工，能说清楚"什么该在边缘做、什么该上传"。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>边缘计算 vs 云计算：延迟、带宽、可靠性、隐私</li>
+        <li>工业边缘网关典型架构：现场总线 → 网关 → MQTT/HTTPS → 云</li>
+        <li>国内外主流边缘网关产品：研华、西门子 IOT2050、华为 AR502H</li>
+        <li>开源选择：ThingsBoard Edge、Node-RED、Apache Edgent</li>
+        <li>你现在的 Qt 应用就是"边缘网关的雏形"</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>读 1 篇中文综述：搜"工业边缘网关 架构"</li>
+        <li>画 1 张边缘网关架构图（你的 Qt 应用 + PLC + InfluxDB + 云的关系）</li>
+        <li>在你的 Qt 项目里加 1 个 HTTP 客户端，能 POST 数据到 webhook.site（验证能上传到云）</li>
+        <li>（可选）安装 ThingsBoard CE（开源 IoT 平台），看你数据能不能接进去</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张边缘架构图 + 1 个能 POST 数据到 webhook 的 Qt demo。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>ThingsBoard（开源 IoT 平台）：<a href="https://thingsboard.io/">thingsboard.io</a></li>
+        <li>Node-RED（可视化边缘编程）：<a href="https://nodered.org/">nodered.org</a></li>
+        <li>EMQX Kuiper（边缘流处理）：<a href="https://www.emqx.io/zh/products/emqx-kuiper">emqx.io</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 4-6 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>什么计算该在边缘做？什么该上传云？</li>
+        <li>你的 Qt 应用现在是个"边缘网关"吗？还差什么？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 17）</h4>
+      <div class="ai-tip"><strong>🌉 概念翻译器：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我是 PLC 电工。用工厂里的场景类比"边缘计算 vs 云计算"：什么数据该在车间本地处理（急停/安全/实时），什么该上传到云端（统计/趋势/AI 训练）。200 字 + 1 张判断决策表。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题（架构选择）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">出 5 个真实工厂场景题，让我判断"该不该用边缘网关 + 哪些计算放边缘"：1) 装配线节拍统计；2) 设备振动预测；3) 火灾紧急停车；4) 工人考勤；5) 产品缺陷拍照分析。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w18" class="week">
+    <div class="week-header">
+      <h2>Week 18 · Python 数据分析</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：从 Qt/C++ 跨界到 Python，开始接触数据分析</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>能写 50 行 Python 脚本，从 InfluxDB 读数据并生成趋势图。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>为什么用 Python 不继续用 C++？—— 数据分析生态</li>
+        <li>Jupyter Notebook：交互式数据分析环境</li>
+        <li>pandas：DataFrame 数据结构</li>
+        <li>matplotlib / plotly：可视化</li>
+        <li>对比：你 Qt 项目的"代码即数据流"，Python 是"脚本式数据探索"</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>装 Anaconda 或 miniconda：<a href="https://www.anaconda.com/download">anaconda.com</a></li>
+        <li>启动 Jupyter Notebook，新建 1 个 .ipynb 文件</li>
+        <li>写 50 行代码：
+          <pre># 读 InfluxDB 数据
+from influxdb_client import InfluxDBClient
+import pandas as pd
+import matplotlib.pyplot as plt
+
+client = InfluxDBClient(url="http://localhost:8086", token="YOUR_TOKEN")
+query_api = client.getQueryApi()
+
+df = query_api.query_data_frame('from(bucket:"factory_data") |&gt; range(start: -1d) |&gt; filter(fn:(r) =&gt; r._measurement == "temperature") |&gt; pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")')
+df.plot(x='_time', y='value')
+plt.show()</pre>
+        </li>
+        <li>尝试：把多个传感器的曲线画在同一张图上</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个 Jupyter Notebook 文件（能从 InfluxDB 读数据 + 画图）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>pandas 10 分钟入门：<a href="https://pandas.pydata.org/docs/user_guide/10min.html">pandas.pydata.org</a></li>
+        <li>InfluxDB Python 客户端：<a href="https://github.com/influxdata/influxdb-client-python">github.com/influxdata/influxdb-client-python</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 6-8 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>DataFrame 跟 Qt 的 <code>QList&lt;Variable*&gt;</code> 有什么本质区别？</li>
+        <li>什么场景该用 Python + pandas 而不是 C++？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 18）</h4>
+      <div class="ai-tip"><strong>🌉 翻译器（pandas vs Qt）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我是 C++/Qt 老手，第一次用 Python pandas。用我熟的概念类比：1) DataFrame ≈ 什么？2) Series ≈ 什么？3) 索引 vs Qt 的索引？给我 1 张映射表 + 1 个 "Qt 里要做 50 行的操作，pandas 只要 1 行" 的对比例子。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题（pandas 实战）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我有一份 CSV：[粘贴 100 行传感器数据]。出 5 道 pandas 练习题：1) 算每小时均值；2) 找异常点；3) 按设备分组统计 OEE；4) 滑动平均；5) 多 sensor 时间对齐。<strong>给题目和期望输出，不要给代码</strong>。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：4 小时（pandas 上手期最痛苦）</span>
+    </div>
+  </section>
+
+  <section id="w19" class="week">
+    <div class="week-header">
+      <h2>Week 19 · 异常检测</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：最简单的"智能化"——3-sigma 异常检测</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>能检测"温度突然跳变"或者"振动信号异常"，不需要深度学习。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>3-sigma 原则：99.7% 的数据落在均值 ± 3 倍标准差内</li>
+        <li>滑动窗口统计：rolling mean / rolling std</li>
+        <li>趋势异常 vs 点异常：z-score 评分</li>
+        <li>进阶（了解即可）：EWMA 控制图、孤立森林、深度学习时序模型</li>
+        <li>对比：你 HMI 里的 <code>ThresholdAlarmChecker</code> 是"硬阈值"；3-sigma 是"动态阈值"</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>在 Jupyter Notebook 里读 24 小时数据</li>
+        <li>用 pandas <code>rolling(window=60)</code> 计算 60 个点的均值和标准差</li>
+        <li>算 z-score：<code>(value - mean) / std</code>，超过 3 标为异常</li>
+        <li>把异常点画在原图上（红色标记）</li>
+        <li>手动改 1 段让它"假装设备坏了"，看检测器能否抓到</li>
+        <li>（进阶）把这个逻辑写成 Python 脚本，每 1 分钟跑一次，结果推送到 Grafana 报警</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个能检测异常的 Notebook + 1 张原图 vs 异常标记的对比图。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>3-sigma 解释：<a href="https://en.wikipedia.org/wiki/68%E2%80%9395%E2%80%9399.7_rule">Wikipedia</a></li>
+        <li>时序异常检测综述：<a href="https://arxiv.org/abs/2009.06422">arxiv.org/abs/2009.06422</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>硬阈值 vs 动态阈值，哪个误报率高？各自适用什么场景？</li>
+        <li>你这个异常检测能提前 N 分钟预警"设备要坏了"吗？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 19）</h4>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（异常检测不灵敏）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我的 3-sigma 检测器在 [粘贴数据] 上漏报了 1 个明显异常。检查我的代码：[粘贴]。我已经试过：调小 sigma 倍数（2.5）、调大窗口（200）。<strong>不要直接给答案</strong>，用 3 个引导问题帮我定位：是窗口太大把异常"平均"掉了？还是阈值方向反了？</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题（异常检测算法对比）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">出 5 道工业场景题，让我选异常检测算法：3-sigma / EWMA / 孤立森林 / LSTM。出题方向：1) 缓慢漂移；2) 突然尖峰；3) 周期性振动异常；4) 多变量相关异常；5) 季节性突变。<strong>只给场景，不要给答案</strong>。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：4 小时（数学+调参最耗时）</span>
+    </div>
+  </section>
+
+  <section id="w20" class="week">
+    <div class="week-header">
+      <h2>Week 20 · MES 概念</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：理解数据往上走的下一站——制造执行系统</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>知道 MES 是什么、跟你的 SCADA/HMI 怎么分工、典型数据流是什么。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>ISA-95 标准：ERP / MES / PCS（你的 SCADA/HMI 在 PCS 层）</li>
+        <li>MES 核心功能：工单管理、批次追溯、SPC、设备 OEE、人员管理</li>
+        <li>主流 MES 产品：西门子 Opcenter、罗克韦尔 FactoryTalk、达索 DELMIA</li>
+        <li>开源 MES：<a href="https://mespad.org/">mespad.org</a>、<a href="https://www.opto22.com/">opto22</a></li>
+        <li>MES 跟你 SCADA 的数据接口：典型是 OPC UA / SQL / Web API</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>读 1 篇 ISA-95 中文综述（B 站搜"ISA-95 入门"）</li>
+        <li>画 1 张 ISA-95 五层架构图（ERP / MES / HMI / Control / Sensor）</li>
+        <li>在你的 HMI 项目里加 1 个简单的"工单"概念：
+          <ul>
+            <li>JSON 文件存当前工单（产品型号 / 数量 / 计划时间）</li>
+            <li>HMI 显示当前工单</li>
+            <li>工单开始/结束时往 InfluxDB 写事件</li>
+          </ul>
+        </li>
+        <li>在 Grafana 里加 1 个 Panel：当前工单进度</li>
+        <li>写 1 份"我们的系统跟 MES 应该怎么对接"的需求文档（200 字）</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 张 ISA-95 架构图 + 1 个带工单的 HMI 截图 + 1 份对接文档。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>ISA-95 简介：<a href="https://en.wikipedia.org/wiki/ANSI/ISA-95_enterprise%E2%80%93control_system_integration">Wikipedia</a></li>
+        <li>开源 MES：<a href="https://github.com/mespad/mespad">github.com/mespad/mespad</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 4-6 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>MES 跟你的 SCADA 在"数据粒度"上有什么差别？</li>
+        <li>客户问"你能做 MES 吗"，你怎么判断接不接？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 20）</h4>
+      <div class="ai-tip"><strong>🌉 翻译器（ISA-95）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我是 PLC + 车间 HMI 开发者，第一次听 MES。用我熟的车间 → 公司管理层级类比 ISA-95 的 5 层架构（ERP / MES / SCADA / Control / Sensor）。给 1 张对应表（车间工位对应哪层？班组长对应哪层？）。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎭 模拟器（需求访谈）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演工厂 MES 项目经理。客户想接入 MES 跟我的 SCADA。你帮我提 8 个关键问题（不要问太技术的）：1) 当前 MES 是哪个厂商？2) 工单数据怎么传到 MES？…… 我回答后你告诉我哪些问题漏了。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w21" class="week">
+    <div class="week-header">
+      <h2>Week 21 · 自动报表</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：自动生成日报 / 周报——解放操作员双手</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>脚本能定时生成 PDF / Excel 报表，每天早上 8 点自动发到邮件。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>Python 报表生态：reportlab（PDF）、openpyxl（Excel）、pandas（数据）</li>
+        <li>定时任务：cron（Linux）/ Task Scheduler（Windows）/ APScheduler（Python）</li>
+        <li>邮件发送：smtplib + email 库</li>
+        <li>报表内容设计：产量、合格率、设备 OEE、能耗、报警次数</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>写 1 个 Python 脚本：读 InfluxDB 过去 24 小时数据 → 生成 Excel 报表（含 5 个 sheet：产量 / 报警 / OEE / 能耗 / 故障）</li>
+        <li>（进阶）写 1 个 PDF 报表（含 matplotlib 图表）</li>
+        <li>用 APScheduler 设每天 8:00 自动跑</li>
+        <li>（进阶）邮件发送：发给你自己测试邮箱</li>
+        <li>在你的 Qt 项目里加 1 个"生成今日报表"按钮 → 调用 Python 脚本</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 份 Excel 报表 + 1 份 PDF 报表（带图表）+ Qt 调用代码。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>reportlab 教程：<a href="https://www.reportlab.com/dev/tutorial/">reportlab.com</a></li>
+        <li>openpyxl 教程：<a href="https://openpyxl.readthedocs.io/">openpyxl.readthedocs.io</a></li>
+        <li>APScheduler 文档：<a href="https://apscheduler.readthedocs.io/">apscheduler.readthedocs.io</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>手工写报表 vs 自动生成报表，对操作员的实际意义是什么？</li>
+        <li>报表里最容易出错的部分是哪里？怎么验证准确性？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 21）</h4>
+      <div class="ai-tip"><strong>🔍 审查员（报表逻辑）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演制造业数据分析专家。审查我的日报生成代码：[粘贴 Python]。重点看：1) 边界情况（没数据时怎么显示？一天没开工时？）；2) 数值精度（OEE 算对了吗？合格率分母是 0 怎么办？）；3) 时区（凌晨跨日怎么处理？）。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎭 模拟器（用户反馈）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演工厂经理。我给你看日报内容（描述 5 个 sheet），你用经理口吻反馈："这个数字我看不懂""那个表太挤了""能不能加个对比昨天的趋势"。我用反馈改。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时</span>
+    </div>
+  </section>
+
+  <section id="w22" class="week">
+    <div class="week-header">
+      <h2>Week 22 · 24h 长跑测试</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：把整套系统跑 24 小时，看哪里崩</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>在 Workstation 上连续运行 24h，记录所有问题。这是 F2 "24h 不掉" 的真正验收。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>内存泄漏检测：Windows 自带的 PerfMon / Linux 的 Valgrind</li>
+        <li>日志最佳实践：滚动日志（log rotation）、结构化日志</li>
+        <li>看门狗：进程死了自动重启（systemd / Windows Service）</li>
+        <li>健康检查：HTTP endpoint（你的 Qt 应用加 <code>/health</code> 返回 200）</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>周五晚上 8 点启动整套系统：OPC UA + MQTT + InfluxDB + Grafana + 你的 Qt HMI</li>
+        <li>加日志：每个组件都把 qDebug 输出到 hmi.log（你 main.cpp 里已做）+ 加滚动策略</li>
+        <li>每小时截图 1 张（用 Windows Task Scheduler 跑截图脚本）</li>
+        <li>周六晚上 8 点收工，分析日志：哪里崩了 / 哪里慢了 / 哪里有内存泄漏</li>
+        <li>写 1 份 24h 长跑测试报告</li>
+        <li>修 Top 3 问题，重新跑 24h 验证</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 份 24h 长跑报告（含 Top 问题列表 + 修复后复跑结果）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>Qt 应用看门狗：<a href="https://doc.qt.io/qt-6/qtcore-attribution-libucontext.html">Qt Application as a Service</a></li>
+        <li>log rotation：<a href="https://doc.qt.io/qt-6/qdebug.html">qDebug 文档</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时（含被动等待）</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>你的 24h 长跑里，最常见的问题是什么？</li>
+        <li>如果客户让你把这个系统部署到 100 个工厂，每个工厂 24h 跑，你最担心什么？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 22）</h4>
+      <div class="ai-tip"><strong>🧑‍🏫 教练（日志分析）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我的 24h 长跑日志显示 [粘贴关键 50 行]。帮我分析 Top 3 异常：1) [异常] 发生时间；2) 触发原因；3) 是否需要修复。<strong>不要直接给修复方案</strong>，先帮我搞清楚"是什么"。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题（可靠性设计）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我要把系统部署到 100 个工厂。出 8 道可靠性设计题让我答：1) 看门狗策略；2) 进程死了谁拉起；3) 网络断了多久要切本地缓存；4) 日志最大能多大；5) 配置文件改完要不要重启；…… 每题要"我要做什么"。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：2 小时</span>
+    </div>
+  </section>
+
+  <section id="w23" class="week">
+    <div class="week-header">
+      <h2>Week 23 · 性能优化</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：让 100 个传感器跑起来还流畅</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>测出你的系统在"100 个传感器、1 秒 1 条"场景下的瓶颈。
+    </div>
+
+    <div class="week-section">
+      <h4>📚 学习内容</h4>
+      <ul>
+        <li>性能分析工具：Qt Creator 自带的、Visual Studio Profiler、Python cProfile</li>
+        <li>常见瓶颈：UI 刷新、数据库写入、网络收发、日志 IO</li>
+        <li>优化技巧：批量写入、缓存、异步、限流</li>
+      </ul>
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>用 Prosys 模拟 100 个 Sinusoid 节点（手动加或在 Prosys 配置）</li>
+        <li>你的 Qt 客户端订阅全部 → 全部写到 InfluxDB</li>
+        <li>测：CPU 占用、内存占用、写入速率（条/秒）</li>
+        <li>用 profiler 找出 Top 3 耗时函数</li>
+        <li>优化其中一个：比如"批量写 InfluxDB"代替"每条都写"</li>
+        <li>写 1 份优化报告：优化前/后对比</li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 份性能优化报告（含 Profiler 截图 + 优化前后数据）。
+    </div>
+
+    <div class="week-section">
+      <h4>📖 资源</h4>
+      <ul>
+        <li>InfluxDB 批量写入：<a href="https://docs.influxdata.com/influxdb/v2/write-data/best-practices/">docs.influxdata.com</a></li>
+      </ul>
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>你的系统能支持多少个传感器？瓶颈在哪？</li>
+        <li>如果客户要"500 个传感器，1 秒 1 条，5 年数据"，你需要怎么改？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 23）</h4>
+      <div class="ai-tip"><strong>🔍 审查员（性能瓶颈）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演 Qt + 高性能 C++ 专家。审查我 100 sensor 跑起来的代码：[粘贴 PollScheduler + InfluxDB 写入]。重点看：1) 主线程被什么阻塞；2) InfluxDB 写入是批量的吗；3) 字符串拼接是不是该用 QStringBuilder；4) 锁竞争在哪里。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 出题（架构升级）：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">我要把系统从 100 sensor 扩到 5000 sensor。出 5 道架构升级选择题：1) 单进程 vs 多进程；2) 单机 vs 集群；3) 同步写 vs 异步批量；4) MQTT QoS 调整；5) InfluxDB 选 OSS vs Enterprise。<strong>给场景不要给答案</strong>。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时（性能调优靠经验，AI 提供大量经验）</span>
+    </div>
+  </section>
+
+  <section id="w24" class="week">
+    <div class="week-header">
+      <h2>Week 24 · Phase 3 复盘 + 下一阶段规划</h2>
+      <span class="week-tag p3">Phase 3 · 边缘</span>
+    </div>
+    <div class="theme">主题：6 个月学习告一段落，画句号 + 规划未来</div>
+
+    <div class="goal-box">
+      <strong>🎯 目标：</strong>整合所有交付物，做一次完整的自我评估 + 规划未来 6 个月。
+    </div>
+
+    <div class="week-section">
+      <h4>🛠️ 实操任务</h4>
+      <ol>
+        <li>整理所有交付物：
+          <ul>
+            <li>Phase 1：OPC UA + MQTT Qt 模块 + 博客</li>
+            <li>Phase 2：InfluxDB + Grafana + Qt 集成 + docker-compose</li>
+            <li>Phase 3：Python 分析脚本 + 自动报表 + 24h 测试报告</li>
+          </ul>
+        </li>
+        <li>更新你的 HMI GitHub README，标题改为"工业 HMI + 数据管道"</li>
+        <li>录 1 段 5 分钟视频 demo（用 OBS 录屏），上传 B 站</li>
+        <li>画 1 张完整的能力地图（你已经会的 vs 还差的）</li>
+        <li>规划未来 6 个月：
+          <ul>
+            <li>路线 A 深化：学 S7 协议 / OPC UA Pub-Sub / 数字孪生</li>
+            <li>路线 B 转型：做 1 个非工业的桌面应用（拓宽技能）</li>
+            <li>路线 C 创业：接 1-2 个真实小项目（验证能力）</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
+
+    <div class="deliverable-box">
+      <strong>📦 交付物：</strong>1 个 GitHub README + 1 段 5 分钟视频 + 1 张能力地图 + 1 份未来规划。
+    </div>
+
+    <p><span class="time-est">⏱️ 8-10 小时</span></p>
+
+    <div class="selfcheck">
+      <h4>✓ 自检问题</h4>
+      <ul>
+        <li>现在的你跟 6 个月前的你，差距在哪？</li>
+        <li>如果让你重新做这 24 周，你会砍掉什么 / 加什么？</li>
+      </ul>
+    </div>
+
+    <div class="ai-collab">
+      <h4>🤖 AI 协作（Week 24）</h4>
+      <div class="ai-tip"><strong>📝 总结共创：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演职业规划教练。我要写 1 篇 1000 字复盘"6 个月从 PLC 电工到工业数据工程师"。你帮我：1) 提炼 5 个核心能力（用动词开头）；2) 找出 3 个最值得讲的踩坑故事；3) 设计未来 6 个月路径（深 / 转 / 接项目 三选一）。</pre>
+      </div>
+      <div class="ai-tip"><strong>🎯 终极面试：</strong>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:8px;border-radius:4px;margin:6px 0;font-size:12px;">扮演工业自动化公司技术总监。面试我 30 分钟：你准备 10 个问题（覆盖 OPC UA / MQTT / 时序数据库 / 异常检测 / 边缘架构）。我答完后给我评分 + 3 条改进建议。这是 6 个月学习的终极验收。</pre>
+      </div>
+      <span class="ai-save">⏱️ AI 预计节省：3 小时</span>
+    </div>
+  </section>
+
+  <div class="milestone">
+    <h3>🏆 Phase 3 里程碑 · Week 24 末 · 6 个月学习完成</h3>
+    <p><strong>你现在能做什么（Level 4 完整）：</strong></p>
+    <ul>
+      <li>✅ 用 Qt + OPC UA + MQTT + InfluxDB + Grafana 搭建完整的工业数据管道</li>
+      <li>✅ 实时监控 + 历史数据 + 大屏可视化</li>
+      <li>✅ 简单异常检测 + 自动报警</li>
+      <li>✅ 自动生成日报表</li>
+      <li>✅ 24h 稳定运行 + 性能优化</li>
+    </ul>
+    <p><strong>下一步可选方向：</strong></p>
+    <ul>
+      <li>🥇 <strong>S7 协议 + 西门子生态</strong>（F1 目标达成）</li>
+      <li>🥈 <strong>接 1-2 个真实小项目</strong>（验证能力 + 赚钱）</li>
+      <li>🥉 <strong>学 OPC UA Pub/Sub</strong>（更现代的工业协议）</li>
+      <li>💡 <strong>学 Qt Quick / QML</strong>（声明式 UI，工业未来方向）</li>
+    </ul>
+  </div>
+
+</div><!-- /container -->
+</div><!-- /layout -->
+
+  <!-- ============ Footer ============ -->
+  <footer>
+    <p><strong>学习计划版本：</strong>1.0 · 2026-08 · 作者：Wqian · 整理：DeepSeek</p>
+    <p>每个阶段都有"产出物"—— 完成后勾选 ✅。如果某周超时 50%，可以压缩下一周；<br>
+       如果连续 2 周都严重超时，建议暂停 + 找原因（可能是预估太乐观，或者环境/资源问题）。</p>
+    <p style="margin-top: 16px;"><strong>建议节奏：</strong>每周 8-12 小时，约 2-3 个晚上 + 周末半天。<br>
+       <strong>重要原则：</strong>每周必须完成 1 个交付物（哪怕很简陋）—— 持续可见的进展最重要。</p>
+    <p style="margin-top: 16px; color: #999;">许可证：MIT · 欢迎复制修改 · 请保留原作者声明</p>
+  </footer>
+
+</div>
+
+<button class="to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="回到顶部">↑</button>
+
+<script>
+(function() {
+  // ===== 折叠/展开 Phase =====
+  window.togglePhase = function(headerEl) {
+    headerEl.parentElement.classList.toggle('collapsed');
+  };
+
+  // ===== 进度：localStorage 持久化 =====
+  const STORAGE_KEY = 'hmi_plan_progress_v1';
+  let progress = {};
+  try {
+    progress = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch(e) { progress = {}; }
+
+  function saveProgress() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  }
+
+  function updateProgressUI() {
+    const done = Object.values(progress).filter(Boolean).length;
+    document.getElementById('doneCount').textContent = done;
+    const pct = (done / 24) * 100;
+    document.getElementById('progressBarFill').style.width = pct + '%';
+  }
+
+  // 初始化 checkbox 状态
+  document.querySelectorAll('.nav-week-list .check').forEach(function(c) {
+    const w = c.dataset.week;
+    if (progress[w]) c.classList.add('done');
+
+    c.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      c.classList.toggle('done');
+      progress[w] = c.classList.contains('done');
+      saveProgress();
+      updateProgressUI();
+    });
+  });
+
+  updateProgressUI();
+
+  // ===== 当前周高亮（scroll spy）=====
+  const sections = document.querySelectorAll('.week');
+  const navLinks = document.querySelectorAll('.nav-week-list a[href^="#w"]');
+
+  function setActive(weekId) {
+    navLinks.forEach(function(a) {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + weekId);
+    });
+  }
+
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          setActive(entry.target.id);
+        }
+      });
+    }, { rootMargin: '-20% 0px -60% 0px', threshold: 0 });
+
+    sections.forEach(function(s) { observer.observe(s); });
+  }
+
+  // ===== 滚动到顶部按钮 =====
+  const toTopBtn = document.querySelector('.to-top');
+  window.addEventListener('scroll', function() {
+    if (window.scrollY > 500) toTopBtn.classList.add('show');
+    else toTopBtn.classList.remove('show');
+  });
+
+  // ===== 点击导航链接时高亮立即切换 =====
+  navLinks.forEach(function(a) {
+    a.addEventListener('click', function() {
+      const href = a.getAttribute('href');
+      if (href.startsWith('#w')) setActive(href.substring(1));
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

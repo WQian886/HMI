@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 提示词库 · 8 大类 · 25+ 模板 · 智能工厂学习专用</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --border: #e4e6eb;
+    --text: #1d1d1f;
+    --text-light: #6e6e73;
+    --accent: #0066cc;
+    --accent-light: #e3f2fd;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+    --warning: #ef4444;
+    --success: #22c55e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 1000px; margin: 0 auto; padding: 30px 24px; }
+  header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+    color: white;
+    padding: 40px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+  }
+  header h1 { font-size: 28px; margin-bottom: 10px; }
+  header p { opacity: 0.95; }
+  .toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 30px;
+  }
+  .toc h3 { margin-bottom: 10px; }
+  .toc a {
+    display: block;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .toc a:hover { background: var(--accent-light); }
+
+  .prompt {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+    page-break-inside: avoid;
+  }
+  .prompt h2 {
+    color: var(--accent);
+    font-size: 20px;
+    margin-bottom: 8px;
+  }
+  .prompt .meta {
+    font-size: 13px;
+    color: var(--text-light);
+    margin-bottom: 12px;
+  }
+  .prompt .meta span {
+    display: inline-block;
+    background: var(--accent-light);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-right: 8px;
+  }
+  .prompt .use-case {
+    background: #f9fafb;
+    border-left: 3px solid #10b981;
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  .prompt .use-case strong { color: #047857; }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    padding: 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .tip {
+    background: #fef3c7;
+    border-left: 3px solid #f59e0b;
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin-top: 10px;
+    font-size: 14px;
+  }
+  .tip strong { color: #92400e; }
+  .red-line {
+    background: #fee2e2;
+    border-left: 3px solid var(--warning);
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin-top: 10px;
+    font-size: 14px;
+  }
+  .red-line strong { color: #991b1b; }
+
+  footer {
+    margin-top: 40px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-light);
+    font-size: 13px;
+  }
+  @media print {
+    body { background: white; }
+    .prompt { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<header>
+  <h1>AI 提示词库 · 智能工厂学习专用</h1>
+  <p>8 大类 · 25+ 个可直接复制的提示词模板 · 配合《24周学习计划》使用</p>
+</header>
+
+<div class="toc">
+  <h3>📋 目录 · 按场景跳转</h3>
+  <a href="#cat1">🎯 1. 出题官（3 个模板）</a>
+  <a href="#cat2">🧑‍🏫 2. 教练（3 个模板）</a>
+  <a href="#cat3">🔍 3. 审查员（3 个模板）</a>
+  <a href="#cat4">🎭 4. 模拟器（4 个模板）</a>
+  <a href="#cat5">🌉 5. 概念翻译器（3 个模板）</a>
+  <a href="#cat6">🔧 6. 调试助手（3 个模板）</a>
+  <a href="#cat7">🎤 7. 面试官（3 个模板）</a>
+  <a href="#cat8">🔨 8. 重构伙伴（3 个模板）</a>
+  <a href="#usage">📖 使用说明</a>
+</div>
+
+<!-- ============ Category 1: 出题官 ============ -->
+<h2 id="cat1" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🎯 1. 出题官</h2>
+
+<div class="prompt">
+  <h2>1.1 概念理解题（由易到难）</h2>
+  <div class="meta">
+    <span>适合</span>学完概念后自测
+    <span>耗时</span>10 分钟出题 + 20 分钟做题
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>读完一篇教程 / 文档后立刻自测。比被动看书记得牢 3 倍。</div>
+<pre>我是 [背景：PLC 电工 / Qt 老手 / Python 入门 / ...]，
+刚学完 [主题：OPC UA 信息模型 / Flux 查询 / pandas DataFrame / 3-sigma 异常检测]。
+
+请出 5 道题测试我的理解：
+- 题 1（最易）：[填空 / 选择]
+- 题 2：概念对比 / 解释
+- 题 3：内部机制 / 为什么
+- 题 4：边界情况 / 实际应用
+- 题 5（最难）：综合应用题 / 开放设计
+
+要求：
+1. 不要直接给答案，先给题目
+2. 题目要结合我熟悉的工业场景（PLC / HMI / Modbus / 车间）
+3. 每题标注考察的能力维度</pre>
+  <div class="tip"><strong>💡 用法：</strong>AI 出题后自己先做，全部做完再问"现在给答案"。批改后标记错题 → 回去翻文档 → 找AI 出同类型题再做一遍。</div>
+</div>
+
+<div class="prompt">
+  <h2>1.2 代码实战题</h2>
+  <div class="meta">
+    <span>适合</span>练习特定 API / 库的使用
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>看完文档想练手，但又想不出要做什么。</div>
+<pre>我刚学完 [主题：open62541 客户端 / Qt MQTT / InfluxDB Python 客户端]。
+
+出 5 道代码题让我练手，由易到难：
+- 题 1（5-10 行）：最基础 API 调用
+- 题 2（20-30 行）：组合 2-3 个 API
+- 题 3（30-50 行）：完整功能 + 错误处理
+- 题 4（50+ 行）：含边界 + 性能考虑
+- 题 5（开放）：自己设计场景实现
+
+每题给出：题目描述 / 输入输出示例 / 评分标准（10 分制）。
+<strong>不要给完整代码</strong>，只给题目和评分标准。</pre>
+  <div class="tip"><strong>💡 用法：</strong>做完让 AI 帮你打分。如果某题得分低，回头看那一节 API 文档。</div>
+</div>
+
+<div class="prompt">
+  <h2>1.3 场景选择题（培养判断力）</h2>
+  <div class="meta">
+    <span>适合</span>学完多种技术后判断"用哪个"
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>学完 Week 7 / Week 19 / Week 20 这类"选择"周。实战经验靠场景题练出来。</div>
+<pre>我刚学完 [A / B / C 三种技术 / 三种算法 / 三个协议]。
+
+出 10 个真实工业场景题让我选：
+- 5 题是 "该用 A 还是 B 还是 C"
+- 3 题是 "如果只用 A，怎么实现 B 的功能"
+- 2 题是 "这个场景下哪些绝对不能用"
+
+每题场景尽量真实（如"老 PLC 改造""化工厂""水处理车间"）。
+<strong>不要给答案</strong>，我选完后你评判 + 解释。</pre>
+  <div class="red-line"><strong>🚫 注意：</strong>如果你连选都不会，说明基础概念还没掌握，回去重读教程。</div>
+</div>
+
+<!-- ============ Category 2: 教练 ============ -->
+<h2 id="cat2" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🧑‍🏫 2. 教练</h2>
+
+<div class="prompt">
+  <h2>2.1 苏格拉底式调试（不直接给答案）</h2>
+  <div class="meta">
+    <span>适合</span>编译错误 / 运行时错误 / 逻辑 bug
+    <span>核心原则</span>AI 只提问，不给答案
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>卡住 15 分钟以上仍没解决。AI 直接给会害了你——下次还是不会。</div>
+<pre>我在 [场景：编译 / 运行 / 部署] 时遇到问题：
+
+错误信息：
+[粘贴完整错误]
+
+我已经尝试：
+1. [你的尝试]
+2. [你的尝试]
+3. [你的尝试]
+
+环境：[Qt 6.8 / Windows 11 / MSVC 2022 / CMake ...]
+
+<strong>请你扮演教练，用苏格拉底式提问引导我：</strong>
+- 不要直接给答案或修复代码
+- 先问 2-3 个澄清问题（如"CMake 怎么写的？"）
+- 根据我的回答再深入
+- 最后如果我真的想不出，再给提示
+- 全程跟踪我的思考过程，记下"我假设错了的地方"</pre>
+  <div class="tip"><strong>💡 为什么有用：</strong>调试能力 = 80% 排除法 + 20% 直觉。AI 帮你练习排除法，下次独立调试时能想到类似思路。</div>
+</div>
+
+<div class="prompt">
+  <h2>2.2 概念深化（追问"为什么"）</h2>
+  <div class="meta">
+    <span>适合</span>理解了"是什么"但不知道为什么
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>读完文档后感觉自己"懂了"，但说不清原理。</div>
+<pre>我刚学完 [主题]，觉得自己懂了。但你能不能用 5 个"为什么"问题帮我验证：
+
+例：
+1. 为什么 OPC UA 用 Client/Server 而不是 Master/Slave？
+2. 为什么订阅要分 PublishingInterval 和 SamplingInterval 两层？
+3. 为什么 MQTT 用 QoS 而不是简单的 ACK？
+
+要求：
+- 5 个问题层层递进（从表层到原理）
+- 每个问题前先告诉我"我假设的答案"，你来评判对不对
+- 不要直接给我"正确答案"——让我自己想
+- 如果我想错了，给我 1 个类比启发，而不是直接答案</pre>
+  <div class="tip"><strong>💡 5 个"为什么"问完，</strong>你的理解深度能超过 90% 看过同一篇教程的人。</div>
+</div>
+
+<div class="prompt">
+  <h2>2.3 思路验证（我做了方案，让 AI 评估）</h2>
+  <div class="meta">
+    <span>适合</span>独立设计了架构 / 选型 / 流程后
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>你做了一个设计决策（不是写代码，是"用什么 + 怎么组织"），想听听反馈。</div>
+<pre>我设计了 [某个方案 / 架构 / 流程]，请你扮演资深 [架构师 / DBA / 嵌入式工程师] 评审：
+
+方案描述：
+[粘贴你的设计文字 / 架构图描述 / 流程图]
+
+重点请评估：
+1. 可行性：技术上能不能跑通？
+2. 可扩展性：加 10 倍数据量 / 加 10 个新变量时哪里崩？
+3. 可维护性：3 个月后我自己（或同事）能看懂吗？
+4. 性能：瓶颈在哪？
+5. 成本：硬件 / 部署 / 学习成本
+6. 跟我已有项目（Qt HMI）的集成点在哪？
+
+<strong>先说 Top 3 问题，再给具体修改建议</strong>。不要客套话。</pre>
+</div>
+
+<!-- ============ Category 3: 审查员 ============ -->
+<h2 id="cat3" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🔍 3. 审查员</h2>
+
+<div class="prompt">
+  <h2>3.1 4 维度代码审查（最常用）</h2>
+  <div class="meta">
+    <span>适合</span>每周交付物
+    <span>建议</span>所有写完的代码都过一遍这个审查
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>写完一段代码后。**24 周计划里每周都建议做一次**。</div>
+<pre>扮演严格的资深 Qt / 工业自动化工程师，审查我的代码：
+
+[粘贴完整代码]
+
+请从这 4 个维度打分（1-10）：
+- <strong>正确性</strong>：逻辑对不对？边界情况处理了吗？
+- <strong>可读性</strong>：命名 / 结构清晰吗？3 个月后我自己能看懂吗？
+- <strong>性能</strong>：有没有明显浪费（轮询 / 字符串拼接 / 不必要的拷贝）？
+- <strong>健壮性</strong>：空指针 / 超时 / 异常输入 / 资源释放都处理了吗？
+
+输出格式：
+1. 总分：[X/40]
+2. Top 3 问题（按严重程度）
+3. 每条具体修改建议（可直接应用的代码片段）
+4. 1 个"加分项"（已经做得好但可以更好的地方）</pre>
+  <div class="tip"><strong>💡 关键：</strong>不要等"完美了"才让 AI 看。**写完就审**——及时反馈比延迟重要 10 倍。</div>
+</div>
+
+<div class="prompt">
+  <h2>3.2 集成代码审查（库与库之间的衔接）</h2>
+  <div class="meta">
+    <span>适合</span>集成第 3 方库 / 新协议 / 新模块
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>Week 3 / Week 15 / Week 33 这种"集成新东西"的周。</div>
+<pre>扮演熟悉 [C 库集成 / Qt 跨平台 / 工业协议] 的架构师。
+
+我刚集成 [库名 / 协议名] 到我的 Qt 项目，审查：
+
+[粘贴：CMakeLists.txt + 集成代码 + 1-2 个使用示例]
+
+重点看：
+1. <strong>依赖管理</strong>：库是源码 / 动态 / 包管理？版本如何锁定？
+2. <strong>接口封装</strong>：C 风格回调有没有包成 Qt 信号？线程安全吗？
+3. <strong>资源生命周期</strong>：库对象谁 new 谁 delete？Qt 父子对象机制用对了吗？
+4. <strong>错误传播</strong>：库的错误码 / 异常如何转成 Qt 的 emit errorOccurred？
+5. <strong>可移植性</strong>：Windows 写完了到 Linux 会有坑吗？</pre>
+</div>
+
+<div class="prompt">
+  <h2>3.3 性能审查（针对性能瓶颈）</h2>
+  <div class="meta">
+    <span>适合</span>项目跑起来后怀疑有性能问题
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>Week 22 / Week 23 这种性能 / 优化周。</div>
+<pre>扮演 Qt + 高性能 C++ 专家。
+
+我的项目场景：[100 个传感器 × 1 秒 1 条 / 5000 个变量 / 24h 长跑]
+代码：[粘贴热点路径，如 PollScheduler::onTick 或 InfluxDB 写入]
+
+重点看：
+1. <strong>主线程阻塞</strong>：哪些调用是同步的？能不能异步？
+2. <strong>内存分配</strong>：有没有频繁 new/delete？reserve() 该用没用？
+3. <strong>字符串拼接</strong>：QString + 操作是否用 QStringBuilder / QStringLiteral？
+4. <strong>锁竞争</strong>：QMutex 该用没用？能不能改成 lock-free？
+5. <strong>IO 模式</strong>：单条写入能不能批量？同步写能不能异步？
+
+输出 Top 3 性能瓶颈 + 每条修复后预期提升的百分比。</pre>
+</div>
+
+<!-- ============ Category 4: 模拟器 ============ -->
+<h2 id="cat4" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🎭 4. 模拟器</h2>
+
+<div class="prompt">
+  <h2>4.1 扮 OPC UA / MQTT 服务器（生成测试数据）</h2>
+  <div class="meta">
+    <span>适合</span>需要模拟真实设备但环境没装好
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>Week 1 / Week 9 测早期 demo，没有真实服务器时。</div>
+<pre>扮演 [OPC UA 服务器 / MQTT broker / Modbus 从站]。
+
+场景：[工厂车间有 3 台泵，每台有温度/振动/电流 3 个传感器]。
+
+请生成：
+1. 3 个节点的描述（名称、数据类型、当前值、地址）
+2. 模拟 24 小时的传感器数据（每 5 分钟一个点，正常波动 + 2 个异常点）
+3. 输出 CSV 格式：timestamp,name,value
+4. 异常点用注释说明（如 # 第 14:35 温度突变 → 模拟泵故障）
+
+要求数据要"真"——不是完全随机，要有工业相关性。</pre>
+</div>
+
+<div class="prompt">
+  <h2>4.2 扮客户 / 用户（需求反馈）</h2>
+  <div class="meta">
+    <span>适合</span>UI 设计 / 报表设计 / 功能取舍
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>Week 12 / Week 21 这种设计周。无成本拿反馈。</div>
+<pre>扮演 [角色：不懂技术的工厂老板 / 车间操作员 / 自动化工程师 / IT 部门经理]。
+
+我刚做完 [我的设计 / 报表 / dashboard]，给你看：
+[粘贴截图描述 / 文字描述 / ASCII 图]
+
+请用你的角色口吻反馈 5 条：
+1. [角色] 第一眼看到了什么？
+2. 哪些 [功能 / 数据 / 文字] 看不懂 / 不关心？
+3. 哪些地方让你 [担心 / 困惑 / 不耐烦]？
+4. 你希望 [多看到 / 少看到 / 改] 什么？
+5. 如果给你 [3 分钟 / 30 秒] 看，你会看哪几个关键点？
+
+不要客气，按 [角色] 的真实反应给。</pre>
+</div>
+
+<div class="prompt">
+  <h2>4.3 扮测试工程师（边界条件 / 异常场景）</h2>
+  <div class="meta">
+    <span>适合</span>写完一段代码，准备进 24h 长跑前
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>Week 22 长跑前 / 每次写完关键代码后。</div>
+<pre>扮演有 10 年经验的测试工程师。我刚写完 [你的系统/模块]。
+
+请帮我列 10 个**最容易炸**的边界场景，让我提前补：
+1. 网络相关的（断网 / 慢网 / 高延迟 / IP 冲突）
+2. 数据相关的（空值 / 越界 / 0 值 / 负值 / NaN）
+3. 并发相关的（同时多客户端 / 资源竞争 / 死锁）
+4. 资源相关的（磁盘满 / 内存耗尽 / 文件锁）
+5. 时间相关的（时间戳乱跳 / 时区切换 / 跨日 / 闰秒）
+
+每条给出：
+- 测试场景描述
+- 预期系统的正确行为
+- 我代码里最可能漏的位置（你猜）</pre>
+</div>
+
+<div class="prompt">
+  <h2>4.4 扮面试官（终极验收）</h2>
+  <div class="meta">
+    <span>适合</span>Phase 收官 / 阶段性复盘
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>Week 8 / Week 16 / Week 24 这种"复盘"周。</div>
+<pre>扮演 [角色：自动化公司技术总监 / Qt 架构师 / SCADA 厂商工程师]。
+
+我刚学完 [主题：OPC UA / 时序数据库 / 异常检测]。
+
+按你的角色风格问 10 个问题，由浅入深：
+- 1-3 题：基本概念 / 你怎么用
+- 4-6 题：内部机制 / 为什么这么设计
+- 7-9 题：边界 / 异常 / 故障处理
+- 10 题：开放设计题 / 你怎么看 X 趋势
+
+要求：
+- 一次只问 1 题，等我回答再继续
+- 答错先指出哪里错，再问是否需要提示
+- 最后给我评分 + Top 3 薄弱环节</pre>
+</div>
+
+<!-- ============ Category 5: 概念翻译器 ============ -->
+<h2 id="cat5" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🌉 5. 概念翻译器</h2>
+
+<div class="prompt">
+  <h2>5.1 用工业场景类比陌生概念</h2>
+  <div class="meta">
+    <span>适合</span>任何概念理解不了的时候
+  </div>
+  <div class="use-case"><strong>使用时机：</strong>看到新名词 / 新架构 / 新算法，立刻用这个 prompt。</div>
+<pre>我是 [PLC 电工 / Qt 老手 / Python 入门 / 后端工程师]，[行业] 出身。
+
+要学的新概念是：[概念名]。
+我对它完全陌生，看了文档还是觉得抽象。
+
+请用 1 个我**真懂**的场景类比它，要求：
+1. 类比必须来自我熟悉的世界（PLC / HMI / 车间 / 流水线 / 数据库表）
+2. 不超过 200 字
+3. 末尾给 1 个"反例"——说明类比的局限（避免我过度类比误解）
+4. 如果实在不好类比，明确告诉我"这个概念需要先理解 X 才能懂"
+
+例：
+- 我熟悉的："OPC UA 节点"
+- 我要学的："Kubernetes Pod"
+- 类比："Pod 像一个车间班组……"</pre>
+</div>
+
+<div class="prompt">
+  <h2>5.2 把"高级术语"翻译成"大白话"</h2>
+  <div class="meta">
+    <span>适合</span>读文档时被术语卡住
+  </div>
+<pre>我读 [OPC UA / InfluxDB / Kafka / ...] 文档，下面这段话看不懂：
+
+[粘贴文档原文 1-2 段]
+
+请：
+1. 用"外行都能懂"的白话翻译
+2. 标出这段里最关键的 3 个名词，单独解释
+3. 给 1 个真实工业例子说明它在干嘛
+4. 如果有图能说清楚，文字描述 1 张图</pre>
+</div>
+
+<div class="prompt">
+  <h2>5.3 概念对照表（横向对比）</h2>
+  <div class="meta">
+    <span>适合</span>学完 2-3 个相似概念后整理
+  </div>
+<pre>我刚学完 [A / B / C 三种类似的技术]，给我做 1 张对照表。
+
+要求维度：
+1. 设计目标（各自解决什么问题）
+2. 适用场景
+3. 性能 / 资源消耗
+4. 学习成本
+5. 生态成熟度
+6. 在我的 Qt 项目里用哪个？
+
+每格不超过 50 字。最后给 1 个结论："如果你是 X 场景，选 Y"。</pre>
+</div>
+
+<!-- ============ Category 6: 调试助手 ============ -->
+<h2 id="cat6" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🔧 6. 调试助手</h2>
+
+<div class="prompt">
+  <h2>6.1 错误日志分析</h2>
+  <div class="meta">
+    <span>适合</span>有完整错误信息时
+  </div>
+<pre>我遇到错误，日志如下：
+[粘贴完整错误日志 / 异常堆栈 / qDebug 输出]
+
+环境信息：
+- Qt 版本：
+- 操作系统：
+- 编译器：
+- 相关库版本：
+
+请你：
+1. 按可能性排序 Top 3 原因
+2. 对每个原因给"如何验证"的方法（让我能确认是不是它）
+3. 给修复代码示例
+4. 列出我应该查文档的关键词</pre>
+</div>
+
+<div class="prompt">
+  <h2>6.2 偶发 bug（最难的那种）</h2>
+  <div class="meta">
+    <span>适合</span>运行 10 次挂 1 次 / 24h 跑挂 1 次
+  </div>
+<pre>我的程序有个**偶发 bug**：描述现象 + 触发频率。
+
+描述：
+[粘贴现象]
+
+触发频率：[如 "24h 跑出现 1-2 次" / "重启后第一次出现" / "特定操作后"]
+
+我已排查：
+1. [做了什么]
+2. [做了什么]
+
+请你扮演调试高手：
+1. 这是"什么类型"的 bug（资源竞争？时间相关？状态污染？）
+2. 在我代码的哪些位置最可能？[粘贴代码关键片段]
+3. 我该怎么写 1 个**能稳定复现**的测试？
+4. 加什么日志能定位？
+6. 临时 workaround 是什么？</pre>
+</div>
+
+<div class="prompt">
+  <h2>6.3 性能分析（找瓶颈）</h2>
+  <div class="meta">
+    <span>适合</span>程序能跑但慢 / 资源占用高
+  </div>
+<pre>我的程序 [场景描述]。
+
+性能数据：
+- CPU 占用：[如 30%]
+- 内存：[如 200MB 持续增长到 1.5GB → 怀疑泄漏]
+- 接口耗时：[如 100ms]
+- 数据库查询：[如 5s]
+
+请你：
+1. 指出 Top 3 怀疑对象（哪段代码 / 哪个环节）
+2. 教我怎么用 [Qt Creator Profiler / Valgrind / Perf / Visual Studio Profiler] 验证
+3. 给出至少 1 个**优化预期百分比**和修复方向
+4. 警告我哪些"看似慢但其实没问题"的红鲱鱼（避免过早优化）</pre>
+</div>
+
+<!-- ============ Category 7: 面试官 ============ -->
+<h2 id="cat7" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🎤 7. 面试官</h2>
+
+<div class="prompt">
+  <h2>7.1 模拟面试（找工作用）</h2>
+  <div class="meta">
+    <span>适合</span>真正找工作前的演练
+  </div>
+<pre>我要面试 [岗位：Qt 工程师 / 工业自动化开发 / 嵌入式开发]。
+背景：PLC 电工 5 年 + 自学 Qt 1 年 + 自学智能工厂 6 个月。
+
+请你扮演该公司资深面试官，按真实面试流程：
+1. <strong>自我介绍</strong>（2 分钟）—— 给我 1 个引导问题让我开始
+2. <strong>项目深挖</strong>（10 分钟）—— 我会讲我的 HMI 项目，你要问 3-5 个有深度的追问
+3. <strong>技术基础</strong>（10 分钟）—— 问 5 个 Qt / C++ / 多线程相关
+4. <strong>业务能力</strong>（5 分钟）—— 问 2 个工业场景题（如"客户投诉 PLC 通讯断了你怎么排查"）
+5. <strong>反问环节</strong>—— 给我 3 个反问问题模板（让我反问你）
+
+规则：
+- 一次只问 1 题，等我回答再继续
+- 答错先指出哪里错，必要时给提示
+- 全程打分，最后给我评分 + Top 3 准备方向</pre>
+</div>
+
+<div class="prompt">
+  <h2>7.2 应聘简历润色</h2>
+  <div class="use-case"><strong>使用时机：</strong>写简历时。</div>
+<pre>我的简历草稿（项目经验部分）：
+[粘贴 1-2 段]
+
+请你扮演资深 HR + 技术面试官：
+1. 找出 5 个最弱的描述（太啰嗦 / 没量化 / 没突出技术）
+2. 改写示例（用 STAR 法：Situation / Task / Action / Result）
+3. 给量化建议：哪些数字该补（用户量 / 性能提升 / 节省时间）
+4. 关键词建议：[岗位 JD 关键词] 应该在简历里出现几次</pre>
+</div>
+
+<div class="prompt">
+  <h2>7.3 自我介绍打磨</h2>
+<pre>我要面试 [岗位]。
+我的背景：[PLC 电工 5 年 + Qt 自学 X 月 + ...]。
+
+帮我写 3 个版本的自我介绍（不同长度 / 不同侧重）：
+1. <strong>1 分钟版</strong>（电梯演讲）
+2. <strong>3 分钟版</strong>（详细版）
+3. <strong>突出 [某个能力] 的版本</strong>
+
+要求：
+- 不要堆砌简历名词
+- 用动词开头
+- 1 个版本强调"工业背景"，1 个强调"自学能力"，1 个强调"项目成果"
+- 每个版本都给我 1 个"亮点钩子"（让面试官追问的话题）</pre>
+</div>
+
+<!-- ============ Category 8: 重构伙伴 ============ -->
+<h2 id="cat8" style="margin: 30px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">🔨 8. 重构伙伴</h2>
+
+<div class="prompt">
+  <h2>8.1 啰嗦代码精简</h2>
+<pre>我的代码工作正常但太啰嗦：
+[粘贴代码]
+
+请用 [目标：行数减少 30% / 用现代 C++ 17 / 改成 Qt 风格] 重构：
+- 保持功能不变
+- 注释每一处改动
+- 解释为什么这样改更好（不只是"看起来更优雅"，要说"性能 / 可维护性 / 安全性"哪个维度提升）
+
+最后给 1 张"重构前后对比表"。</pre>
+</div>
+
+<div class="prompt">
+  <h2>8.2 Qt 风格化（C++ 老代码转 Qt 风）</h2>
+<pre>我用"标准 C++"写的代码，在 Qt 项目里显得格格不入：
+[粘贴代码]
+
+请改写成 Qt 风格：
+- 容器用 QList / QHash / QMap（不是 std::vector / std::unordered_map）
+- 字符串用 QString（不是 std::string）
+- 文件用 QFile（不是 std::ifstream）
+- 信号槽代替回调
+- 智能指针用 QPointer / std::unique_ptr（看场景）
+- lambda + Qt 算法
+
+注释每一处"为什么要这么改"。</pre>
+</div>
+
+<div class="prompt">
+  <h2>8.3 代码现代化（C++ 11 → C++ 17/20）</h2>
+<pre>我的代码停留在 C++ 11 风格，用了很多老式写法：
+[粘贴代码]
+
+请改写成现代 C++（17/20）：
+- nullptr 替代 NULL
+- auto auto
+- 范围 for 替代迭代器
+- 结构化绑定
+- if constexpr
+- std::optional / std::variant（替代魔法值）
+- [[nodiscard]] / override / final
+
+每改一处标"提升维度"（编译期检查 / 运行时性能 / 可读性）。</pre>
+</div>
+
+<!-- ============ 使用说明 ============ -->
+<h2 id="usage" style="margin: 40px 0 16px; padding-top: 20px; border-top: 2px solid var(--border);">📖 使用说明</h2>
+
+<div class="prompt">
+  <h2>💡 5 个让 AI 输出更好的小技巧</h2>
+  <ol style="padding-left: 24px;">
+    <li><strong>给 AI 角色背景</strong>（"我是 PLC 电工 + Qt 老手"），输出会量身定制</li>
+    <li><strong>给 AI 角色定位</strong>（"扮演资深 DBA"），输出会从那个视角看</li>
+    <li><strong>明确"不要给答案"</strong>（如果是练习题），避免 AI 把活全干了</li>
+    <li><strong>贴完整上下文</strong>（代码 + 错误 + 环境 + 你已做的尝试），AI 一次答对率高</li>
+    <li><strong>要格式</strong>（"先说问题，再说修复"），AI 输出更结构化</li>
+  </ol>
+</div>
+
+<div class="prompt">
+  <h2>⚠️ 4 个绝对不该用 AI 的场景</h2>
+  <ul style="padding-left: 24px;">
+    <li><strong>急停 / 安全联锁代码</strong> —— 必须自己懂每一行，工业事故代价高</li>
+    <li><strong>不理解就直接抄</strong> —— 你会 debug 一辈子，下次还是不会</li>
+    <li><strong>关键配置文件</strong>（证书 / 密钥 / 产线 IP） —— 不能给 AI</li>
+    <li><strong>你自己公司的专有逻辑</strong> —— 上传给 AI 可能有泄密风险</li>
+  </ul>
+</div>
+
+<div class="prompt">
+  <h2>📊 评估 AI 输出是否可信</h2>
+  <p>每条 AI 输出前问自己 3 问：</p>
+  <ol style="padding-left: 24px;">
+    <li><strong>这代码我能逐行解释吗？</strong> 不能 → 不要用</li>
+    <li><strong>跟官方文档对得上吗？</strong> 不对 → 优先信文档</li>
+    <li><strong>边界情况处理了吗？</strong> 没处理 → 补上</li>
+  </ol>
+  <p>如果 3 问都过，可以信。如果任何 1 问过不了，要么回头补基础，要么查文档。</p>
+</div>
+
+<footer>
+  <p><strong>版本：</strong>1.0 · 配套《学习计划_智能工厂_24周.html》使用</p>
+  <p>许可证：MIT · 欢迎复制修改 · 请保留原作者声明</p>
+</footer>
+
+</div>
+
+</body>
+</html>
