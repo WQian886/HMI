@@ -4,7 +4,7 @@
 //
 //   【设计】用静态方法 + namespace 风格,不要状态、无构造
 //   【取舍】enum ↔ string 的转换:Variable::DataType/Access 走 Q_ENUM 反射;AlarmLevel/Direction 无 Q_ENUM,手写 switch
-//   【参照】Wqian 2026-08-07 阶段 6.2 开干;inventory/HMI.md 阶段 6 schema 设计
+//   【参照】Wqian 2026-08-07 阶段 6.2 开干;schema 设计见 docs/专题/阶段6_schema设计.md
 
 #pragma once
 

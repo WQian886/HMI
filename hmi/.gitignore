@@ -1,0 +1,95 @@
+# ===== Build outputs =====
+build/
+build-*/
+out/
+cmake-build-*/
+
+# VS build config dirs (all platforms)
+x64/
+x86/
+ARM/
+ARM64/
+
+# Build flavors
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# ===== Qt =====
+*.pro.user
+*.pro.user.*
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+*.qmake.stash
+moc_predefs.h.cbt
+
+# ===== Compilers / Linkers / Binaries =====
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.recipe
+*.log
+*.tlog/
+*.ipch
+*.obj.enc
+*.db
+*.db-shm
+*.db-wal
+*.vsidx
+
+# ===== IDEs =====
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ===== CMake / Ninja =====
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+Testing/
+
+# ===== Editor swap / backup =====
+*.swp
+*.swo
+*~
+*.tmp
+*.bak
+*.bak.*
+tmp_*.json
+*.cache
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ===== Secrets (just in case) =====
+*.env
+.env
+secrets/
+# 阶段 6.2 测试产物(运行时 JSON,不入库)
+# 注意:git 只认行首的 #,不支持行尾注释 —— 原来写成同一行,导致这条规则从未生效
+test_save.json
+
+# 个人学习资料(本地保留,不进 git)
+学习计划_智能工厂_24周.html

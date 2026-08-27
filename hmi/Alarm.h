@@ -27,7 +27,9 @@ enum class AlarmState   { Active, Acknowledged, Cleared };
 //   【背景】5.2 阶段定下来的字段数据模型
 //   【改法】name / variableName / level / state + 3 个时间戳 + 触发值快照 + 阈值
 //   【取舍】3 个时间戳是工业标配(触发/确认/恢复);triggerValue 留事故分析用;threshold 调试用
-//   【参照】Wqian 2026-08-04 拍板的阶段 5 修订版(inventory/HMI.md)
+//   【参照】Wqian 2026-08-04 拍板的阶段 5 修订版
+//          (原记于外部 inventory:C:\Users\HP\.openclaw\workspace\inventory\HMI.md,不在本仓库)
+//          本仓库内的现行版本见 docs/现状.md 与 docs/路线图.md
 struct Alarm {
     qint64      id_ = 0;          // 唯一 ID(QDateTime::currentMSecsSinceEpoch() 生成)—— 5.5 BUGFIX
     QString     name;             // 报警名("温度高")

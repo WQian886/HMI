@@ -135,7 +135,7 @@ bool Project::saveToFile(const QString& path) {
 //   【背景】Q4-A 拍板:JSON = 唯一真理,加载后内存 = JSON(全删干净 + 重建)
 //   【流程】读文件 → 解析 JSON → 校验 schema_version → 清空现有状态 → 重建 4 类 → 失败 abort
 //   【取舍】失败严格:任何引用错误(variables 不存在)立即 abort,不留半成品状态
-//   【参照】Wqian 2026-08-07 阶段 6.3 开干;inventory/HMI_阶段6_schema_design.md
+//   【参照】Wqian 2026-08-07 阶段 6.3 开干;docs/专题/阶段6_schema设计.md
 bool Project::loadFromFile(const QString& path) {
     if (!varMgr_ || !alarmMgr_ || !actionMgr_ || !pollScheduler_) {
         emit loadError("管理器指针为空,loadFromFile 中止");

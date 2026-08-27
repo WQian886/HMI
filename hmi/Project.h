@@ -6,7 +6,7 @@
 //          saveToFile 不接管生命周期,只读
 //   【取舍】TcpClient 用于拿 host/port(阶段 6.2 getter 已经加好)
 //          Modbus 详细参数暂时硬编码在 saveToFile 里(以后可加 ModbusMaster getter)
-//   【参照】inventory/HMI_阶段6_schema_design.md
+//   【参照】docs/专题/阶段6_schema设计.md
 
 #pragma once
 
