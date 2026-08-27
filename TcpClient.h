@@ -42,7 +42,7 @@ public:
 signals:
     void connected();                                  // 连接成功
     void disconnected();                               // 连接断开
-    void readyRead(const QByteArray& data);            // 累积缓冲发出去
+    void readyRead(const QByteArray& data);            // 累积缓冲发出去 （收到数据）
     void errorOccurred(const QString& msg);            // 发生错误
 
     // 阶段 1 第 2 练:重连进度信号(给 UI 显示"重连中(2/5)")

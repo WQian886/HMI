@@ -60,7 +60,7 @@ public:
     bool isRunning() const { return timer_.isActive(); }
 
     // 阶段 4.x 写审计日志(2026-07-28):给 UI 一次性拉所有记录
-    QList<WriteAuditEntry> auditLog() const { return auditLog_; }
+	QList<WriteAuditEntry> auditLog() const { return auditLog_; }// 只读,UI 拉取后自己缓存
 
 signals:
     // 阶段 4.x 写审计日志(2026-07-28):每条新记录都发,UI 接了加行
@@ -70,7 +70,7 @@ signals:
     void writeFailed(const QString& varName, const QString& reason);
 
 private slots:
-    void onTick();
+	void onTick();   // 每 100ms 扫描 dirty Variable,发写请求
     void onWriteReply(quint32 requestId, bool success);
 
     // ★ 阶段 6.3(2026-08-07):监听 varMgr_->variableReplaced,更新 pending_ 里的失效指针
