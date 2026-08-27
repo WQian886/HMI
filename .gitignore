@@ -87,4 +87,9 @@ $RECYCLE.BIN/
 *.env
 .env
 secrets/
-test_save.json  # �׶� 6.2 ���Բ���(����ʱ JSON,�����)
+# 阶段 6.2 测试产物(运行时 JSON,不入库)
+# 注意:git 只认行首的 #,不支持行尾注释 —— 原来写成同一行,导致这条规则从未生效
+test_save.json
+
+# 个人学习资料(本地保留,不进 git)
+学习计划_智能工厂_24周.html
