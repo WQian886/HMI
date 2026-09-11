@@ -1,0 +1,54 @@
+# 阶段 A · A6 CI (GitHub Actions windows-2022)
+name: build
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtserialbus'
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure (主程序)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+
+      - name: Configure (tests)
+        run: cmake -S tests -B tests/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build tests
+        run: cmake --build tests/build --config Debug --parallel
+
+      - name: Run tests
+        working-directory: tests/build
+        run: ctest --output-on-failure -C Debug
+
+      - name: Upload hmi.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: hmi-windows-debug
+          path: build/bin/Debug/hmi.exe
+          if-no-files-found: warn

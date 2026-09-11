@@ -39,11 +39,18 @@
 
 ---
 
-## 📚 学习路线
+## 📚 学习路线(历史快照)
 
-> ⚠ 阶段编号只有这一套(2026-08-27 统一)。旧版 README 用过另一套编号,已作废归档。
+> ⚠ **本表是 2026-08-27 统一编号后的学习路线快照,仅作历史**。
+> 2026-09-08 锁定 v0.2.0 商业化路线后,**阶段编号已改为 A–I**,权威路线见
+> [`docs/路线图.md`](docs/路线图.md)("接下来做什么"的唯一答案)。
+>
+> 怎么对得上:
+> - 阶段 0–5 = 完成态(本表 ✅)
+> - 阶段 6 = 已并入 v0.2.0 的"阶段 A 工程化基线",见 [`hmi/docs/阶段A_工程化基线.md`](hmi/docs/阶段A_工程化基线.md)
+> - 阶段 7 / 8+ = 已全部拆解进 v0.2.0 的 A–I 9 阶段(用户权限/多协议/历史库/画面/报警/OPC UA/配方/安装包)
 
-| 阶段 | 内容 | 状态 |
+| 阶段 | 内容 | 状态(历史) |
 |---|---|---|
 | 0 | Qt 热身(窗口、信号槽、元对象系统) | ✅ |
 | 1 | 传输层 TCP(超时 + 指数退避重连 + 心跳) | ✅ |
@@ -51,11 +58,11 @@
 | 3 | 变量模型(订阅发布 + 轮询 + 死区) | ✅ |
 | 4 | 控件绑定(变量 ↔ UI 双向) | ✅ |
 | 5 | 业务层(状态机 + 报警 + 报警联动) | ✅ |
-| 6 | 工程文件(JSON 存读) | 🟡 端到端验收中 |
-| 7 | 整合 demo(真 PLC + 24h 长跑 + 截图视频) | ⬜ |
-| 8+ | 可选扩展(S7 / 曲线 / 串口 / 多 PLC / 权限) | ⬜ |
+| 6 | 工程文件(JSON 存读) | 🟡 6.5 端到端验收 ⏳ → 转入 v0.2.0 阶段 A |
+| 7 | 整合 demo(真 PLC + 24h 长跑 + 截图视频) | ↪️ 见 v0.2.0 阶段 A |
+| 8+ | 可选扩展(S7 / 曲线 / 串口 / 多 PLC / 权限) | ↪️ 见 v0.2.0 阶段 B–I |
 
-细化任务见 [`docs/路线图.md`](docs/路线图.md)。
+**下一步该做什么**:打开 [`docs/路线图.md`](docs/路线图.md) 看 v0.2.0 阶段 A 验证清单。
 
 ---
 
@@ -94,28 +101,40 @@ Qt signal/slot 是层间唯一的调度机制。详见 [`docs/专题/2026-08-09_
 ## 📁 目录结构
 
 ```
-HMI/
-├── README.md              ← 本文件(唯一入口)
-├── LICENSE                  MIT
-├── docs/                  ← 所有文档
-│   ├── 现状.md              进度 + 架构 + 约定 + 环境(唯一权威)
-│   ├── 路线图.md            接下来做什么(唯一权威)
-│   ├── 改善清单.md          代码待修 30 条
-│   ├── HMI工程档案.md       Qt 知识卡片库
-│   ├── 专题/                模块深挖(调度机制/报警联动/Modbus/schema)
-│   ├── 通用知识/            跨项目可复用
-│   ├── 日记/                按天流水
-│   └── 归档/                过期文档(只读)
-└── hmi/                   ← Qt VS 工程(VS 打开这一层)
-    ├── hmi.slnx / hmi.vcxproj
+HMI/                              ← 仓库根(2026-09-08 从更上层下移至此)
+├── README.md                       本文件(唯一入口)
+├── LICENSE                         MIT
+├── scripts/                        自维护脚本(目前含 sync_vcxproj.py)
+├── docs/                         ← 所有文档
+│   ├── 现状.md                     进度 + 架构 + 约定 + 环境(唯一权威)
+│   ├── 路线图.md                   接下来做什么(唯一权威,v0.2.0 A–I)
+│   ├── 改善清单.md                 代码待修 30 条
+│   ├── 优化与改善计划.html         v0.2.0 完整方案
+│   ├── HMI工程档案.md              Qt 知识卡片库
+│   ├── 专题/                       模块深挖(调度机制/报警联动/Modbus/schema)
+│   ├── 通用知识/                   跨项目可复用
+│   ├── 日记/                       按天流水
+│   └── 归档/                       过期文档(只读)
+└── hmi/                         ← Qt VS 工程根(单层)
+    ├── hmi.slnx / hmi.vcxproj / hmi.vcxproj.filters
     ├── main.cpp / hmi.cpp / hmi.h / hmi.ui
-    ├── TcpClient · ModbusMaster                 传输 + 协议
-    ├── Variable · VariableManager               数据
+    ├── TcpClient · ModbusMaster                传输 + 协议
+    ├── Variable · VariableManager              数据
     ├── PollScheduler · WriteScheduler · Binding 调度 + 绑定
     ├── Alarm · AlarmManager · ThresholdAlarmChecker · WriteFailChecker
-    ├── ActionManager                            报警联动
-    └── Project · JsonSerializer                 工程文件
+    ├── ActionManager                           报警联动
+    ├── Project · JsonSerializer                工程文件
+    ├── src/                                    A 阶段:logging/crash/instance/tray
+    ├── installer/hmi.iss                       A 阶段:Inno Setup 安装包
+    ├── tests/                                  A 阶段:单元测试(自带 CMakeLists.txt)
+    ├── docs/阶段A_工程化基线.md                A 阶段:验证步骤
+    ├── .clang-tidy / .clang-format             A 阶段:静态分析
+    ├── .github/workflows/build.yml             A 阶段:CI
+    └── CHANGELOG.md                            A 阶段:变更日志(待写)
 ```
+
+**VS 主打开路径**:仓库根 → `hmi/hmi.slnx`(单层,不是嵌套)
+**cmake 构建路径**:仓库根 → `hmi/` 下 `cmake -B build`(CMakeLists.txt 2026-09-08 已升级为 GLOB_RECURSE)
 
 ---
 

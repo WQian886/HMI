@@ -1,0 +1,19 @@
+# 阶段 A · A7 clang-format
+BasedOnStyle: Mozilla
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+BreakBeforeBraces: Allman
+AlignAfterOpenBracket: Align
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+DerivePointerAlignment: false
+PointerAlignment: Left
+Language: Cpp
+Standard: c++17
+NamespaceIndentation: None
+FixNamespaceComments: true
+SortIncludes: true
+IncludeBlocks: Preserve

@@ -69,10 +69,13 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>      <!-- 阶段 A:全配置 Windows,启动无控制台,看 hmi.log 看 qDebug -->
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="Configuration">
@@ -83,12 +86,15 @@
       <ConformanceMode>true</ConformanceMode>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -141,6 +147,21 @@
     <!-- 阶段 4.3.x:WriteFailChecker 写失败转报警(2026-08-05 Bug #2 修复) -->
     <QtMoc Include="WriteFailChecker.h" />
     <ClCompile Include="WriteFailChecker.cpp" />
+
+    <!-- 阶段 A:工程化基线新增 8 个文件(2026-09-08) -->
+    <!-- A2 单实例(Q_OBJECT + 信号) -->
+    <!-- 注:<QtMoc> 已隐含 <ClInclude> 语义,不可重复注册,否则 VS 报"Header Files 下已存在" -->
+    <QtMoc Include="src\instance\SingleInstance.h" />
+    <ClCompile Include="src\instance\SingleInstance.cpp" />
+    <!-- A2 系统托盘(Q_OBJECT + 信号) -->
+    <QtMoc Include="src\tray\SystemTray.h" />
+    <ClCompile Include="src\tray\SystemTray.cpp" />
+    <!-- A3 日志系统(Q_DECLARE_LOGGING_CATEGORY,无 Q_OBJECT) -->
+    <ClInclude Include="src\logging\Logging.h" />
+    <ClCompile Include="src\logging\Logging.cpp" />
+    <!-- A4 崩溃 dump(无 Q_OBJECT,Windows API) -->
+    <ClInclude Include="src\crash\CrashHandler.h" />
+    <ClCompile Include="src\crash\CrashHandler.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
