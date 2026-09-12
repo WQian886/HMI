@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QtWidgets/QMainWindow>
 #include <QTimer>  // 阶段 0 第 1 练:加 QTimer 头
@@ -12,6 +12,7 @@
 #include "AlarmManager.h"    // 阶段 5.2:报警管理器(集中管理所有 Checker + Alarm 生命周期)
 #include "ActionManager.h"   // 阶段 5.6:报警联动动作(关阀/停机)
 #include "Project.h"          // ★ 阶段 6.2:JSON 配置存读
+#include <QCloseEvent>
 #include "ui_hmi.h"
 
 class hmi : public QMainWindow
@@ -22,6 +23,10 @@ public:
     hmi(QWidget *parent = nullptr);
     ~hmi();
 
+
+protected:
+    // ★ DIAG-2026-09-09:窗口关闭原因日志(spontaneous=true 表示外部/Qt,=false 表示用户代码)
+    void closeEvent(QCloseEvent* e) override;
 private slots:
     // 阶段 0 第 2 练:改名 + 改用显式 connect(避开 on_xxx_xxx 自动连接约定)
 	void onStartClicked();  // 点击了"连接"按钮 槽函数

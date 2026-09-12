@@ -11,6 +11,8 @@
 #include <QRegularExpressionValidator>
 #include <QTableWidget>     // 阶段 4.x 写审计日志
 #include <QTableWidgetItem> // 阶段 4.x 写审计日志
+#include <QCloseEvent>
+#include "logging/Logging.h"
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
@@ -418,6 +420,18 @@ hmi::hmi(QWidget *parent)
         });
 }
 
+
+// ★ DIAG-2026-09-09:窗口关闭原因诊断
+//   spontaneous=true → 外部事件(WM_CLOSE / Taskmgr / 父进程退出)
+//   spontaneous=false → 用户代码调 close()
+//   看 isVisible → 关之前窗口是显示的还是隐藏的
+void hmi::closeEvent(QCloseEvent* e) {
+    qCInfo(hmiApp) << "[hmi-close] reason spontaneous=" << e->spontaneous()
+                   << "isVisible=" << isVisible()
+                   << "isMinimized=" << isMinimized()
+                   << "windowState=" << (int)windowState();
+    QMainWindow::closeEvent(e);
+}
 hmi::~hmi()
 {}
 

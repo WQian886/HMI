@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+﻿cmake_minimum_required(VERSION 3.21)
 project(hmi LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -66,12 +66,18 @@ set(RESOURCES
 #   - 新增的 .cpp / .h 自动捡进 SOURCES / HEADERS
 #   - CONFIGURE_DEPENDS 让 CMake 在 build 时检测文件变化,自动重 configure
 #   - 排除 Qt 生成的中间文件(*.moc / moc_*.cpp 等)
-file(GLOB EXTRA_CPP CONFIGURE_DEPENDS
+# ★ 阶段 A 修复:排除 tests/ 目录(它有自己的工程和 moc 文件,不能混编)
+file(GLOB_RECURSE EXTRA_CPP CONFIGURE_DEPENDS
     "*.cpp"
+    "src/*.cpp"
 )
-file(GLOB EXTRA_H CONFIGURE_DEPENDS
+file(GLOB_RECURSE EXTRA_H CONFIGURE_DEPENDS
     "*.h"
+    "src/*.h"
 )
+# 排除 tests/、x64/、out/ 等构建产物目录
+list(FILTER EXTRA_CPP EXCLUDE REGEX "[/\\](tests|x64|out)[/\\]")
+list(FILTER EXTRA_H   EXCLUDE REGEX "[/\\](tests|x64|out)[/\\]")
 list(REMOVE_ITEM EXTRA_CPP ${SOURCES})
 list(REMOVE_ITEM EXTRA_H   ${HEADERS})
 list(APPEND SOURCES ${EXTRA_CPP})
@@ -84,7 +90,18 @@ source_group("Headers"     REGULAR_EXPRESSION ".*\.h$")
 source_group("Forms"       REGULAR_EXPRESSION ".*\.ui$")
 source_group("Resources"   REGULAR_EXPRESSION ".*\.qrc$")
 source_group("Build Files" REGULAR_EXPRESSION "(CMakeLists\.txt|.*Presets\.json|.*\.slnx|.*\.vcxproj.*|default\.json|LICENSE)$")
-qt_add_executable(hmi ${SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})  # ★ 不写 WIN32 —— 保持 CONSOLE 子系统,与 hmi.vcxproj 一致,黑框 + qDebug 终端输出
+
+# 阶段 A:Debug + Release 都用 Windows 子系统
+# 启动没黑框,用户没法通过关黑框误杀程序;qDebug 输出到 hmi.log(看 %APPDATA%\QianWei\HMI\logs)
+# vcxproj 也对齐改了(两个配置都 SubSystem=Windows)
+
+qt_add_executable(hmi ${SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})
+# 阶段 A:Debug + Release 都用 Windows 子系统
+# 启动没黑框,用户没法通过关黑框误杀程序;qDebug 输出到 hmi.log(看 %APPDATA%\QianWei\HMI\logs)
+# vcxproj 也对齐改了(两个配置都 SubSystem=Windows)
+set_target_properties(hmi PROPERTIES WIN32_EXECUTABLE TRUE)
+
+target_include_directories(hmi PRIVATE src)
 
 target_link_libraries(hmi PRIVATE
     Qt6::Core

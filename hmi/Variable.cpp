@@ -66,11 +66,11 @@ Variable::SetValueResult Variable::setValue(const QVariant& v, bool checkRange) 
         // 死区=0 或首次刷新:老逻辑,严格比较
         changed = (value_ != v);
     }
-    value_ = v;
-    // timestamp 跟 value 同步更新(保留原行为:调用一次就刷一次)
     timestamp_ = QDateTime::currentDateTime();
     // 仅在值真变了才发信号 — 死区过滤 / 轮询回包 / UI 刷新都挂这根信号
     if (changed) {
+        value_ = v;
+        timestamp_ = QDateTime::currentDateTime();
         emit valueChanged(*this);
         return SetValueResult::Accepted;  // 真改了
     }
