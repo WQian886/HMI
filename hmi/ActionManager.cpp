@@ -3,6 +3,7 @@
 #include "ActionManager.h"
 #include "Alarm.h"
 #include "Variable.h"
+#include "logging/Logging.h"  // ★ E #27 #28(2026-09-15):联动失败日志走 hmiAlarm 分类
 
 ActionManager::ActionManager(QObject* parent) : QObject(parent) {}
 ActionManager::~ActionManager() = default;
@@ -58,12 +59,32 @@ void ActionManager::onAlarmTriggered(const Alarm& a) {
     auto it = mappings_.find(a.name);
     if (it == mappings_.end()) return;
 
-    // ★ 6.3 FIX:旧 Variable 已死,清空指针(联动不写)避免 dangling
-    if (!it->variable) return;
-    it->variable->setValue(it->value);  // 改本地值
-    it->variable->markDirty();          // 标记 dirty → WriteScheduler 写 PLC
+    // ★ E #27 FIX(2026-09-15):联动静默失效 → 改为日志告警 + return
+    //   【背景】原 `if (!it->variable) return;` 默默离开:报警响了安全动作没执行
+    //          却无任何痕迹,事故复盘看不到失败原因 → 现场事故级风险
+    //   【改法】走 qCWarning(hmiAlarm),联动失效在日志里留下证据
+    //   【参照】docs/改善清单.md E 类 #27
+    if (!it->variable) {
+        qCWarning(hmiAlarm) << "[Action] 联动失败:变量已不存在(被删除/未加载),alarm=" << a.name;
+        return;
+    }
 
-    qDebug() << "[Action]" << a.name << "→" << it->variable->name()
-             << "=" << it->value.toString();
+    // ★ E #28 FIX(2026-09-15):联动撒谎上报 → 检查 setValue 返回值
+    //   【背景】setValue 可能返 Rejected(类型不匹配 / 超范围)。原代码忽略返回值,
+    //          照样 markDirty + emit actionExecuted,审计日志会记"已执行"
+    //          但 PLC 实际啥也没收到 → 事故复盘唯一证据是假的
+    //   【改法】Rejected 时 qCWarning + return;不 markDirty / 不 emit,审计不撒谎
+    //   【参照】docs/改善清单.md E 类 #28;Variable.h SetValueResult 枚举
+    const auto result = it->variable->setValue(it->value);
+    if (result == Variable::SetValueResult::Rejected) {
+        qCWarning(hmiAlarm) << "[Action] 联动失败:变量" << it->variable->name()
+                            << "拒绝值" << it->value.toString();
+        return;
+    }
+    // Accepted / NoChange 都走原路径:WriteScheduler 会处理写失败重试
+    it->variable->markDirty();  // 标记 dirty → WriteScheduler 写 PLC
+
+    qCInfo(hmiAlarm) << "[Action]" << a.name << "→" << it->variable->name()
+                     << "=" << it->value.toString();
     emit actionExecuted(a.name, it->variable->name(), it->value.toString());
 }
