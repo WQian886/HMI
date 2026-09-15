@@ -44,6 +44,16 @@ TcpClient::TcpClient(QObject* parent) : QObject(parent) {
 TcpClient::~TcpClient() = default;
 
 void TcpClient::connectTo(const QString& host, quint16 port) {
+    // ★ 改善清单 #9(2026-09-15):host 空校验
+    //   【背景】空 host 调 connectToHost 会进入 ConnectingState 卡 3 秒(connect timeout),
+    //          期间 UI 显示"正在连接..."但其实啥也没连,误导操作员
+    //   【改法】直接 emit errorOccurred + return,不进 ConnectingState
+    //   【参照】docs/改善清单.md #9
+    if (host.isEmpty()) {
+        qWarning() << "[TcpClient] connectTo: host 为空,拒绝";
+        emit errorOccurred(QStringLiteral("host 为空"));
+        return;
+    }
     // 已有进行中?先 abort 干净
     if (socket_->state() != QAbstractSocket::UnconnectedState) {
         socket_->abort();

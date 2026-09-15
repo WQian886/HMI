@@ -44,6 +44,7 @@
 #include <QStandardPaths>
 #include <QUrl>
 #include <windows.h>
+#include <exception>  // ★ 改善清单 #21(2026-09-15):try-catch 需要 std::exception
 
 int main(int argc, char *argv[])
 {
@@ -209,5 +210,22 @@ int main(int argc, char *argv[])
     });
 
     qCInfo(hmiApp) << "进入事件循环";
-    return app.exec();
+    // ★ 改善清单 #21(2026-09-15):app.exec() 包 try-catch
+    //   【背景】crash::install() 兜 SEH(C 结构异常/空指针段错),但 C++ 异常
+    //          (std::bad_alloc / std::system_error 等)会穿透到 main → 默认 std::terminate
+    //   【改法】catch 弹 QMessageBox + 返回非 0,免得直接闪退用户看不到任何信息
+    //   【参照】docs/改善清单.md #21
+    try {
+        return app.exec();
+    } catch (const std::exception& e) {
+        qCCritical(hmiApp) << "未捕获 C++ 异常:" << e.what();
+        QMessageBox::critical(nullptr, QObject::tr("HMI 异常"),
+            QObject::tr("程序异常退出:\n%1").arg(e.what()));
+        return 1;
+    } catch (...) {
+        qCCritical(hmiApp) << "未捕获未知异常";
+        QMessageBox::critical(nullptr, QObject::tr("HMI 异常"),
+            QObject::tr("程序异常退出(未知错误)"));
+        return 2;
+    }
 }
