@@ -324,13 +324,12 @@ hmi::hmi(QWidget *parent)
     // 阶段 5.6(2026-08-04):报警联动动作 — 温度高/低时速度写 0(模拟停机)
     //   ★ 5.6 收尾(2026-08-07):mapping 配置抽到 initActionManager(),为阶段 6 JSON 铺路
     actionMgr_ = new ActionManager(this);
+    actionMgr_->setVariableManager(varMgr_);  // ★ E #29(2026-09-15):按名查指针需要 varMgr
     initActionManager(speed);   // 阶段 5.6 收尾:集中 mapping 配置(speed 是构造函数局部变量)
     connect(alarmMgr_, &AlarmManager::alarmTriggered,
             actionMgr_, &ActionManager::onAlarmTriggered);
 
-    // ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 ActionManager::Mapping 里失效的 Variable*
-    connect(varMgr_, &VariableManager::variableReplaced,
-            actionMgr_, &ActionManager::onVariableReplaced);
+    // ★ 阶段 6.3 onVariableReplaced connect 已删除(E #29):改为按名查,无需监听 variableReplaced 广播
 
     // ★ 阶段 6.2(2026-08-07):Project 类(saveToFile 入口)—— 等所有管理器都建好后才能 new
     project_ = new Project(varMgr_, alarmMgr_, actionMgr_, pollScheduler_, tcp_, this);
@@ -849,8 +848,9 @@ void hmi::updateModbusLabel() {
 //   【取舍】当前还是"配置写代码"(5.6 最小版),但接口位置留好
 //   【参照】Wqian 2026-08-07 阶段 5.6 收尾拍板
 void hmi::initActionManager(Variable* speed) {
-    actionMgr_->addMapping("温度高", speed, 0);   // 温度 > 50 触发 → 速度 = 0(停机)
-    actionMgr_->addMapping("温度低", speed, 0);   // 温度 < 10 触发 → 速度 = 0(停机)
+    // ★ E #29(2026-09-15):传变量名而不是裸指针(Mapping 已改存 QString)
+    actionMgr_->addMapping("温度高", speed->name(), 0);   // 温度 > 50 触发 → 速度 = 0(停机)
+    actionMgr_->addMapping("温度低", speed->name(), 0);   // 温度 < 10 触发 → 速度 = 0(停机)
 }
 
 // ★ 阶段 6.2(2026-08-07):UI 保存按钮槽函数 → 调 project_->saveToFile

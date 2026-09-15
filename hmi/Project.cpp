@@ -105,8 +105,8 @@ bool Project::saveToFile(const QString& path) {
     {
         QJsonArray actionsArr;
         for (const ActionManager::Mapping& m : actionMgr_->mappings()) {
-            QString varName = m.variable ? m.variable->name() : QString();
-            actionsArr.append(JsonSerializer::toActionMappingJson(m.alarmName, varName, m.value));
+            // ★ E #29(2026-09-15):Mapping.variableName 直接用,不再走裸指针
+            actionsArr.append(JsonSerializer::toActionMappingJson(m.alarmName, m.variableName, m.value));
         }
         root["actions"] = actionsArr;
     }
@@ -225,8 +225,11 @@ bool Project::loadFromFile(const QString& path) {
             emit loadError(QString("action \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
             return false;
         }
-        // action 可以引用还没存在的 alarm(只是永远不触发),不强制检查
-        actionMgr_->addMapping(alarmName, var, writeValue);
+        // ★ E #29(2026-09-15):addMapping 收 QString 名,直接传 varName 即可
+        //   【背景】原代码需要先 findVariable 拿指针再传 — 但 Mapping 改存变量名后
+        //          触发时按名查更稳,这里直接传名字更简洁(也保留上面的存在性检查)
+        //   【参照】docs/改善清单.md E #29
+        actionMgr_->addMapping(alarmName, varName, writeValue);
     }
 
     // 8. 通讯字段应用(★ 6.5 收尾:communications.host/port 真正应用到 TcpClient)

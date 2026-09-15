@@ -24,6 +24,7 @@
 
 struct Alarm;  // 前向声明跟 Alarm.h 定义一致(struct)
 class Variable;
+class VariableManager;  // ★ E #29(2026-09-15):按变量名查当前 Variable* 需要
 
 class ActionManager : public QObject {
     Q_OBJECT
@@ -31,11 +32,11 @@ public:
     explicit ActionManager(QObject* parent = nullptr);
     ~ActionManager() override;
 
-    // 注册映射:addMapping("温度高", speedVar, 0) → 温度高 → 速度=0(模拟停机)
+    // 注册映射:addMapping("温度高", "speedVar", 0) → 温度高 → 速度=0(模拟停机)
     //   【背景】报警触发后,联动执行安全动作(关阀/停机),避免操作员手慢误事
-    //   【取舍】配置写代码里(阶段 6 再做 JSON 配置文件);Variable 不接管生命周期
-    //   【参照】Wqian 2026-08-04 阶段 5.6 拍板
-    void addMapping(const QString& alarmName, Variable* variable, const QVariant& value);
+    //   【取舍】配置写代码里(阶段 6 再做 JSON 配置文件);按变量名查,触发时拿当前指针
+    //   【参照】Wqian 2026-08-04 阶段 5.6 拍板;E #29(2026-09-15)改存 QString
+    void addMapping(const QString& alarmName, const QString& variableName, const QVariant& value);
 
     void clear();
 
@@ -49,10 +50,12 @@ public slots:
     // 接收 AlarmManager::alarmTriggered(5.2 已有信号)
     void onAlarmTriggered(const Alarm& a);
 
-    // ★ 阶段 6.3(2026-08-07):监听 varMgr_->variableReplaced,更新 mappings_ 里失效的 Variable*
-    void onVariableReplaced(Variable* oldVar, Variable* newVar);
+    // ★ E #29(2026-09-15):onVariableReplaced 已删除 — 改存变量名后无需监听 variableReplaced 广播
 
 public:
+    // ★ E #29(2026-09-15):ActionManager 需要 VariableManager 引用来按名查 Variable*
+    void setVariableManager(VariableManager* m) { varMgr_ = m; }
+
     // ★ IMPROVE-6.2(2026-08-07):暴露 Mapping 给 saveToFile
     //   【背景】原来私有,JsonSerializer 拿不到 alarmName + variable + value
     //   【改法】提到 public,加 alarmName 字段(mappings() getter 返回 QList 拷贝用)
@@ -60,7 +63,9 @@ public:
     //   【参照】Wqian 2026-08-07 阶段 6.2 开干
     struct Mapping {
         QString   alarmName;
-        Variable* variable;   // 不接管生命周期(VariableManager 管)
+        QString   variableName;  // ★ E #29(2026-09-15):改存变量名,不存裸指针
+                                  //   触发时 varMgr_->findVariable(name) 拿当前指针
+                                  //   卸下 onVariableReplaced 临时补丁(阶段 6.3)
         QVariant  value;
     };
 
@@ -69,4 +74,5 @@ public:
 
 private:
     QHash<QString, Mapping> mappings_;  // alarm name → mapping
+    VariableManager* varMgr_ = nullptr;  // ★ E #29(2026-09-15):按名查指针的入口
 };

@@ -3,18 +3,25 @@
 #include "ActionManager.h"
 #include "Alarm.h"
 #include "Variable.h"
+#include "VariableManager.h"  // ★ E #29(2026-09-15):按名查 Variable 需要完整定义(findVariable)
 #include "logging/Logging.h"  // ★ E #27 #28(2026-09-15):联动失败日志走 hmiAlarm 分类
 
 ActionManager::ActionManager(QObject* parent) : QObject(parent) {}
 ActionManager::~ActionManager() = default;
 
-void ActionManager::addMapping(const QString& alarmName, Variable* variable, const QVariant& value) {
-    if (!variable || alarmName.isEmpty()) return;
-    // ★ IMPROVE-6.2(2026-08-07):Mapping 加 alarmName 字段,改用 explicit 赋值
+// ★ E #29(2026-09-15):改存变量名,不存裸指针
+//   【背景】原代码持裸 Variable*,Variable 被 delete 后变悬空指针 → 阶段 6.3 临时
+//          补丁 connect variableReplaced 来手动修指针
+//   【改法】addMapping 收 QString 名字,触发时 varMgr_->findVariable(name) 拿当前指针
+//   【取舍】多一次 hash 查找,但 mappings 数量 < 10 完全无感
+//   【参照】docs/改善清单.md E #29
+void ActionManager::addMapping(const QString& alarmName,
+                               const QString& variableName, const QVariant& value) {
+    if (variableName.isEmpty() || alarmName.isEmpty()) return;
     Mapping m;
-    m.alarmName = alarmName;
-    m.variable  = variable;
-    m.value     = value;
+    m.alarmName    = alarmName;
+    m.variableName = variableName;
+    m.value        = value;
     mappings_[alarmName] = m;
 }
 
@@ -28,23 +35,15 @@ QList<ActionManager::Mapping> ActionManager::mappings() const {
     list.reserve(mappings_.size());
     for (auto it = mappings_.constBegin(); it != mappings_.constEnd(); ++it) {
         Mapping m;
-        m.alarmName = it.key();
-        m.variable  = it.value().variable;
-        m.value     = it.value().value;
+        m.alarmName    = it.key();
+        m.variableName = it.value().variableName;  // ★ E #29
+        m.value        = it.value().value;
         list.append(m);
     }
     return list;
 }
 
-// ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 mappings_ 里的 Variable* 指针
-//   旧 Variable 被 delete,新 Variable 同名替换;由 hmi.cpp connect varMgr_->variableReplaced 触发
-void ActionManager::onVariableReplaced(Variable* oldVar, Variable* newVar) {
-    for (auto& m : mappings_) {
-        if (m.variable == oldVar) {
-            m.variable = newVar;  // 可能是 nullptr(被 clear)
-        }
-    }
-}
+// ★ E #29(2026-09-15):onVariableReplaced 已删除 — Mapping 改存变量名,不再需要监听 variableReplaced 广播
 
 void ActionManager::clear() {
     mappings_.clear();
@@ -59,13 +58,15 @@ void ActionManager::onAlarmTriggered(const Alarm& a) {
     auto it = mappings_.find(a.name);
     if (it == mappings_.end()) return;
 
-    // ★ E #27 FIX(2026-09-15):联动静默失效 → 改为日志告警 + return
-    //   【背景】原 `if (!it->variable) return;` 默默离开:报警响了安全动作没执行
-    //          却无任何痕迹,事故复盘看不到失败原因 → 现场事故级风险
-    //   【改法】走 qCWarning(hmiAlarm),联动失效在日志里留下证据
-    //   【参照】docs/改善清单.md E 类 #27
-    if (!it->variable) {
-        qCWarning(hmiAlarm) << "[Action] 联动失败:变量已不存在(被删除/未加载),alarm=" << a.name;
+    // ★ E #29(2026-09-15):按变量名查当前 Variable*(替代裸指针持有)
+    //   【背景】原 Mapping.variable 是裸 Variable*,Variable 被 delete 后悬空 → 6.3
+    //          临时补丁 connect variableReplaced 监听广播,新模块忘 connect 就崩
+    //   【改法】存 variableName,触发时按名查。Variable 被删了,findVariable 返回
+    //          nullptr → 走"变量不存在"分支,自然安全
+    //   【参照】docs/改善清单.md E #29
+    Variable* v = varMgr_ ? varMgr_->findVariable(it->variableName) : nullptr;
+    if (!v) {
+        qCWarning(hmiAlarm) << "[Action] 联动失败:变量" << it->variableName << "已不存在(被删除/未加载),alarm=" << a.name;
         return;
     }
 
@@ -75,16 +76,16 @@ void ActionManager::onAlarmTriggered(const Alarm& a) {
     //          但 PLC 实际啥也没收到 → 事故复盘唯一证据是假的
     //   【改法】Rejected 时 qCWarning + return;不 markDirty / 不 emit,审计不撒谎
     //   【参照】docs/改善清单.md E 类 #28;Variable.h SetValueResult 枚举
-    const auto result = it->variable->setValue(it->value);
+    const auto result = v->setValue(it->value);
     if (result == Variable::SetValueResult::Rejected) {
-        qCWarning(hmiAlarm) << "[Action] 联动失败:变量" << it->variable->name()
+        qCWarning(hmiAlarm) << "[Action] 联动失败:变量" << v->name()
                             << "拒绝值" << it->value.toString();
         return;
     }
     // Accepted / NoChange 都走原路径:WriteScheduler 会处理写失败重试
-    it->variable->markDirty();  // 标记 dirty → WriteScheduler 写 PLC
+    v->markDirty();  // 标记 dirty → WriteScheduler 写 PLC
 
-    qCInfo(hmiAlarm) << "[Action]" << a.name << "→" << it->variable->name()
+    qCInfo(hmiAlarm) << "[Action]" << a.name << "→" << v->name()
                      << "=" << it->value.toString();
-    emit actionExecuted(a.name, it->variable->name(), it->value.toString());
+    emit actionExecuted(a.name, v->name(), it->value.toString());
 }
