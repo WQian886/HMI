@@ -29,6 +29,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/PasswordHasher.cpp
     # 阶段 B · B1.2 UserManager
     ${HMI_SRC_DIR}/src/auth/UserManager.cpp
+    # 阶段 B · B1.3 UserStore
+    ${HMI_SRC_DIR}/src/auth/UserStore.cpp
 )
 
 function(add_hmi_test test_name)
@@ -52,5 +54,7 @@ add_hmi_test(tst_Serializer)
 add_hmi_test(tst_PasswordHasher)
 # 阶段 B · B1.2
 add_hmi_test(tst_UserManager)
+# 阶段 B · B1.3
+add_hmi_test(tst_UserStore)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

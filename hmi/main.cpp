@@ -30,6 +30,9 @@
 #include "crash/CrashHandler.h"
 #include "instance/SingleInstance.h"
 #include "tray/SystemTray.h"
+#include "auth/AdminSetupDialog.h"
+#include "auth/UserManager.h"
+#include "auth/UserStore.h"
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -149,6 +152,30 @@ int main(int argc, char *argv[])
     // 7. 主窗口 + 托盘
     hmi window;
     tray::SystemTray trayIcon(&window);
+
+    // ★ B1.3 用户系统集成(2026-09-16):
+    //   加载 users.json → 检查 hasUsers() → 首启弹 AdminSetupDialog → 接 signals 自动存
+    {
+        auth::UserManager userMgr;
+        const int loaded = auth::UserStore::load(userMgr);
+        qCInfo(hmiApp) << "[main] userMgr 启动:load=" << loaded
+                       << "hasUsers=" << (userMgr.hasUsers() ? "yes" : "no");
+        if (!userMgr.hasUsers()) {
+            // 首启引导
+            auth::AdminSetupDialog dlg(userMgr);
+            if (dlg.exec() != QDialog::Accepted) {
+                qCWarning(hmiApp) << "[main] 首启未建 admin,拒绝启动";
+                return 1;
+            }
+            // 立刻持久化(避免下次还弹引导)
+            if (!auth::UserStore::save(userMgr)) {
+                qCCritical(hmiApp) << "[main] 保存 users.json 失败,无法保证下次启动";
+                // 不强制退出 — 用户在跑,只是下次启动会再次引导
+            }
+        }
+        // 后续 B2 / B5 接 signals 即可,B1.3 阶段不再额外动作
+        Q_UNUSED(userMgr);
+    }
 
     QObject::connect(&trayIcon, &tray::SystemTray::showRequested, &window, [&window]() {
         window.show();

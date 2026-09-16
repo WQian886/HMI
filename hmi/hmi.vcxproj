@@ -172,6 +172,11 @@
     <!-- 阶段 B · B1.2 UserManager(Q_OBJECT,进 QtMoc) -->
     <QtMoc Include="src\auth\UserManager.h" />
     <ClCompile Include="src\auth\UserManager.cpp" />
+    <!-- 阶段 B · B1.3 UserStore + AdminSetupDialog -->
+    <ClInclude Include="src\auth\UserStore.h" />
+    <ClCompile Include="src\auth\UserStore.cpp" />
+    <QtMoc Include="src\auth\AdminSetupDialog.h" />
+    <ClCompile Include="src\auth\AdminSetupDialog.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

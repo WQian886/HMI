@@ -18,6 +18,16 @@ namespace qwhmi::auth {
 UserManager::UserManager(QObject* parent) : QObject(parent) {}
 UserManager::~UserManager() = default;
 
+void UserManager::appendLoadedUser(User u) {
+    // 仅给 UserStore::load 用。重复名字自动 skip(不覆盖现有用户)
+    if (indexOf(u.name) >= 0) {
+        qCWarning(hmiApp) << "[UserMgr] appendLoadedUser 跳过重复:" << u.name;
+        return;
+    }
+    users_.append(std::move(u));
+    // 不 emit userAdded(这是 load,不是 add)
+}
+
 int UserManager::indexOf(const QString& name) const {
     for (int i = 0; i < users_.size(); ++i) {
         if (User::namesEqual(users_[i].name, name)) {

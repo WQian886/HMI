@@ -62,6 +62,10 @@ public:
     // 用户总数
     int count() const { return users_.size(); }
 
+    // 内部方法:把"已 hash 的 User"加进列表(仅给 UserStore load 用)
+    // 业务代码不要调这个,直接走 addUser(name, plain, role)
+    void appendLoadedUser(User u);
+
 signals:
     // 添加成功(参数:用户名)
     void userAdded(const QString& name);

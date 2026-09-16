@@ -160,5 +160,18 @@
     <ClCompile Include="src\auth\UserManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B1.3 UserStore + AdminSetupDialog -->
+    <ClInclude Include="src\auth\UserStore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\auth\UserStore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\auth\AdminSetupDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\AdminSetupDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
