@@ -162,6 +162,13 @@
     <!-- A4 崩溃 dump(无 Q_OBJECT,Windows API) -->
     <ClInclude Include="src\crash\CrashHandler.h" />
     <ClCompile Include="src\crash\CrashHandler.cpp" />
+    <!-- 阶段 B · B1 用户/角色/密码哈希(无 Q_OBJECT) -->
+    <ClInclude Include="src\auth\Role.h" />
+    <ClCompile Include="src\auth\Role.cpp" />
+    <ClInclude Include="src\auth\User.h" />
+    <ClCompile Include="src\auth\User.cpp" />
+    <ClInclude Include="src\auth\PasswordHasher.h" />
+    <ClCompile Include="src\auth\PasswordHasher.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

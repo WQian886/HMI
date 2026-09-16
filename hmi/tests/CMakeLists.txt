@@ -13,12 +13,18 @@ enable_testing()
 # 主程序源码目录(用来 include 头文件)
 set(HMI_SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 include_directories(${HMI_SRC_DIR})
+# 阶段 B · B1:src/auth/ 头文件(#include "auth/Role.h" 风格)
+include_directories(${HMI_SRC_DIR}/src)
 
 # 测试要链接的核心源文件
 set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/Variable.cpp
     ${HMI_SRC_DIR}/VariableManager.cpp
     ${HMI_SRC_DIR}/JsonSerializer.cpp
+    # 阶段 B · B1 用户/角色/密码哈希
+    ${HMI_SRC_DIR}/src/auth/Role.cpp
+    ${HMI_SRC_DIR}/src/auth/User.cpp
+    ${HMI_SRC_DIR}/src/auth/PasswordHasher.cpp
 )
 
 function(add_hmi_test test_name)
@@ -38,5 +44,7 @@ endfunction()
 add_hmi_test(tst_Variable)
 add_hmi_test(tst_VariableManager)
 add_hmi_test(tst_Serializer)
+# 阶段 B · B1
+add_hmi_test(tst_PasswordHasher)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

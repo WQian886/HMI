@@ -133,4 +133,25 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <!-- 阶段 B · B1 用户/角色/密码哈希(无 Q_OBJECT,用 ClInclude) -->
+    <ClInclude Include="src\auth\Role.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\auth\Role.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\auth\User.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\auth\User.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\auth\PasswordHasher.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\auth\PasswordHasher.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
 </Project>
