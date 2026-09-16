@@ -177,6 +177,9 @@
     <ClCompile Include="src\auth\UserStore.cpp" />
     <QtMoc Include="src\auth\AdminSetupDialog.h" />
     <ClCompile Include="src\auth\AdminSetupDialog.cpp" />
+    <!-- 阶段 B · B2 LoginDialog(Q_OBJECT) -->
+    <QtMoc Include="src\auth\LoginDialog.h" />
+    <ClCompile Include="src\auth\LoginDialog.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

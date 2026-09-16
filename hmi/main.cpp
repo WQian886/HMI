@@ -31,6 +31,7 @@
 #include "instance/SingleInstance.h"
 #include "tray/SystemTray.h"
 #include "auth/AdminSetupDialog.h"
+#include "auth/LoginDialog.h"
 #include "auth/UserManager.h"
 #include "auth/UserStore.h"
 
@@ -172,8 +173,18 @@ int main(int argc, char *argv[])
                 qCCritical(hmiApp) << "[main] 保存 users.json 失败,无法保证下次启动";
                 // 不强制退出 — 用户在跑,只是下次启动会再次引导
             }
+        } else {
+            // ★ B2.1(2026-09-16):已有用户 → 必须登录才能启动
+            auth::LoginDialog loginDlg(userMgr);
+            if (loginDlg.exec() != QDialog::Accepted) {
+                qCWarning(hmiApp) << "[main] 用户取消登录,拒绝启动";
+                return 1;
+            }
+            qCInfo(hmiApp) << "[main] 登录成功:" << loginDlg.currentUser().name
+                           << "role=" << roleToString(loginDlg.currentUser().role);
+            // B2.2 阶段会把 currentUser 存入 CurrentUser 单例,B3+ 业务代码查
         }
-        // 后续 B2 / B5 接 signals 即可,B1.3 阶段不再额外动作
+        // 后续 B2.2 / B5 接 signals 即可,B2.1 阶段不再额外动作
         Q_UNUSED(userMgr);
     }
 

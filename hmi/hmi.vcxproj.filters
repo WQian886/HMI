@@ -173,5 +173,12 @@
     <ClCompile Include="src\auth\AdminSetupDialog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B2 LoginDialog -->
+    <QtMoc Include="src\auth\LoginDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\LoginDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
