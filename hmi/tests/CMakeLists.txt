@@ -21,10 +21,14 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/Variable.cpp
     ${HMI_SRC_DIR}/VariableManager.cpp
     ${HMI_SRC_DIR}/JsonSerializer.cpp
+    # 阶段 A · A3 日志(UserManager 用 qCInfo/qCWarning)
+    ${HMI_SRC_DIR}/src/logging/Logging.cpp
     # 阶段 B · B1 用户/角色/密码哈希
     ${HMI_SRC_DIR}/src/auth/Role.cpp
     ${HMI_SRC_DIR}/src/auth/User.cpp
     ${HMI_SRC_DIR}/src/auth/PasswordHasher.cpp
+    # 阶段 B · B1.2 UserManager
+    ${HMI_SRC_DIR}/src/auth/UserManager.cpp
 )
 
 function(add_hmi_test test_name)
@@ -46,5 +50,7 @@ add_hmi_test(tst_VariableManager)
 add_hmi_test(tst_Serializer)
 # 阶段 B · B1
 add_hmi_test(tst_PasswordHasher)
+# 阶段 B · B1.2
+add_hmi_test(tst_UserManager)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

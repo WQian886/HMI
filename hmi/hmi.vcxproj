@@ -169,6 +169,9 @@
     <ClCompile Include="src\auth\User.cpp" />
     <ClInclude Include="src\auth\PasswordHasher.h" />
     <ClCompile Include="src\auth\PasswordHasher.cpp" />
+    <!-- 阶段 B · B1.2 UserManager(Q_OBJECT,进 QtMoc) -->
+    <QtMoc Include="src\auth\UserManager.h" />
+    <ClCompile Include="src\auth\UserManager.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

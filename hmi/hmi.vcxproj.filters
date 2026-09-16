@@ -153,5 +153,12 @@
     <ClCompile Include="src\auth\PasswordHasher.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B1.2 UserManager(Q_OBJECT,进 QtMoc) -->
+    <QtMoc Include="src\auth\UserManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\UserManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
