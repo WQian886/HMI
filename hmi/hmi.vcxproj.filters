@@ -227,5 +227,12 @@
     <ClCompile Include="src\auth\UIPermission.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B5 AuditLog -->
+    <QtMoc Include="src\auth\AuditLog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\AuditLog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

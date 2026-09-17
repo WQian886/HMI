@@ -199,6 +199,9 @@
     <!-- 阶段 B · B4 UIPermission(无 Q_OBJECT,只 free functions) -->
     <ClInclude Include="src\auth\UIPermission.h" />
     <ClCompile Include="src\auth\UIPermission.cpp" />
+    <!-- 阶段 B · B5 AuditLog(QObject 单例 + Q_OBJECT 宏,进 QtMoc) -->
+    <QtMoc Include="src\auth\AuditLog.h" />
+    <ClCompile Include="src\auth\AuditLog.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
