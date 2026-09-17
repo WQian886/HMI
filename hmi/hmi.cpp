@@ -15,6 +15,7 @@
 #include <QTableWidgetItem> // 阶段 4.x 写审计日志
 #include <QCloseEvent>
 #include "logging/Logging.h"
+#include "auth/UIPermission.h"  // ★ B4(2026-09-17):画面级权限(按钮 enabled 跟 Permission 挂钩)
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
@@ -419,6 +420,18 @@ hmi::hmi(QWidget *parent)
                 QString("%1 %2").arg(e.resultText, e.address)));
             ui.auditTable->scrollToBottom();
         });
+
+    // ★ B4(2026-09-17):画面级权限 - 按钮 enabled 跟 CurrentUser.role 挂钩
+    //   B3 已在 Binding.cpp:148 / AlarmManager.cpp:35 拦截动作发生瞬间(兜底),
+    //   这里负责"动作发生前 UI 就灰",提升 UX、减少无效点击 + 拒日志噪音。
+    //   connectBtn/disconnectBtn 不绑:任何角色都要能连 PLC 看数据
+    //   speedWriteEdit 是 QLineEdit 不是按钮,B3 在回车时拦
+    //   托盘"用户管理"在 SystemTray.cpp 里 bindActionEnable(ManageUsers)
+    qwhmi::auth::bindButtonEnable(ui.startButton, qwhmi::auth::Permission::WriteVariable);
+    qwhmi::auth::bindButtonEnable(ui.stopButton,  qwhmi::auth::Permission::WriteVariable);
+    qwhmi::auth::bindButtonEnable(ui.resetButton, qwhmi::auth::Permission::WriteVariable);
+    qwhmi::auth::bindButtonEnable(ui.saveButton,  qwhmi::auth::Permission::EditProject);
+    qwhmi::auth::bindButtonEnable(ui.openButton,  qwhmi::auth::Permission::EditProject);
 }
 
 

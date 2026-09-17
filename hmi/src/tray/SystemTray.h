@@ -25,6 +25,7 @@
 
 class QWidget;
 class QMenu;
+class QAction;
 
 namespace qwhmi::tray {
 
@@ -36,6 +37,10 @@ public:
 
     bool install();
     bool isVisible() const;
+
+    // ★ B4(2026-09-17):暴露"用户管理"菜单项给 bindActionEnable(Permission::ManageUsers)
+    //   仅在 install() 成功后才返回非 nullptr
+    QAction* userManagementAction() const { return userMgrAct_; }
 
     void showMessage(const QString& title,
                           const QString& body,
@@ -57,6 +62,7 @@ private:
     QWidget*        mainWindow_ = nullptr;
     QSystemTrayIcon* icon_      = nullptr;
     QMenu*          menu_       = nullptr;
+    QAction*        userMgrAct_ = nullptr;  // ★ B4:用户管理菜单项(暴露给权限绑定)
 };
 
 } // namespace qwhmi::tray

@@ -38,6 +38,7 @@
 #include "auth/UserStore.h"
 #include "auth/CurrentUser.h"
 #include "auth/InactivityWatcher.h"
+#include "auth/UIPermission.h"  // ★ B4(2026-09-17):托盘"用户管理"绑 ManageUsers
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -286,6 +287,9 @@ int main(int argc, char *argv[])
         qCWarning(hmiApp) << "  → 关窗口会退出程序,需要从命令行杀进程";
     } else {
         qCInfo(hmiApp) << "✓ 托盘已安装,关窗口不会退出";
+        // ★ B4(2026-09-17):托盘"用户管理"菜单项绑 ManageUsers(只有 Admin 能进)
+        qwhmi::auth::bindActionEnable(trayIcon.userManagementAction(),
+                                       qwhmi::auth::Permission::ManageUsers);
     }
 
     if (parser.isSet(projectOpt)) {

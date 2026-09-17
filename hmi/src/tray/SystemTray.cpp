@@ -57,7 +57,7 @@ bool SystemTray::install() {
     auto* logoutAct = menu_->addAction(tr("切换用户"));
     auto* changePwAct = menu_->addAction(tr("修改密码"));
     // ★ B2.4:用户管理(仅 Admin 可见,exec() 内部再校验)
-    auto* userMgrAct = menu_->addAction(tr("用户管理"));
+    userMgrAct_ = menu_->addAction(tr("用户管理"));
     menu_->addSeparator();
     auto* quitAct = menu_->addAction(tr("退出"));
 
@@ -65,7 +65,7 @@ bool SystemTray::install() {
     connect(hideAct, &QAction::triggered, this, &SystemTray::hideRequested);
     connect(logoutAct, &QAction::triggered, this, &SystemTray::logoutRequested);
     connect(changePwAct, &QAction::triggered, this, &SystemTray::changePasswordRequested);
-    connect(userMgrAct, &QAction::triggered, this, &SystemTray::userManagementRequested);
+    connect(userMgrAct_, &QAction::triggered, this, &SystemTray::userManagementRequested);
     connect(quitAct, &QAction::triggered, this, &SystemTray::quitRequested);
 
     icon_->setContextMenu(menu_);
