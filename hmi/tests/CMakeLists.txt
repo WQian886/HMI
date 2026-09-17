@@ -7,7 +7,7 @@ project(hmi_tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus)
 enable_testing()
 
 # 主程序源码目录(用来 include 头文件)
@@ -39,6 +39,16 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/UIPermission.cpp
     # 阶段 B · B5 操作审计
     ${HMI_SRC_DIR}/src/auth/AuditLog.cpp
+    # 阶段 C · C.0 schema 演进
+    ${HMI_SRC_DIR}/Project.cpp
+    ${HMI_SRC_DIR}/ActionManager.cpp
+    ${HMI_SRC_DIR}/ThresholdAlarmChecker.cpp
+    ${HMI_SRC_DIR}/TcpClient.cpp
+    ${HMI_SRC_DIR}/Alarm.cpp
+    ${HMI_SRC_DIR}/AlarmManager.cpp
+    ${HMI_SRC_DIR}/PollScheduler.cpp
+    ${HMI_SRC_DIR}/ModbusMaster.cpp
+    ${HMI_SRC_DIR}/WriteScheduler.cpp
 )
 
 function(add_hmi_test test_name)
@@ -51,6 +61,8 @@ function(add_hmi_test test_name)
         Qt6::Gui
         Qt6::Test
         Qt6::Widgets   # ★ B4:UIPermission.cpp 需要 QAbstractButton / QAction
+        Qt6::Network   # ★ C.0:Project.cpp 间接 include QTcpSocket(TcpClient.h)
+        Qt6::SerialBus  # ★ C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 依赖)
     )
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
@@ -74,5 +86,7 @@ add_hmi_test(tst_UIPermission)
 # 阶段 B · B5
 add_hmi_test(tst_AuditLog)
 add_hmi_test(tst_AuditE2E)
+# 阶段 C · C.0
+add_hmi_test(tst_ProjectSchema)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
