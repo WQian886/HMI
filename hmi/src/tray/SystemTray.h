@@ -47,6 +47,7 @@ signals:
     void hideRequested();
     void logoutRequested();       // ★ B2.3:切换用户(logout + 重新弹 LoginDialog)
     void changePasswordRequested();// ★ B2.3:弹修改密码对话框
+    void userManagementRequested();// ★ B2.4:弹用户管理对话框(仅 Admin 可见)
     void quitRequested();
 
 private slots:

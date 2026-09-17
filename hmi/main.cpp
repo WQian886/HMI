@@ -33,6 +33,7 @@
 #include "auth/AdminSetupDialog.h"
 #include "auth/LoginDialog.h"
 #include "auth/ChangePasswordDialog.h"
+#include "auth/UserManagementDialog.h"
 #include "auth/UserManager.h"
 #include "auth/UserStore.h"
 #include "auth/CurrentUser.h"
@@ -253,6 +254,14 @@ int main(int argc, char *argv[])
         qCInfo(hmiApp) << "[main] 修改密码触发";
         auth::ChangePasswordDialog dlg(userMgr);
         dlg.exec();   // 模态,关闭不退出
+    });
+
+    // ★ B2.4:托盘"用户管理" → 弹 UserManagementDialog(Admin 才能进)
+    QObject::connect(&trayIcon, &tray::SystemTray::userManagementRequested,
+                     &app, [&userMgr]() {
+        qCInfo(hmiApp) << "[main] 用户管理触发";
+        auth::UserManagementDialog dlg(userMgr);
+        dlg.exec();   // exec() 内部检查 role == Admin,不是 Admin 直接 reject
     });
     QObject::connect(&instance, &instance::SingleInstance::messageReceived,
                      &window, [&window](const QStringList& args) {

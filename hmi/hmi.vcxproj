@@ -188,6 +188,11 @@
     <!-- 阶段 B · B2.3 ChangePasswordDialog(Q_OBJECT) -->
     <QtMoc Include="src\auth\ChangePasswordDialog.h" />
     <ClCompile Include="src\auth\ChangePasswordDialog.cpp" />
+    <!-- 阶段 B · B2.4 UserManagementDialog + NewUserDialog(Q_OBJECT) -->
+    <QtMoc Include="src\auth\UserManagementDialog.h" />
+    <ClCompile Include="src\auth\UserManagementDialog.cpp" />
+    <QtMoc Include="src\auth\NewUserDialog.h" />
+    <ClCompile Include="src\auth\NewUserDialog.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
