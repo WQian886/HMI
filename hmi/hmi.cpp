@@ -16,6 +16,8 @@
 #include <QCloseEvent>
 #include "logging/Logging.h"
 #include "auth/UIPermission.h"  // ★ B4(2026-09-17):画面级权限(按钮 enabled 跟 Permission 挂钩)
+#include "auth/CurrentUser.h"   // ★ B4 修复(2026-09-17):updateButtons 需要查 role
+#include "auth/Permission.h"    // ★ B4 修复(2026-09-17):updateButtons 需要查 WriteVariable
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
@@ -830,14 +832,24 @@ void hmi::updateButtons() {
     bool tcpIdle = (connState_ == ConnState::Disconnected || connState_ == ConnState::Failed);
     bool isReconnecting = (connState_ == ConnState::Reconnecting);
 
-    // 业务三键:必须 TCP 连上才能用(决策 1-B)
+    // ★ B4 修复(2026-09-17):updateButtons 之前会覆盖 bindButtonEnable 的 setEnabled,
+    //   导致 Viewer 连了 PLC 后 startButton/stopButton/resetButton 变亮(saveButton/openButton
+    //   不在 updateButtons 里所以 B4 生效)。修法:加 canWrite 闸门,跟 B4 形成 AND。
+    //   切换用户时 B4 自动重算,updateButtons 也会被 onTcpConnected/disconnected/state 变化触发重跑,
+    //   两者协同 → Viewer 永远灰,Admin 在 Stopped+已连 时亮。
+    const bool canWrite = qwhmi::auth::checkPermission(
+        qwhmi::auth::CurrentUser::instance().role(),
+        qwhmi::auth::Permission::WriteVariable);
+
+    // 业务三键:必须 TCP 连上 + 有 WriteVariable 权限才能用(决策 1-B + B4)
     // 阶段 5.1:Fault 态时,startButton/stopButton 因为 state != Stopped/Running 自动灰,
     //   resetButton 因为 state != Resetting 自动可用 —— 现有逻辑已正确,无需改
-    ui.startButton->setEnabled(tcpReady && state == State::Stopped);
-    ui.stopButton->setEnabled(tcpReady && state == State::Running);
-    ui.resetButton->setEnabled(tcpReady && state != State::Resetting);
+    ui.startButton->setEnabled(canWrite && tcpReady && state == State::Stopped);
+    ui.stopButton->setEnabled(canWrite && tcpReady && state == State::Running);
+    ui.resetButton->setEnabled(canWrite && tcpReady && state != State::Resetting);
 
     // 网络按钮:Reconnecting 时 connectBtn 灰掉,disconnectBtn 仍可点(用户取消)
+    //   不加 canWrite:Viewer 也要能连 PLC 看数据(B4 设计如此)
     ui.connectBtn->setEnabled(tcpIdle);
     ui.disconnectBtn->setEnabled(!tcpIdle || isReconnecting);
 
