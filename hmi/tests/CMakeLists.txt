@@ -37,6 +37,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/Permission.cpp
     # 阶段 B · B4 UI 权限绑定
     ${HMI_SRC_DIR}/src/auth/UIPermission.cpp
+    # 阶段 B · B5 操作审计
+    ${HMI_SRC_DIR}/src/auth/AuditLog.cpp
 )
 
 function(add_hmi_test test_name)
@@ -69,5 +71,7 @@ add_hmi_test(tst_CurrentUser)
 add_hmi_test(tst_Permission)
 # 阶段 B · B4
 add_hmi_test(tst_UIPermission)
+# 阶段 B · B5
+add_hmi_test(tst_AuditLog)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
