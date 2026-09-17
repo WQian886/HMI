@@ -8,6 +8,8 @@
 
 #include "Binding.h"
 #include "Variable.h"
+#include "auth/CurrentUser.h"
+#include "auth/Permission.h"
 #include <QLabel>
 #include <QLineEdit>
 #include <QPointer>  // 阶段 4.x:bindEdit 用 QPointer 防止 Variable delete 后 lambda 段错,见改善计划.md #7
@@ -137,6 +139,17 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
             if (!parseOk) {
                 applyNowEdit(edit, v);
                 qDebug() << "[BindEdit] 校验失败,已回滚:" << edit->text();
+                return;
+            }
+
+            // ★ B3(2026-09-17):写值前 checkPermission(WriteVariable)
+            if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                                       qwhmi::auth::Permission::WriteVariable)) {
+                applyNowEdit(edit, v);
+                setDirtyStyle(edit, true);
+                qCWarning(qwhmi::auth::hmiPerm)
+                    << "本用户" << qwhmi::auth::CurrentUser::instance().name()
+                    << "无 WriteVariable 权限,写入被拒:" << v->name();
                 return;
             }
 

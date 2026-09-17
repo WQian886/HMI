@@ -5,6 +5,8 @@
 #include "Variable.h"
 #include "VariableManager.h"  // ★ E #29(2026-09-15):按名查 Variable 需要完整定义(findVariable)
 #include "logging/Logging.h"  // ★ E #27 #28(2026-09-15):联动失败日志走 hmiAlarm 分类
+// 注:B3 决定联动不加 checkPermission(系统级行为,不是用户操作)
+//   ActionManager.h 顶声明"便利性功能,不是安全功能"
 
 ActionManager::ActionManager(QObject* parent) : QObject(parent) {}
 ActionManager::~ActionManager() = default;

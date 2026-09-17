@@ -33,6 +33,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/UserStore.cpp
     # 阶段 B · B2.2 CurrentUser
     ${HMI_SRC_DIR}/src/auth/CurrentUser.cpp
+    # 阶段 B · B3 Permission
+    ${HMI_SRC_DIR}/src/auth/Permission.cpp
 )
 
 function(add_hmi_test test_name)
@@ -60,5 +62,7 @@ add_hmi_test(tst_UserManager)
 add_hmi_test(tst_UserStore)
 # 阶段 B · B2.2
 add_hmi_test(tst_CurrentUser)
+# 阶段 B · B3
+add_hmi_test(tst_Permission)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

@@ -213,5 +213,12 @@
     <ClCompile Include="src\auth\NewUserDialog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B3 Permission -->
+    <ClInclude Include="src\auth\Permission.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\auth\Permission.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

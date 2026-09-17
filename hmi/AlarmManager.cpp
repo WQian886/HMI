@@ -1,6 +1,8 @@
 // 阶段 5.2(2026-08-04):AlarmManager 实现
 
 #include "AlarmManager.h"
+#include "auth/CurrentUser.h"
+#include "auth/Permission.h"
 
 AlarmManager::AlarmManager(QObject* parent) : QObject(parent) {}
 AlarmManager::~AlarmManager() = default;
@@ -30,6 +32,14 @@ QList<Alarm> AlarmManager::activeAlarms() const {
 }
 
 void AlarmManager::acknowledge(qint64 id) {
+    // ★ B3(2026-09-17):确认报警前 checkPermission(AcknowledgeAlarm)
+    if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                              qwhmi::auth::Permission::AcknowledgeAlarm)) {
+        qCWarning(qwhmi::auth::hmiPerm)
+            << "本用户" << qwhmi::auth::CurrentUser::instance().name()
+            << "无 AcknowledgeAlarm 权限,确认被拒 alarmId=" << id;
+        return;
+    }
     auto it = activeAlarms_.find(id);
     if (it == activeAlarms_.end()) return;
     if (it->state != AlarmState::Active) return;  // 已经确认/清除就不重复
