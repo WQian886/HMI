@@ -234,5 +234,27 @@
     <ClCompile Include="src\auth\AuditLog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 C · C.1 协议抽象层 -->
+    <QtMoc Include="src\drivers\IPollDriver.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\drivers\IPollDriver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\drivers\IPollDriver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\drivers\ModbusDriver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\drivers\ModbusDriver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\drivers\DriverFactory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\drivers\DriverFactory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

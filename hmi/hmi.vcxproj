@@ -202,6 +202,14 @@
     <!-- 阶段 B · B5 AuditLog(QObject 单例 + Q_OBJECT 宏,进 QtMoc) -->
     <QtMoc Include="src\auth\AuditLog.h" />
     <ClCompile Include="src\auth\AuditLog.cpp" />
+    <!-- 阶段 C · C.1 协议抽象层 -->
+    <QtMoc Include="src\drivers\IPollDriver.h" />
+    <ClInclude Include="src\drivers\IPollDriver.h" />
+    <ClCompile Include="src\drivers\IPollDriver.cpp" />
+    <ClInclude Include="src\drivers\ModbusDriver.h" />
+    <ClCompile Include="src\drivers\ModbusDriver.cpp" />
+    <ClInclude Include="src\drivers\DriverFactory.h" />
+    <ClCompile Include="src\drivers\DriverFactory.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
