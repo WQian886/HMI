@@ -37,7 +37,9 @@ static QString alarmLevelName(AlarmLevel l) {
 hmi::hmi(QWidget *parent)
     : QMainWindow(parent)
 {
+    qDebug() << "[B3-diag] hmi 构造函数开始";
     ui.setupUi(this);
+    qDebug() << "[B3-diag] setupUi 完成";
 
     // ★ B3 诊断(2026-09-17):登录完 3 秒自动模拟按回车,绕过 Wqian 不会操作 UI
     QTimer::singleShot(3000, this, [this]() {
@@ -52,6 +54,7 @@ hmi::hmi(QWidget *parent)
         ui.speedWriteEdit->setText("8888");
         emit ui.speedWriteEdit->returnPressed();
     });
+    qDebug() << "[B3-diag] QTimer::singleShot 已注册(this=" << this << ")";
 
     // 输入校验:IP 正则 + 端口范围
     QRegularExpression ipRx(
