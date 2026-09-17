@@ -6,6 +6,8 @@
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include <QIntValidator>
+#include <QTimer>                 // ★ B3 诊断(2026-09-17):登录后自动模拟 returnPressed
+#include <QMessageBox>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -36,6 +38,13 @@ hmi::hmi(QWidget *parent)
     : QMainWindow(parent)
 {
     ui.setupUi(this);
+
+    // ★ B3 诊断(2026-09-17):登录完 3 秒自动模拟按回车,绕过 Wqian 不会操作 UI
+    QTimer::singleShot(3000, this, [this]() {
+        qDebug() << "[B3-diag] 自动触发 setText + returnPressed";
+        ui.speedWriteEdit->setText("8888");
+        emit ui.speedWriteEdit->returnPressed();
+    });
 
     // 输入校验:IP 正则 + 端口范围
     QRegularExpression ipRx(
