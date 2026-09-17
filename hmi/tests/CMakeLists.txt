@@ -7,7 +7,7 @@ project(hmi_tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets)
 enable_testing()
 
 # 主程序源码目录(用来 include 头文件)
@@ -35,6 +35,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/CurrentUser.cpp
     # 阶段 B · B3 Permission
     ${HMI_SRC_DIR}/src/auth/Permission.cpp
+    # 阶段 B · B4 UI 权限绑定
+    ${HMI_SRC_DIR}/src/auth/UIPermission.cpp
 )
 
 function(add_hmi_test test_name)
@@ -46,6 +48,7 @@ function(add_hmi_test test_name)
         Qt6::Core
         Qt6::Gui
         Qt6::Test
+        Qt6::Widgets   # ★ B4:UIPermission.cpp 需要 QAbstractButton / QAction
     )
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
@@ -64,5 +67,7 @@ add_hmi_test(tst_UserStore)
 add_hmi_test(tst_CurrentUser)
 # 阶段 B · B3
 add_hmi_test(tst_Permission)
+# 阶段 B · B4
+add_hmi_test(tst_UIPermission)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
