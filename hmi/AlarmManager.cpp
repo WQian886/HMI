@@ -1,6 +1,7 @@
 // 阶段 5.2(2026-08-04):AlarmManager 实现
 
 #include "AlarmManager.h"
+#include "auth/AuditLog.h"      // ★ B5(2026-09-17):确认报警留痕
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
 
@@ -43,9 +44,17 @@ void AlarmManager::acknowledge(qint64 id) {
     auto it = activeAlarms_.find(id);
     if (it == activeAlarms_.end()) return;
     if (it->state != AlarmState::Active) return;  // 已经确认/清除就不重复
+    // ★ B5(2026-09-17):记一下原报警名,audit 行可读
+    const QString alarmName = it->name;
     it->state = AlarmState::Acknowledged;
     it->acknowledgedAt = QDateTime::currentDateTime();
     emit alarmAcknowledged(id);
+    // ★ B5:确认报警留痕(只在权限检查通过后才到这里)
+    //   注:AlarmManager 在全局 namespace,用全限定避免和 AlarmLevel 等其他"auth"符号冲突
+    qwhmi::auth::AuditLog::instance().appendCurrent(
+        "alarm.ack", QString::number(id),
+        QStringLiteral("name=%1").arg(alarmName),
+        QStringLiteral("ok"));
 }
 
 // ★ 阶段 6.3 FIX(2026-08-07):clearAll 必须真清一切 —— 不光清 activeAlarms_,也要清 checkers_

@@ -8,6 +8,7 @@
 
 #include "Binding.h"
 #include "Variable.h"
+#include "auth/AuditLog.h"      // ★ B5(2026-09-17):写值成功留痕
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
 #include <QLabel>
@@ -168,6 +169,11 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
             // (虽然值没变,但可能 PLC 端被外部改了,写回去对齐)— 简化决策:都 markDirty
             v->markDirty();           // 阶段 4.3.0:告诉 WriteScheduler 待写 PLC
             setDirtyStyle(edit, false);
+            // ★ B5(2026-09-17):写值成功留痕(v.name + 新值 + Accepted)
+            qwhmi::auth::AuditLog::instance().appendCurrent(
+                "variable.write", v->name(),
+                QStringLiteral("value=%1").arg(typedVal.toString()),
+                QStringLiteral("ok"));
         });
 
     // ③ Esc → 取消

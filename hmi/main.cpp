@@ -39,6 +39,7 @@
 #include "auth/CurrentUser.h"
 #include "auth/InactivityWatcher.h"
 #include "auth/UIPermission.h"  // ★ B4(2026-09-17):托盘"用户管理"绑 ManageUsers
+#include "auth/AuditLog.h"      // ★ B5(2026-09-17):操作审计日志
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -159,10 +160,50 @@ int main(int argc, char *argv[])
     //   理由:signals 自动存盘 / CurrentUser.login / InactivityWatcher 都要活到 main 退出
     auth::UserManager userMgr;
 
-    // ★ B2.2:signals → UserStore::save 集中触发,任何增删改都自动存盘
-    QObject::connect(&userMgr, &auth::UserManager::userAdded,    &app, [&userMgr]() { auth::UserStore::save(userMgr); });
-    QObject::connect(&userMgr, &auth::UserManager::userRemoved,  &app, [&userMgr]() { auth::UserStore::save(userMgr); });
-    QObject::connect(&userMgr, &auth::UserManager::passwordChanged, &app, [&userMgr]() { auth::UserStore::save(userMgr); });
+    // ★ B5(2026-09-17):UserManager signals → UserStore::save + AuditLog 集中触发
+    //   save:已有,自动持久化 users.json
+    //   audit:新增,把"谁在什么时间做了什么"留痕(给事故复盘 + 合规审计)
+    QObject::connect(&userMgr, &auth::UserManager::userAdded, &app,
+        [&userMgr](const QString& name) {
+            auth::UserStore::save(userMgr);
+            const auto* u = userMgr.findUser(name);
+            const QString role = u ? roleToString(u->role) : QStringLiteral("unknown");
+            auto& audit = auth::AuditLog::instance();
+            // 未登录 = 首启 AdminSetupDialog 触发(系统事件),已登录 = 用户管理增删(操作事件)
+            if (auth::CurrentUser::instance().isLoggedIn()) {
+                audit.appendCurrent("user.add", name, QStringLiteral("role=%1").arg(role));
+            } else {
+                audit.append("user.add", "system", "system", name, QStringLiteral("role=%1").arg(role));
+            }
+        });
+    QObject::connect(&userMgr, &auth::UserManager::userRemoved, &app,
+        [&userMgr](const QString& name) {
+            auth::UserStore::save(userMgr);
+            auth::AuditLog::instance().appendCurrent("user.remove", name);
+        });
+    QObject::connect(&userMgr, &auth::UserManager::passwordChanged, &app,
+        [&userMgr](const QString& name) {
+            auth::UserStore::save(userMgr);
+            auth::AuditLog::instance().appendCurrent("user.passwordChange", name);
+        });
+    // ★ B5:认证失败(独立 connect,因为 authenticationFailed 不需要 save)
+    QObject::connect(&userMgr, &auth::UserManager::authenticationFailed, &app,
+        [](const QString& name) {
+            auth::AuditLog::instance().append("auth.fail", "anonymous", "anonymous",
+                                             name, {}, QStringLiteral("fail"));
+        });
+
+    // ★ B5:CurrentUser login/logout 全局审计(覆盖首启 / 托盘切用户 / 自动注销 3 条路径)
+    QObject::connect(&auth::CurrentUser::instance(), &auth::CurrentUser::userLoggedIn, &app,
+        [](const QString& name) {
+            auth::AuditLog::instance().append("auth.login", name,
+                roleToString(auth::CurrentUser::instance().role()));
+        });
+    QObject::connect(&auth::CurrentUser::instance(), &auth::CurrentUser::userLoggedOut, &app,
+        []() {
+            // 注销时 name/role 已清,传 system 占位(actor 是"上次登录的用户"语义模糊,不写)
+            auth::AuditLog::instance().append("auth.logout", "system", "system");
+        });
 
     // ★ B1.3:加载 users.json + 首启引导
     const int loaded = auth::UserStore::load(userMgr);
