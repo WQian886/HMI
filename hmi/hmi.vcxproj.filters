@@ -193,5 +193,12 @@
     <ClCompile Include="src\auth\InactivityWatcher.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B2.3 -->
+    <QtMoc Include="src\auth\ChangePasswordDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\ChangePasswordDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

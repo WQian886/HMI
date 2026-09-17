@@ -185,6 +185,9 @@
     <ClCompile Include="src\auth\CurrentUser.cpp" />
     <QtMoc Include="src\auth\InactivityWatcher.h" />
     <ClCompile Include="src\auth\InactivityWatcher.cpp" />
+    <!-- 阶段 B · B2.3 ChangePasswordDialog(Q_OBJECT) -->
+    <QtMoc Include="src\auth\ChangePasswordDialog.h" />
+    <ClCompile Include="src\auth\ChangePasswordDialog.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

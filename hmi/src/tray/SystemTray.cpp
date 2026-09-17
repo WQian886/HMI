@@ -53,10 +53,16 @@ bool SystemTray::install() {
     auto* showAct = menu_->addAction(tr("显示主窗口"));
     auto* hideAct = menu_->addAction(tr("隐藏主窗口"));
     menu_->addSeparator();
+    // ★ B2.3:切换用户 + 修改密码
+    auto* logoutAct = menu_->addAction(tr("切换用户"));
+    auto* changePwAct = menu_->addAction(tr("修改密码"));
+    menu_->addSeparator();
     auto* quitAct = menu_->addAction(tr("退出"));
 
     connect(showAct, &QAction::triggered, this, &SystemTray::showRequested);
     connect(hideAct, &QAction::triggered, this, &SystemTray::hideRequested);
+    connect(logoutAct, &QAction::triggered, this, &SystemTray::logoutRequested);
+    connect(changePwAct, &QAction::triggered, this, &SystemTray::changePasswordRequested);
     connect(quitAct, &QAction::triggered, this, &SystemTray::quitRequested);
 
     icon_->setContextMenu(menu_);

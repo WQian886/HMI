@@ -32,6 +32,7 @@
 #include "tray/SystemTray.h"
 #include "auth/AdminSetupDialog.h"
 #include "auth/LoginDialog.h"
+#include "auth/ChangePasswordDialog.h"
 #include "auth/UserManager.h"
 #include "auth/UserStore.h"
 #include "auth/CurrentUser.h"
@@ -227,6 +228,32 @@ int main(int argc, char *argv[])
     });
     QObject::connect(&trayIcon, &tray::SystemTray::quitRequested,
                      &app, &QCoreApplication::quit);
+
+    // ★ B2.3(2026-09-17):托盘"切换用户" → logout + 重新弹 LoginDialog(in-place)
+    QObject::connect(&trayIcon, &tray::SystemTray::logoutRequested,
+                     &app, [&userMgr, &inactivityWatcher, &window]() {
+        qCInfo(hmiApp) << "[main] 手动注销触发";
+        auth::CurrentUser::instance().logout();
+        inactivityWatcher.stop();
+        auth::LoginDialog loginDlg(userMgr);
+        if (loginDlg.exec() != QDialog::Accepted) {
+            qCWarning(hmiApp) << "[main] 手动注销后用户拒绝登录,退出";
+            QCoreApplication::exit(1);
+            return;
+        }
+        auth::CurrentUser::instance().login(loginDlg.currentUser());
+        qCInfo(hmiApp) << "[main] 手动注销后重新登录:" << loginDlg.currentUser().name;
+        inactivityWatcher.start();
+        window.show();   // 切换用户后让主窗口重新可见(可能之前已隐藏)
+    });
+
+    // ★ B2.3:托盘"修改密码" → 弹 ChangePasswordDialog
+    QObject::connect(&trayIcon, &tray::SystemTray::changePasswordRequested,
+                     &app, [&userMgr]() {
+        qCInfo(hmiApp) << "[main] 修改密码触发";
+        auth::ChangePasswordDialog dlg(userMgr);
+        dlg.exec();   // 模态,关闭不退出
+    });
     QObject::connect(&instance, &instance::SingleInstance::messageReceived,
                      &window, [&window](const QStringList& args) {
         qCInfo(hmiApp) << "[main] messageReceived slot 触发,args=" << args;

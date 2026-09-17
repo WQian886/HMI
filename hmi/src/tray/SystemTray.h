@@ -45,6 +45,8 @@ public:
 signals:
     void showRequested();
     void hideRequested();
+    void logoutRequested();       // ★ B2.3:切换用户(logout + 重新弹 LoginDialog)
+    void changePasswordRequested();// ★ B2.3:弹修改密码对话框
     void quitRequested();
 
 private slots:
