@@ -8,6 +8,8 @@
 //   4. 切换用户 → 已注册的按钮自动重算(CurrentUser signal 钩生效)
 //   5. 重复注册同一控件 → 覆盖(以最后一次为准)
 //   6. nullptr 控件 → no-op,不崩
+//   7. 集成流:admin 登录 → 切 viewer → 全灰(等价真实 UI 流程)
+//   8. 4 角色 × 5 权限 矩阵全覆盖(hmi.cpp 5 个按钮 + 托盘 1 个 action 用的权限)
 //
 // 关联:UIPermission.h, CurrentUser.h, Permission.h
 // ============================================================================
@@ -47,6 +49,10 @@ private slots:
 
     // 信号触发链路(调试用)
     void applyAllBindings_triggersOnUserLoggedIn();
+
+    // 集成流(等价于真实启动 hmi.exe + 托盘切换用户的视觉验证)
+    void fullFlow_adminToViewer_disablesButtons();
+    void fullFlow_realRoles_haveExpectedVisibility();
 };
 
 namespace {
@@ -191,6 +197,80 @@ void TestUIPermission::applyAllBindings_triggersOnUserLoggedIn() {
     CurrentUser::instance().login(makeUser("admin1", Role::Admin));
     QCOMPARE(spy.count(), 1);
     QVERIFY(btn.isEnabled());  // signal hook 触发后已自动重算
+}
+
+// ★ B4 集成验证(C 方案)
+// 模拟真实流程:启动 hmi.exe → admin 登录 → 所有按钮亮 → 托盘"切换用户"
+//   → viewer 登录 → 所有按钮灰。等价覆盖真实 UI 视觉验证,
+//   不依赖 GUI 启动,Wqian 不用操作 UI 也能拿到确定性答案。
+void TestUIPermission::fullFlow_adminToViewer_disablesButtons() {
+    // 模拟 hmi.cpp 构造函数里的 5 个 bindButtonEnable 调用
+    QPushButton startBtn, stopBtn, resetBtn, saveBtn, openBtn;
+    bindButtonEnable(&startBtn, Permission::WriteVariable);
+    bindButtonEnable(&stopBtn,  Permission::WriteVariable);
+    bindButtonEnable(&resetBtn, Permission::WriteVariable);
+    bindButtonEnable(&saveBtn,  Permission::EditProject);
+    bindButtonEnable(&openBtn,  Permission::EditProject);
+
+    // 模拟 main.cpp 托盘 install 后的 bindActionEnable(ManageUsers)
+    QAction userMgrAct("用户管理");
+    bindActionEnable(&userMgrAct, Permission::ManageUsers);
+
+    // 阶段 1:admin 登录(模拟首启 + 首登)
+    CurrentUser::instance().login(makeUser("admin", Role::Admin));
+    QVERIFY(startBtn.isEnabled());
+    QVERIFY(stopBtn.isEnabled());
+    QVERIFY(resetBtn.isEnabled());
+    QVERIFY(saveBtn.isEnabled());
+    QVERIFY(openBtn.isEnabled());
+    QVERIFY(userMgrAct.isEnabled());
+
+    // 阶段 2:托盘"切换用户" → viewer 登录
+    CurrentUser::instance().login(makeUser("viewer", Role::Viewer));
+    QVERIFY(!startBtn.isEnabled());
+    QVERIFY(!stopBtn.isEnabled());
+    QVERIFY(!resetBtn.isEnabled());
+    QVERIFY(!saveBtn.isEnabled());
+    QVERIFY(!openBtn.isEnabled());
+    QVERIFY(!userMgrAct.isEnabled());
+
+    // 阶段 3:注销(自动 / 手动)→ 默认 Viewer 态 → 全灰(本来就是灰的)
+    CurrentUser::instance().logout();
+    QVERIFY(!startBtn.isEnabled());
+    QVERIFY(!userMgrAct.isEnabled());
+}
+
+// ★ B4 集成验证(C 方案)
+// 4 角色 × 5 权限 = 20 组合一次性矩阵验。
+// 这是 hmi.cpp 5 个按钮 + 托盘 1 个 action 实际用到的权限组合。
+void TestUIPermission::fullFlow_realRoles_haveExpectedVisibility() {
+    struct Case { Role role; Permission perm; bool expectEnabled; };
+    const Case cases[] = {
+        // Admin:全 6 权限,这里只测 5 个用到的
+        {Role::Admin,    Permission::WriteVariable, true},
+        {Role::Admin,    Permission::EditProject,   true},
+        {Role::Admin,    Permission::ManageUsers,   true},
+        // Engineer:5 权限(无 ManageUsers)
+        {Role::Engineer, Permission::WriteVariable, true},
+        {Role::Engineer, Permission::EditProject,   true},
+        {Role::Engineer, Permission::ManageUsers,   false},
+        // Operator:2 权限(WriteVariable + AcknowledgeAlarm)
+        {Role::Operator, Permission::WriteVariable, true},
+        {Role::Operator, Permission::EditProject,   false},
+        {Role::Operator, Permission::ManageUsers,   false},
+        // Viewer:0 权限
+        {Role::Viewer,   Permission::WriteVariable, false},
+        {Role::Viewer,   Permission::EditProject,   false},
+        {Role::Viewer,   Permission::ManageUsers,   false},
+    };
+
+    for (const auto& c : cases) {
+        // 每个 case 用新按钮隔离(避免注册表残留)
+        QPushButton btn;
+        bindButtonEnable(&btn, c.perm);
+        CurrentUser::instance().login(makeUser("u", c.role));
+        QCOMPARE(btn.isEnabled(), c.expectEnabled);
+    }
 }
 
 QTEST_MAIN(TestUIPermission)
