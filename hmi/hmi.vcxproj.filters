@@ -180,5 +180,18 @@
     <ClCompile Include="src\auth\LoginDialog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B2.2 -->
+    <QtMoc Include="src\auth\CurrentUser.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\CurrentUser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\auth\InactivityWatcher.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClCompile Include="src\auth\InactivityWatcher.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

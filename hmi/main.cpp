@@ -34,6 +34,8 @@
 #include "auth/LoginDialog.h"
 #include "auth/UserManager.h"
 #include "auth/UserStore.h"
+#include "auth/CurrentUser.h"
+#include "auth/InactivityWatcher.h"
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -150,43 +152,64 @@ int main(int argc, char *argv[])
                    << "version=" << QCoreApplication::applicationVersion()
                    << "build=" << __DATE__ << __TIME__;
 
+    // ★ B2.2(2026-09-17):UserManager 提到 main 局部(从原 B1.3 嵌套块挪出)
+    //   理由:signals 自动存盘 / CurrentUser.login / InactivityWatcher 都要活到 main 退出
+    auth::UserManager userMgr;
+
+    // ★ B2.2:signals → UserStore::save 集中触发,任何增删改都自动存盘
+    QObject::connect(&userMgr, &auth::UserManager::userAdded,    &app, [&userMgr]() { auth::UserStore::save(userMgr); });
+    QObject::connect(&userMgr, &auth::UserManager::userRemoved,  &app, [&userMgr]() { auth::UserStore::save(userMgr); });
+    QObject::connect(&userMgr, &auth::UserManager::passwordChanged, &app, [&userMgr]() { auth::UserStore::save(userMgr); });
+
+    // ★ B1.3:加载 users.json + 首启引导
+    const int loaded = auth::UserStore::load(userMgr);
+    qCInfo(hmiApp) << "[main] userMgr 启动:load=" << loaded
+                   << "hasUsers=" << (userMgr.hasUsers() ? "yes" : "no");
+    if (!userMgr.hasUsers()) {
+        auth::AdminSetupDialog dlg(userMgr);
+        if (dlg.exec() != QDialog::Accepted) {
+            qCWarning(hmiApp) << "[main] 首启未建 admin,拒绝启动";
+            return 1;
+        }
+        // signals 已接 save,这里不用手动 save
+    } else {
+        // ★ B2.1:已有用户 → 必须登录;B2.2:登录成功 → CurrentUser.login
+        auth::LoginDialog loginDlg(userMgr);
+        if (loginDlg.exec() != QDialog::Accepted) {
+            qCWarning(hmiApp) << "[main] 用户取消登录,拒绝启动";
+            return 1;
+        }
+        auth::CurrentUser::instance().login(loginDlg.currentUser());
+        qCInfo(hmiApp) << "[main] 登录成功:" << loginDlg.currentUser().name
+                       << "role=" << roleToString(loginDlg.currentUser().role);
+    }
+
+    // ★ B2.2:自动注销监听器(install 到 qApp,5 分钟无操作 → 重新弹 LoginDialog)
+    auth::InactivityWatcher inactivityWatcher;
+    inactivityWatcher.installTo(&app);
+    QObject::connect(&inactivityWatcher, &auth::InactivityWatcher::inactivityTimeout,
+                     &app, [&userMgr, &inactivityWatcher]() {
+        qCWarning(hmiApp) << "[main] 自动注销触发";
+        auth::CurrentUser::instance().logout();
+        inactivityWatcher.stop();
+        // 重新弹 LoginDialog(in-place,不退出程序)
+        auth::LoginDialog reLoginDlg(userMgr);
+        if (reLoginDlg.exec() != QDialog::Accepted) {
+            qCWarning(hmiApp) << "[main] 自动注销后用户拒绝登录,退出";
+            QCoreApplication::exit(1);
+            return;
+        }
+        auth::CurrentUser::instance().login(reLoginDlg.currentUser());
+        qCInfo(hmiApp) << "[main] 自动注销后重新登录:" << reLoginDlg.currentUser().name;
+        inactivityWatcher.start();   // 重新开始计时
+    });
+
     // 7. 主窗口 + 托盘
     hmi window;
     tray::SystemTray trayIcon(&window);
 
-    // ★ B1.3 用户系统集成(2026-09-16):
-    //   加载 users.json → 检查 hasUsers() → 首启弹 AdminSetupDialog → 接 signals 自动存
-    {
-        auth::UserManager userMgr;
-        const int loaded = auth::UserStore::load(userMgr);
-        qCInfo(hmiApp) << "[main] userMgr 启动:load=" << loaded
-                       << "hasUsers=" << (userMgr.hasUsers() ? "yes" : "no");
-        if (!userMgr.hasUsers()) {
-            // 首启引导
-            auth::AdminSetupDialog dlg(userMgr);
-            if (dlg.exec() != QDialog::Accepted) {
-                qCWarning(hmiApp) << "[main] 首启未建 admin,拒绝启动";
-                return 1;
-            }
-            // 立刻持久化(避免下次还弹引导)
-            if (!auth::UserStore::save(userMgr)) {
-                qCCritical(hmiApp) << "[main] 保存 users.json 失败,无法保证下次启动";
-                // 不强制退出 — 用户在跑,只是下次启动会再次引导
-            }
-        } else {
-            // ★ B2.1(2026-09-16):已有用户 → 必须登录才能启动
-            auth::LoginDialog loginDlg(userMgr);
-            if (loginDlg.exec() != QDialog::Accepted) {
-                qCWarning(hmiApp) << "[main] 用户取消登录,拒绝启动";
-                return 1;
-            }
-            qCInfo(hmiApp) << "[main] 登录成功:" << loginDlg.currentUser().name
-                           << "role=" << roleToString(loginDlg.currentUser().role);
-            // B2.2 阶段会把 currentUser 存入 CurrentUser 单例,B3+ 业务代码查
-        }
-        // 后续 B2.2 / B5 接 signals 即可,B2.1 阶段不再额外动作
-        Q_UNUSED(userMgr);
-    }
+    // 启动 inactivity 监听(必须在主窗口 show 前 install + start)
+    inactivityWatcher.start();
 
     QObject::connect(&trayIcon, &tray::SystemTray::showRequested, &window, [&window]() {
         window.show();

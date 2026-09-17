@@ -180,6 +180,11 @@
     <!-- 阶段 B · B2 LoginDialog(Q_OBJECT) -->
     <QtMoc Include="src\auth\LoginDialog.h" />
     <ClCompile Include="src\auth\LoginDialog.cpp" />
+    <!-- 阶段 B · B2.2 CurrentUser + InactivityWatcher(都有 Q_OBJECT,进 QtMoc) -->
+    <QtMoc Include="src\auth\CurrentUser.h" />
+    <ClCompile Include="src\auth\CurrentUser.cpp" />
+    <QtMoc Include="src\auth\InactivityWatcher.h" />
+    <ClCompile Include="src\auth\InactivityWatcher.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
