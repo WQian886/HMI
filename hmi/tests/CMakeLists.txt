@@ -73,5 +73,6 @@ add_hmi_test(tst_Permission)
 add_hmi_test(tst_UIPermission)
 # 阶段 B · B5
 add_hmi_test(tst_AuditLog)
+add_hmi_test(tst_AuditE2E)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
