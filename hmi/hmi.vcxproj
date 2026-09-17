@@ -196,6 +196,9 @@
     <!-- 阶段 B · B3 Permission(无 Q_OBJECT,只 Q_DECLARE_LOGGING_CATEGORY) -->
     <ClInclude Include="src\auth\Permission.h" />
     <ClCompile Include="src\auth\Permission.cpp" />
+    <!-- 阶段 B · B4 UIPermission(无 Q_OBJECT,只 free functions) -->
+    <ClInclude Include="src\auth\UIPermission.h" />
+    <ClCompile Include="src\auth\UIPermission.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

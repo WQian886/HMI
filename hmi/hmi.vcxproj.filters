@@ -220,5 +220,12 @@
     <ClCompile Include="src\auth\Permission.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 B · B4 UIPermission -->
+    <ClInclude Include="src\auth\UIPermission.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\auth\UIPermission.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

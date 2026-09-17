@@ -291,6 +291,24 @@ B5 要监听的事件(按数据源分):
 **症状**:开着 qDebug 看 log,5 分钟没动鼠标 → 自动注销 → LoginDialog 弹出来挡住。
 **正确处理**:调试时临时把 `inactivityWatcher.installTo(&app)` 注释掉,或调大阈值(看 InactivityWatcher.h 的 `kTimeoutMs`)。
 
+### 7.6 加新 .cpp/.h 漏同步 vcxproj,B4 真踩了
+
+**症状**:VS IDE F5 build 报 LNK2019 — "无法解析的外部符号 qwhmi::auth::bindButtonEnable"。
+**原因**:**CMake 用 GLOB 自动捡新文件,但 VS 用的 `hmi.vcxproj` 是显式列表,新文件不会被自动加进去**。
+现状.md 第五节约定 #3 早就写过,但 cmake build 通过容易让人忘。
+
+**正确处理**(加新 .cpp/.h 的标准流程):
+1. 写源文件 + 头文件
+2. **改 `hmi.vcxproj`**:在对应分组加 `<ClInclude Include="src\xxx\Xxx.h" />` + `<ClCompile Include="src\xxx\Xxx.cpp" />`(带 Q_OBJECT 的改成 `<QtMoc>`)
+3. **改 `hmi.vcxproj.filters`**:Solution Explorer 分组,加同样的条目 + `<Filter>Header Files</Filter>` 或 `Source Files</Filter>`
+4. `cmake build` 验证 + VS F5 验证
+
+**快速检查**:`grep "Xxx\.cpp" hmi/hmi.vcxproj` → 必须有 1 行,否则漏了。
+**Q_OBJECT 区分**:
+- 类里有 `Q_OBJECT` 宏 → vcxproj 用 `<QtMoc Include="...">`
+- 纯 free function / 普通类 → vcxproj 用 `<ClInclude Include="...">`
+- 不确定时:`grep "Q_OBJECT" src/xxx/Xxx.h` 看一眼
+
 ---
 
 ## 8. 一句话回顾
