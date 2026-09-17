@@ -45,8 +45,9 @@ bool Project::saveToFile(const QString& path) {
     // ★ IMPROVE-6.2(2026-08-07):构造顶层 JSON
     QJsonObject root;
 
-    // schema_version(Q1-Q5 拍板的硬性字段,加载时检查)
-    root["schema_version"] = "1.0";
+    // ★ C.0(2026-09-17):schema_version 从 "1.0"(字符串)→ 2(数字)
+    //   原因:C.5 多 PLC 准备 + 字符串版本号不好比较
+    root["schema_version"] = kCurrentSchemaVersion;  // 2
 
     // project_name / 时间戳(暂时硬编码,6.3 加用户输入)
     root["project_name"] = "HMI Demo Project";
@@ -54,26 +55,28 @@ bool Project::saveToFile(const QString& path) {
     root["created_at"]   = nowIso;
     root["updated_at"]   = nowIso;
 
-    // ===== communications(Q1-A:全存)=====
+    // ★ C.0(2026-09-17):plcs 顶级数组(替代原 communications 单 PLC)
+    //   - 现在 C 阶段只有 modbus_tcp,但 schema 提前留多 PLC 位置
+    //   - 通讯参数从 tcp_ 拿;C.1 协议抽象层完成后改成 IPollDriver
     {
-        QJsonObject comm;
-        comm["protocol"] = "modbus_tcp";   // 当前只支持 modbus_tcp
+        QJsonArray plcsArr;
+        QJsonObject plc;
+        plc["id"] = "plc1";                        // ★ C.5 多 PLC 时改成实际 ID
+        plc["protocol"] = "modbus_tcp";             // 当前只支持 modbus_tcp(C.1 后会扩展)
         if (tcp_) {
-            comm["host"] = tcp_->host();
-            comm["port"] = tcp_->port();
+            plc["host"] = tcp_->host();
+            plc["port"] = tcp_->port();
         } else {
-            comm["host"] = "127.0.0.1";     // 没 tcp_ 时 fallback
-            comm["port"] = 502;
+            plc["host"] = "127.0.0.1";              // 没 tcp_ 时 fallback
+            plc["port"] = 502;
         }
         QJsonObject modbus;
-        // ★ TODO:以后从 ModbusMaster / PollScheduler 拿真值,现在用代码默认(Q1 拍板"全存"先落实字段)
-        // ★ 6.2 优化(2026-08-07):从 TcpClient 常量拿,不硬编码(Q1-A 全存 落实)
-        modbus["timeout_ms"]       = TcpClient::kConnectTimeoutMs;   // 3000ms
-        modbus["max_retries"]      = TcpClient::kMaxRetries;          // 5 次
-        // TODO:poll_interval_ms 应从 PollScheduler::kPollIntervalMs 拿真值(目前临时硬编码 100ms)
+        modbus["timeout_ms"]       = TcpClient::kConnectTimeoutMs;
+        modbus["max_retries"]      = TcpClient::kMaxRetries;
         modbus["poll_interval_ms"] = 100;
-        comm["modbus"] = modbus;
-        root["communications"] = comm;
+        plc["modbus"] = modbus;
+        plcsArr.append(plc);
+        root["plcs"] = plcsArr;
     }
 
     // ===== variables(遍历 varMgr_)=====
@@ -164,11 +167,36 @@ bool Project::loadFromFile(const QString& path) {
     }
     QJsonObject root = doc.object();
 
-    // 3. 校验 schema_version(只接受 1.x)
-    QString schemaVer = root["schema_version"].toString();
-    if (schemaVer.isEmpty() || !schemaVer.startsWith("1.")) {
-        emit loadError(QString("schema_version \"%1\" 不支持,需要 1.x").arg(schemaVer));
+    // 3. ★ C.0(2026-09-17):schema_version 校验 + 自动迁移
+    //   v1: 字符串 "1.0" → 调 migrateV1ToV2
+    //   v2: 整数 2(当前版本)→ 直接通过
+    //   v3+: 整数 > 2 → 拒绝(新版本,旧 hmi 不支持)
+    //   缺字段: 默认当 v1 处理(migrate)
+    QJsonValue schemaVal = root["schema_version"];
+    int schemaVerInt = 0;
+    if (schemaVal.isString()) {
+        // 老格式:"1.0" 字符串
+        QString s = schemaVal.toString();
+        if (s.startsWith("1.")) schemaVerInt = 1;
+    } else if (schemaVal.isDouble()) {
+        // 新格式:整数(实际是 int,QJsonValue 用 double 存)
+        schemaVerInt = schemaVal.toInt();
+    }
+    // 没有 schema_version 字段也当 v1(最老的格式,默认走迁移)
+    if (schemaVal.isUndefined()) schemaVerInt = 1;
+
+    if (schemaVerInt > kCurrentSchemaVersion) {
+        emit loadError(QString("schema_version %1 太新,当前 hmi 只支持到 %2")
+                       .arg(schemaVerInt).arg(kCurrentSchemaVersion));
         return false;
+    }
+    // ★ C.0:按需调迁移函数链 v1 → v2 → ... → vN
+    if (schemaVerInt < kCurrentSchemaVersion) {
+        if (!migrateTo(root, schemaVerInt, kCurrentSchemaVersion)) {
+            emit loadError(QString("schema 迁移失败:从 v%1 到 v%2").arg(schemaVerInt).arg(kCurrentSchemaVersion));
+            return false;
+        }
+        qDebug() << "[Project] schema 迁移完成:v" << schemaVerInt << "→ v" << kCurrentSchemaVersion;
     }
 
     // 4. 清空现有状态(Q4-A 全删干净)
@@ -232,25 +260,95 @@ bool Project::loadFromFile(const QString& path) {
         actionMgr_->addMapping(alarmName, varName, writeValue);
     }
 
-    // 8. 通讯字段应用(★ 6.5 收尾:communications.host/port 真正应用到 TcpClient)
-    //   【背景】6.3 拍板保留字段、6.4 拍板不应用,问题是切工程后内存 = 新 JSON 但 TCP 还连着旧 IP
-    //   【改法】loadFromFile 调 tcp_->connectTo(host, port) 触发重连,emit loaded 让 hmi 同步 modbus
-    //   ★ 6.5 收尾(2026-08-08 BugFix #3):host/port 跟当前相同 → 跳过重连,避免状态闪烁 / in-flight UAF
-    //   【取舍】正在通讯时 loadFromFile 会短暂断连,但用户主动打开工程 = 期望切换,合理
-    //   【参照】Wqian 2026-08-08 review 6.4 修复 #2
-    QJsonObject comm = root["communications"].toObject();
-    QString host = comm["host"].toString();
-    int port = comm["port"].toInt();
-    if (tcp_ && !host.isEmpty() && port > 0 && port < 65536) {
-        if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
-            qDebug() << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
-        } else {
-            tcp_->connectTo(host, static_cast<quint16>(port));
-            qDebug() << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
+    // 8. 通讯字段应用(★ C.0 改:从 plcs[0] 拿 host/port,而非旧的 communications)
+    //   【背景】v1 字段名 communications,v2 改成 plcs[](多 PLC 准备)
+    //   ★ C.0:migrate 已经在 step 3 把 communications 提到 plcs[0],所以这里统一读 plcs
+    QJsonArray plcsArr = root["plcs"].toArray();
+    if (!plcsArr.isEmpty()) {
+        QJsonObject plc0 = plcsArr[0].toObject();
+        QString host = plc0["host"].toString();
+        int port = plc0["port"].toInt();
+        if (tcp_ && !host.isEmpty() && port > 0 && port < 65536) {
+            if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
+                qDebug() << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
+            } else {
+                tcp_->connectTo(host, static_cast<quint16>(port));
+                qDebug() << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
+            }
         }
     }
 
     qDebug() << "[Project] loaded from" << path;
     emit loaded(path);   // ★ 6.3:load 成功(hmi 收到后重绑 UI)
+    return true;
+}
+
+// =============================================================================
+// ★ C.0(2026-09-17):schema 演进函数链
+//
+// 设计原则:
+//   - 迁移在内存里做,不立即写回(用户主动 save 才落盘成新版本)
+//   - 每次 schema_version++ 时,加一个 migrateVxToVxPlus1 函数 + 在 migrateTo 里注册
+//   - 迁移失败不丢数据,返回 false 让 loadFromFile 报错
+// =============================================================================
+
+// v1 → v2:communications 单 PLC → plcs[0] 多 PLC 数组准备
+//   - schema_version: "1.0" → 2(数字)
+//   - 新增 plcs[] 顶级数组,内容从 communications 提取
+//   - 删 communications 字段(冗余)
+bool Project::migrateV1ToV2(QJsonObject& root) {
+    qDebug() << "[Project] migrateV1ToV2 开始";
+
+    // 1. 改 schema_version 数字
+    root["schema_version"] = 2;
+
+    // 2. 如果还没 plcs 字段,从 communications 提取
+    if (!root.contains("plcs")) {
+        QJsonObject comm = root["communications"].toObject();
+        QJsonObject plc;
+        plc["id"] = "plc1";
+        plc["protocol"] = comm.value("protocol").toString("modbus_tcp");
+        plc["host"] = comm.value("host").toString("127.0.0.1");
+        plc["port"] = comm.value("port").toInt(502);
+        // 保留 modbus 子对象(timeout/max_retries/poll_interval_ms)
+        if (comm.contains("modbus")) {
+            plc["modbus"] = comm["modbus"];
+        } else {
+            // 缺 modbus 子对象 → 写默认(避免后续 IPollDriver 找不到 timeout)
+            QJsonObject modbus;
+            modbus["timeout_ms"] = 3000;
+            modbus["max_retries"] = 5;
+            modbus["poll_interval_ms"] = 100;
+            plc["modbus"] = modbus;
+        }
+        QJsonArray plcsArr;
+        plcsArr.append(plc);
+        root["plcs"] = plcsArr;
+    }
+
+    // 3. 删 communications 字段(冗余,信息已搬到 plcs[0])
+    root.remove("communications");
+
+    qDebug() << "[Project] migrateV1ToV2 完成(communications → plcs[0])";
+    return true;
+}
+
+// 迁移调度器:按版本号差依次调 migrate 函数
+//   设计成"链式":v1→v2→v3→v4...直到目标版本
+//   未来加 v3 时,只加 migrateV2ToV3 + 在这里加一行 case
+bool Project::migrateTo(QJsonObject& root, int fromVersion, int toVersion) {
+    int current = fromVersion;
+    while (current < toVersion) {
+        switch (current) {
+            case 1:
+                if (!migrateV1ToV2(root)) return false;
+                current = 2;
+                break;
+            // case 2: migrateV2ToV3(root); current = 3; break;  // 未来加
+            default:
+                qWarning() << "[Project] migrateTo:没有从 v" << current << "到 v" << (current+1) << "的迁移函数";
+                return false;
+        }
+    }
     return true;
 }
