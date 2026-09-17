@@ -2,6 +2,9 @@
 #include "Variable.h"             // 阶段 3.2:Variable 数据模型
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
+#include "drivers/IPollDriver.h"   // ★ C.1(2026-09-17):协议抽象层
+#include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
+#include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
@@ -102,10 +105,14 @@ hmi::hmi(QWidget *parent)
 	connect(ui.sendBtn, &QPushButton::clicked, this, &hmi::onSendClicked);//      当 sendBtn 被点击时调用 hmi::onSendClicked
 
     // ==================== 阶段 2 第 4 练:重设计 — Qt 统一接口 ====================
-    modbus_ = new ModbusMaster(this);
+    // ★ C.1(2026-09-17):ModbusMaster 包装为 ModbusDriver(IPollDriver*)
+    //   100% 行为兼容(后面 PollScheduler 直接换 IPollDriver* 不破现有逻辑)
+    modbus_ = qwhmi::drivers::DriverFactory::create("modbus", this);
+    auto* modbusDriver = qobject_cast<qwhmi::drivers::ModbusDriver*>(modbus_);
 
     // 2026-07-07 重设计:连接 / 错误 信号(同阶段 2-3 风格)
-    connect(modbus_, &ModbusMaster::connected, this, [this](){
+    // ★ C.1(2026-09-17):用 IPollDriver 通用信号(由 ModbusDriver 转发自 ModbusMaster)
+    connect(modbus_, &qwhmi::drivers::IPollDriver::connected, this, [this](){
         modbusState_ = ModbusState::Connected;
         // ★ BUGFIX(2026-07-28):重连时清 PollScheduler 残留 in-flight -1,避免 Variable 永远不读
         if (pollScheduler_) pollScheduler_->resetAll();
@@ -115,7 +122,7 @@ hmi::hmi(QWidget *parent)
         }
         updateUi();
     });
-    connect(modbus_, &ModbusMaster::disconnected, this, [this](){
+    connect(modbus_, &qwhmi::drivers::IPollDriver::disconnected, this, [this](){
         // 2026-07-09:记住旧状态,在跳转 Disconnected 前判断 —— Connecting → 要弹窗告诉用户连不上
         const bool wasConnecting = (modbusState_ == ModbusState::Connecting);
         const bool hadPending     = hasPendingModbus_;
@@ -136,7 +143,7 @@ hmi::hmi(QWidget *parent)
                 "连接意外中断,刚才排队的请求被丢弃。\n请重新点 [发送]。");
         }
     });
-    connect(modbus_, &ModbusMaster::errorOccurred, this,
+    connect(modbus_, &qwhmi::drivers::IPollDriver::errorOccurred, this,
         [this](QString msg){
             qDebug() << "Modbus 错误(伴随状态):" << msg;
             modbusState_ = ModbusState::Failed;
@@ -145,8 +152,8 @@ hmi::hmi(QWidget *parent)
             QMessageBox::warning(this, "Modbus 错误", msg);
         });
     // 2026-07-09:UI 防抖 —— pending_ 变空时重新启用发送按钮
-    // (正常响应 / 异常响应 / 超时 / 断开 都会 emit idle)
-    connect(modbus_, &ModbusMaster::idle, this, [this](){
+    // ★ C.1:idle 是 ModbusMaster 特有,需要从 ModbusDriver.inner() 取
+    connect(modbusDriver->inner(), &ModbusMaster::idle, this, [this](){
         ui.modbusSendBtn->setEnabled(true);
         statusBar()->showMessage("Modbus 空闲,可发下一帧", kStatusBarShortMs);  // ★ IMPROVE-B4
     });
@@ -252,7 +259,7 @@ hmi::hmi(QWidget *parent)
     Binding::bindEdit(ui.speedWriteEdit, speed);
 
     // 阶段 3.3:启动定时轮询(替代 demoTimer 的 random 数据,真 modbus 读 PLC)
-    pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);
+    pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);   // ★ C.1:modbus_ 现在是 IPollDriver*
     pollScheduler_->start();
     // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询 —— 单窗口场景初始化
     //   单窗口场景:所有 var 都在 UI 中,所以全部激活
@@ -260,7 +267,11 @@ hmi::hmi(QWidget *parent)
     pollScheduler_->setAllActive();
 
     // 阶段 4.3.0:启动写调度(与 PollScheduler 对称,处理 Variable.dirty_ → Modbus 写 PLC)
-    writeScheduler_ = new WriteScheduler(varMgr_, modbus_, this);
+    writeScheduler_ = new WriteScheduler(varMgr_, modbusDriver->inner(), this);
+    //                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    //   ★ C.1:WriteScheduler 保留 ModbusMaster* 参数(写调度仍是 Modbus-specific),
+    //   从 ModbusDriver.inner() 拿 ModbusMaster* 给它用
+    //   未来 C.4 协议 UI 切到 S7 时,WriteScheduler 也得协议无关化(单独一个里程碑)
     writeScheduler_->start();
 
     // 阶段 5.2:报警管理器(空架子,5.3 才注册 Checker)
@@ -492,12 +503,21 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
     bool ok;
     QModbusReply* reply = nullptr;
 
+    // ★ C.1(2026-09-17):executeModbus 是 Modbus-特定调试 UI,需要 ModbusMaster 接口
+    //   从 modbus_(IPollDriver*) cast 回 ModbusDriver*,再拿 inner() 用 ModbusMaster 接口
+    auto* modbusDriver = qobject_cast<qwhmi::drivers::ModbusDriver*>(modbus_);
+    if (!modbusDriver) {
+        qCWarning(hmiApp) << "[hmi] executeModbus:modbus_ 不是 ModbusDriver(C.1 协议切换后此函数无效)";
+        return;
+    }
+    ModbusMaster* modbus = modbusDriver->inner();
+
     if (isRead) {
         int count = pendingModbus_.isRead == false ? 1 : pendingModbus_.count;
         if (hasPendingModbus_ && pendingModbus_.isRead) count = pendingModbus_.count;
         // 读
         QModbusDataUnit unit(type, addr, static_cast<quint16>(count));
-        reply = modbus_->sendReadRequest(unit, slaveId);
+        reply = modbus->sendReadRequest(unit, slaveId);
     } else {
         // 2026-07-13 阶段 2 第 6 练:写多值(逗号分隔)
         QVector<quint16> vals;
@@ -512,7 +532,7 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
             }
         }
         QModbusDataUnit unit(type, addr, vals);
-        reply = modbus_->sendWriteRequest(unit, slaveId);
+        reply = modbus->sendWriteRequest(unit, slaveId);
     }
 
     if (!reply) return;

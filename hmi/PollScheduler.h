@@ -1,12 +1,16 @@
 // 阶段 3.3:定时轮询调度器
-// 职责:每隔 100ms 扫所有 Variable,看谁"到期"就合并连续地址发 1 次 Modbus 读请求
-// 监听 ModbusMaster::readFinished,按 requestId 反查 + 拆 reply 数据,setValue 给 Variable
+// 职责:每隔 100ms 扫所有 Variable,看谁"到期"就合并连续地址发 1 次 IPollDriver 读请求
+// 监听 IPollDriver::readFinished,按 requestId 反查 + 拆 reply 数据,setValue 给 Variable
+//
+// ★ C.1(2026-09-17):从 ModbusMaster* 改成 IPollDriver*
+//   - 不再 include QModbusDataUnit(协议无关)
+//   - 跟 DriverFactory 配合,C.4 加协议 UI 时换 driver 不用改 PollScheduler
 //
 // 设计原则:
 // 1. 单 timer 集中调度(不给每个 Variable 一个 QObject,timer 太多不高效)
 // 2. 按 address 排序后合并连续区间(0x0001+0x0002+0x0003 = 1 次 read holding reg count=3)
-// 3. in-flight 机制:nextPollAtMs[v] = -1 表示在等 reply,tick 不再选
-// 4. 失败/超时:由 PollScheduler 自己的下一帧重试(不依赖 ModbusMaster 失败信号)
+// 3. in-flight 机制:nextPollAtMs[v] = 0 + inFlight_ set(避免 -1 magic number)
+// 4. 失败/超时:由 PollScheduler 自己的下一帧重试(不依赖具体 driver 失败信号)
 
 #pragma once
 
@@ -15,16 +19,16 @@
 #include <QHash>
 #include <QList>
 #include <QSet>            // ★ IMPROVE-A7(2026-07-29):inFlight_ 用 QSet
-#include <QModbusDataUnit>
+#include <QVector>         // ★ C.1:readFinished 信号用 QVector<quint16>(协议无关)
 
 class Variable;
 class VariableManager;
-class ModbusMaster;
+namespace qwhmi::drivers { class IPollDriver; }
 
 class PollScheduler : public QObject {
     Q_OBJECT
 public:
-    explicit PollScheduler(VariableManager* mgr, ModbusMaster* modbus, QObject* parent = nullptr);
+    explicit PollScheduler(VariableManager* mgr, qwhmi::drivers::IPollDriver* driver, QObject* parent = nullptr);
 
 	void start();// 开始轮询调度
 	void stop();// 停止轮询调度
@@ -53,11 +57,13 @@ signals:
 
 private slots:
     void onTick();                                       // 100ms 一次扫描
-    void onModbusReply(quint32 requestId, QModbusDataUnit unit, bool success);// ModbusMaster::readFinished 回调
+    // ★ C.1:readFinished 改成 QVector<quint16>(不再依赖 QModbusDataUnit)
+    void onDriverReadFinished(quint32 requestId, QVector<quint16> registers, bool success);
 
 private:
     VariableManager* varMgr_;
-    ModbusMaster* modbus_;
+    // ★ C.1:从 ModbusMaster* 改成 IPollDriver*(协议无关)
+    qwhmi::drivers::IPollDriver* driver_;
     QTimer timer_;                                       // 100ms tick
     QHash<Variable*, qint64> nextPollAtMs_;            // 下次轮询时刻(0 = 立即可发,>0 = 等到该时刻)
     // ★ IMPROVE-A7(2026-07-29):in-flight 状态独立用 QSet,替原来的 -1 magic number

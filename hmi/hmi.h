@@ -5,6 +5,7 @@
 //#include <QPair>   // 阶段 2-1 第 2 步:连接建立后待发的读请求
 #include "TcpClient.h"  // 阶段 1 第 1 练:TCP 客户端封装
 #include "ModbusMaster.h" // 阶段 2 第 3 练:手写 ModbusMaster 接入 UI
+namespace qwhmi::drivers { class IPollDriver; }  // ★ C.1(2026-09-17):协议抽象层,modbus_ 改为 IPollDriver*
 #include "VariableManager.h"  // 阶段 3.2:把 VariableManager 接入主工程
 #include "PollScheduler.h"  // 阶段 3.3:定时轮询调度器
 #include "WriteScheduler.h" // 阶段 4.3.0:写调度器(Variable.dirty_ → Modbus 写 PLC)
@@ -155,7 +156,11 @@ private:
     QMenu* alarmContextMenu_ = nullptr;  // 阶段 5.5:alarmTable 右键菜单(含"确认"动作)
     int counter = 0;  // 阶段 0 第 1 练:用成员变量存计数(修法 B,数据归程序)
     TcpClient* tcp_ = nullptr;  // 阶段 1 第 1 练:TCP 客户端(生命周期由 this 管)
-    ModbusMaster* modbus_ = nullptr;  // 阶段 2 第 3 练:Modbus 客户端(手写版)
+    // ★ C.1(2026-09-17):从 ModbusMaster* 改为 IPollDriver*
+    //   实参:DriverFactory::create("modbus") → ModbusDriver(IPollDriver*)
+    //   executeModbus 内 cast 回 ModbusDriver* 拿 inner() 用 Modbus-特定接口(QModbusDataUnit 等)
+    //   未来 C.4 协议 UI 切到 S7 时,executeModbus 也要改或被更通用的函数替代
+    qwhmi::drivers::IPollDriver* modbus_ = nullptr;
     VariableManager* varMgr_ = nullptr;  // 阶段 3.2:变量管理器(管理所有 Variable 生命周期)
     PollScheduler* pollScheduler_ = nullptr;  // 阶段 3.3:定时轮询调度器(替代 demoTimer,真 modbus 读)
     WriteScheduler* writeScheduler_ = nullptr; // 阶段 4.3.0:写调度器(Variable.dirty_ → modbus 写 PLC,与 PollScheduler 对称)

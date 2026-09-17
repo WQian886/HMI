@@ -4,14 +4,14 @@
 #include "PollScheduler.h"
 #include "Variable.h"
 #include "VariableManager.h"
-#include "ModbusMaster.h"
+#include "drivers/IPollDriver.h"
 #include <QDateTime>
 #include <QVariant>
 #include <algorithm>
-#include <cstring>  // memcpy
+#include <cstring>  // memcpy (Float register 组合用)
 
-PollScheduler::PollScheduler(VariableManager* mgr, ModbusMaster* modbus, QObject* parent)
-    : QObject(parent), varMgr_(mgr), modbus_(modbus)
+PollScheduler::PollScheduler(VariableManager* mgr, qwhmi::drivers::IPollDriver* driver, QObject* parent)
+    : QObject(parent), varMgr_(mgr), driver_(driver)
 {
     timer_.setInterval(100);  // 100ms tick 一次
     connect(&timer_, &QTimer::timeout, this, &PollScheduler::onTick);
@@ -24,14 +24,16 @@ void PollScheduler::start() {
     for (Variable* v : varMgr_->allVariables()) {
         nextPollAtMs_[v] = 0;
     }
-    // 接 modbus reply
-    connect(modbus_, &ModbusMaster::readFinished, this, &PollScheduler::onModbusReply);
+    // ★ C.1:接 driver 的 readFinished(协议无关信号:QVector<quint16>)
+    connect(driver_, &qwhmi::drivers::IPollDriver::readFinished,
+            this, &PollScheduler::onDriverReadFinished);
     timer_.start();
 }
 
 void PollScheduler::stop() {
     timer_.stop();
-    disconnect(modbus_, &ModbusMaster::readFinished, this, &PollScheduler::onModbusReply);
+    disconnect(driver_, &qwhmi::drivers::IPollDriver::readFinished,
+               this, &PollScheduler::onDriverReadFinished);
     nextPollAtMs_.clear();
     pending_.clear();
 }
@@ -62,8 +64,7 @@ void PollScheduler::addActiveVariable(Variable* v) {
 
 void PollScheduler::removeActiveVariable(Variable* v) {
     if (v && activeVariables_.remove(v)) {
-        qDebug() << "[PollScheduler] removeActiveVariable:" << v->name()
-                 << " active.size=" << activeVariables_.size();
+        qDebug() << "[PollScheduler] removeActiveVariable:" << v->name();
     }
 }
 
@@ -82,29 +83,21 @@ void PollScheduler::clearActiveVariables() {
 }
 
 void PollScheduler::onTick() {
-    // 2026-07-21 防御:modbus 未连就别 poll,避免连环弹错
-    if (!modbus_->isConnected()) return;
+    // 2026-07-21 防御:driver 未连就别 poll,避免连环弹错
+    if (!driver_->isConnected()) return;
 
-    // ★ BUGFIX(2026-07-28):跟 WriteScheduler 对齐,加 modbus in-flight 防御
+    // ★ BUGFIX(2026-07-28):跟 WriteScheduler 对齐,加 in-flight 防御
     //
-    //   【背景】ModbusMaster 2026-07-09 加了「并发请求限流」机制:
-    //     同一时刻 ModbusMaster::pending_ 只能有 1 个未完成请求
-    //     (Modbus 协议从站串行响应,master 不能同时问 1 又问 2)
+    //   【背景】Modbus 协议从站串行响应,master 不能同时问 1 又问 2
+    //     1 个 driver(单 in-flight)→ 防御必加
+    //     多个 driver(可并行,未来 S7) → 这层防御无影响
     //
-    //   【Bug 现象】本函数 onTick() 100ms 一次,直接发读请求;但 WriteScheduler
-    //     也 100ms 一次发写请求,二者偶尔撞车:一个发完没回,另一个接着发,
-    //     第二个被 ModbusMaster 拒,emit errorOccurred → hmi.cpp 弹窗
-    //     「Modbus 错误 / 上一帧未完成,稍后再发(pending=1)」
-    //
-    //   【修法】onTick 顶部加 pending 检查,有未完成的就静默 return,
-    //     等下一帧(100ms)再发,不会撞 WriteScheduler
-    //
-    //   【参照】WriteScheduler::onTick (WriteScheduler.cpp:41) 已经有同样防御:
-    //     if (modbus_->pendingCount() > 0) return;
+    //   【修法】onTick 顶部检查 pendingCount,有未完成的就静默 return,
+    //     等下一帧(100ms)再发
     //
     //   【取舍】静默 return 会让 PollScheduler 100ms 内少读一次(最多 1 次),
     //     对工业 HMI 1 秒轮询周期影响可忽略;比弹窗骚扰操作员好得多
-    if (modbus_->pendingCount() > 0) return;
+    if (driver_->pendingCount() > 0) return;
 
     qint64 now = QDateTime::currentMSecsSinceEpoch();
 
@@ -131,7 +124,7 @@ void PollScheduler::onTick() {
         return a->address() < b->address();
     });
 
-    // 3. 合并连续区间 → 1 次 Modbus 读请求
+    // 3. 合并连续区间 → 1 次 driver 读请求
     while (!due.isEmpty()) {
         Variable* first = due.takeFirst();
         QList<Variable*> batch{first};
@@ -142,19 +135,25 @@ void PollScheduler::onTick() {
             count++;
         }
 
-        // 4. 发读请求(holding register,从 first->address() 起 count 个)
+        // 4. 发读请求(通用 IPollDriver 接口,不再依赖 QModbusDataUnit)
         // ★ IMPROVE-A2(2026-07-29):++ 前缀 + 跳过 0
         quint32 reqId = ++nextReqId_;
         if (reqId == 0) reqId = ++nextReqId_;
         pending_[reqId] = batch;
-        modbus_->sendReadRequest(
-            QModbusDataUnit(QModbusDataUnit::HoldingRegisters, first->address(), count),
-            1,  // slaveId 暂时固定 1,阶段 6 工程文件再做成可配
-            reqId);
+
+        qwhmi::drivers::IPollDriver::ReadRequest req;
+        req.area      = qwhmi::drivers::RegisterArea::HoldingReg;
+        req.slaveId   = 1;   // slaveId 暂时固定 1,阶段 6 工程文件再做成可配
+        req.addr      = first->address();
+        req.count     = count;
+        req.requestId = reqId;
+        driver_->sendReadRequest(req);
     }
 }
 
-void PollScheduler::onModbusReply(quint32 requestId, QModbusDataUnit unit, bool success) {
+// ★ C.1:信号签名从 QModbusDataUnit → QVector<quint16>
+//   PollScheduler 不再依赖 Modbus-特定类型,任何 IPollDriver 都触发得了
+void PollScheduler::onDriverReadFinished(quint32 requestId, QVector<quint16> registers, bool success) {
     QList<Variable*> batch = pending_.take(requestId);
     if (batch.isEmpty()) return;
 
@@ -177,14 +176,14 @@ void PollScheduler::onModbusReply(quint32 requestId, QModbusDataUnit unit, bool 
     // 成功:按合并顺序分发到各 Variable
     int regIdx = 0;
     for (Variable* v : batch) {
-        if (regIdx >= unit.valueCount()) {
+        if (regIdx >= registers.size()) {
             // 数据不够(不应该发生,但防御一下)
             v->setQuality(Variable::Quality::Bad);
             nextPollAtMs_[v] = now + v->pollIntervalMs();
             continue;
         }
 
-        quint16 raw = unit.value(regIdx);
+        quint16 raw = registers[regIdx];
         QVariant val;
         switch (v->dataType()) {
             case Variable::DataType::Bool:
@@ -198,8 +197,8 @@ void PollScheduler::onModbusReply(quint32 requestId, QModbusDataUnit unit, bool 
                 break;
             case Variable::DataType::Int32: {
                 // 32-bit 占 2 个 register,低地址在前(大端)
-                if (regIdx + 1 < unit.valueCount()) {
-                    quint32 composed = (static_cast<quint32>(unit.value(regIdx + 1)) << 16) | raw;
+                if (regIdx + 1 < registers.size()) {
+                    quint32 composed = (static_cast<quint32>(registers[regIdx + 1]) << 16) | raw;
                     val = QVariant::fromValue<qint32>(static_cast<qint32>(composed));
                     regIdx++;
                 } else {
@@ -209,8 +208,8 @@ void PollScheduler::onModbusReply(quint32 requestId, QModbusDataUnit unit, bool 
             }
             case Variable::DataType::Float: {
                 // IEEE 754 float 占 2 个 register
-                if (regIdx + 1 < unit.valueCount()) {
-                    quint32 bits = (static_cast<quint32>(unit.value(regIdx + 1)) << 16) | raw;
+                if (regIdx + 1 < registers.size()) {
+                    quint32 bits = (static_cast<quint32>(registers[regIdx + 1]) << 16) | raw;
                     float f;
                     std::memcpy(&f, &bits, sizeof(float));
                     val = QVariant::fromValue<float>(f);

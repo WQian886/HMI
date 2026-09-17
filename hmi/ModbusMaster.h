@@ -32,6 +32,9 @@ public:
 
     // 连接管理(沿用阶段 2-3)
     void connectTo(const QString& host, quint16 port);
+    // ★ C.1(2026-09-17):ModbusDriver::disconnect() 需要调这个关闭连接
+    //   内部一行 tcp_->close()(C.1 之前 IPollDriver 接口名是 disconnect,ModbusMaster 没这方法)
+    void disconnect();
     bool isConnected() const;
 
     // ============================================================

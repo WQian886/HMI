@@ -63,6 +63,11 @@ bool ModbusMaster::isConnected() const {
     return tcp_->isConnected();
 }
 
+// ★ C.1(2026-09-17):供 ModbusDriver::disconnect() 调,内部 tcp_->close() 触发 TcpClient::disconnected
+void ModbusMaster::disconnect() {
+    if (tcp_) tcp_->close();
+}
+
 // ============================================================
 // type → fc 映射(单点真理)
 // ============================================================
