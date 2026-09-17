@@ -49,6 +49,10 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/PollScheduler.cpp
     ${HMI_SRC_DIR}/ModbusMaster.cpp
     ${HMI_SRC_DIR}/WriteScheduler.cpp
+    # 阶段 C · C.1 协议抽象层
+    ${HMI_SRC_DIR}/src/drivers/IPollDriver.cpp
+    ${HMI_SRC_DIR}/src/drivers/ModbusDriver.cpp
+    ${HMI_SRC_DIR}/src/drivers/DriverFactory.cpp
 )
 
 function(add_hmi_test test_name)
@@ -88,5 +92,7 @@ add_hmi_test(tst_AuditLog)
 add_hmi_test(tst_AuditE2E)
 # 阶段 C · C.0
 add_hmi_test(tst_ProjectSchema)
+# 阶段 C · C.1 协议抽象层
+add_hmi_test(tst_IPollDriver)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
