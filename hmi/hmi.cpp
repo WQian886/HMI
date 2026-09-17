@@ -41,7 +41,14 @@ hmi::hmi(QWidget *parent)
 
     // ★ B3 诊断(2026-09-17):登录完 3 秒自动模拟按回车,绕过 Wqian 不会操作 UI
     QTimer::singleShot(3000, this, [this]() {
-        qDebug() << "[B3-diag] 自动触发 setText + returnPressed";
+        qDebug() << "[B3-diag] QTimer 触发了";
+        qDebug() << "[B3-diag] speedWriteEdit 指针:" << ui.speedWriteEdit;
+        qDebug() << "[B3-diag] this 指针:" << this;
+        if (!ui.speedWriteEdit) {
+            qDebug() << "[B3-diag] speedWriteEdit 是 null,提前返";
+            return;
+        }
+        qDebug() << "[B3-diag] isVisible:" << ui.speedWriteEdit->isVisible();
         ui.speedWriteEdit->setText("8888");
         emit ui.speedWriteEdit->returnPressed();
     });
