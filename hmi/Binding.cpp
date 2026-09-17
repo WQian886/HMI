@@ -105,15 +105,12 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
     // ② 回车 → 写变量
     QObject::connect(edit, &QLineEdit::returnPressed, edit,
         [edit, vPtr]() {
-            // ★ B3 诊断(2026-09-17):看 returnPressed 触发 + vPtr 状态
-            qDebug() << "[BindEdit-diag] returnPressed 触发 vPtr.isNull()=" << vPtr.isNull();
             // ★ 防 v 被 delete(2026-07-28):QPointer 早返
             if (vPtr.isNull()) return;
             Variable* v = vPtr.data();
             // 阶段 4.3.1 类型参数化:按 v->dataType() 分派(替换原 quint16 硬编码)
             bool parseOk = false;
             QVariant typedVal;
-            qDebug() << "[BindEdit-diag] v.name=" << v->name() << "dataType=" << (int)v->dataType();
 
             switch (v->dataType()) {
                 case Variable::DataType::Bool: {
@@ -149,9 +146,6 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
             const bool ok = qwhmi::auth::checkPermission(
                 qwhmi::auth::CurrentUser::instance().role(),
                 qwhmi::auth::Permission::WriteVariable);
-            qDebug() << "[BindEdit-diag] checkPermission(WriteVariable)=" << ok
-                     << "currentRole=" << (int)qwhmi::auth::CurrentUser::instance().role()
-                     << "currentUser=" << qwhmi::auth::CurrentUser::instance().name();
             if (!ok) {
                 applyNowEdit(edit, v);
                 setDirtyStyle(edit, true);

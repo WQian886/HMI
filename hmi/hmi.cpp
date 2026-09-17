@@ -6,7 +6,7 @@
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include <QIntValidator>
-#include <QTimer>                 // ★ B3 诊断(2026-09-17):登录后自动模拟 returnPressed
+#include <QTimer>                 // counter / resetTimer_ / alarmBlinkTimer_ 共用
 #include <QMessageBox>
 #include <QMessageBox>
 #include <QRegularExpression>
@@ -37,24 +37,7 @@ static QString alarmLevelName(AlarmLevel l) {
 hmi::hmi(QWidget *parent)
     : QMainWindow(parent)
 {
-    qDebug() << "[B3-diag] hmi 构造函数开始";
     ui.setupUi(this);
-    qDebug() << "[B3-diag] setupUi 完成";
-
-    // ★ B3 诊断(2026-09-17):登录完 3 秒自动模拟按回车,绕过 Wqian 不会操作 UI
-    QTimer::singleShot(3000, this, [this]() {
-        qDebug() << "[B3-diag] QTimer 触发了";
-        qDebug() << "[B3-diag] speedWriteEdit 指针:" << ui.speedWriteEdit;
-        qDebug() << "[B3-diag] this 指针:" << this;
-        if (!ui.speedWriteEdit) {
-            qDebug() << "[B3-diag] speedWriteEdit 是 null,提前返";
-            return;
-        }
-        qDebug() << "[B3-diag] isVisible:" << ui.speedWriteEdit->isVisible();
-        ui.speedWriteEdit->setText("8888");
-        emit ui.speedWriteEdit->returnPressed();
-    });
-    qDebug() << "[B3-diag] QTimer::singleShot 已注册(this=" << this << ")";
 
     // 输入校验:IP 正则 + 端口范围
     QRegularExpression ipRx(
