@@ -112,6 +112,23 @@
     <item>
      <layout class="QHBoxLayout" name="tcpConnLayout">
       <item>
+       <!-- ★ 阶段 C · C.4(2026-09-18):协议选择下拉框,3 协议 — 教训 1.5:跨协议切工程弹错误 -->
+       <widget class="QComboBox" name="protocolComboBox">
+        <property name="minimumSize">
+         <size><width>120</width><height>40</height></size>
+        </property>
+        <item>
+         <property name="text"><string>Modbus</string></property>
+        </item>
+        <item>
+         <property name="text"><string>S7</string></property>
+        </item>
+        <item>
+         <property name="text"><string>EtherNet/IP</string></property>
+        </item>
+       </widget>
+      </item>
+      <item>
        <widget class="QLineEdit" name="ipEdit">
         <property name="text"><string>127.0.0.1</string></property>
         <property name="minimumSize">

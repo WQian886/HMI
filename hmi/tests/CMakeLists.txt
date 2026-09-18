@@ -98,5 +98,7 @@ add_hmi_test(tst_AuditE2E)
 add_hmi_test(tst_ProjectSchema)
 # 阶段 C · C.1 协议抽象层
 add_hmi_test(tst_IPollDriver)
+# 阶段 C · C.4 协议选择 UX 锁(教训 1.5)
+add_hmi_test(tst_ProtocolSwitch)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

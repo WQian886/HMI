@@ -5,6 +5,7 @@
 #include "drivers/IPollDriver.h"   // ★ C.1(2026-09-17):协议抽象层
 #include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
+#include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
@@ -21,6 +22,7 @@
 #include "auth/UIPermission.h"  // ★ B4(2026-09-17):画面级权限(按钮 enabled 跟 Permission 挂钩)
 #include "auth/CurrentUser.h"   // ★ B4 修复(2026-09-17):updateButtons 需要查 role
 #include "auth/Permission.h"    // ★ B4 修复(2026-09-17):updateButtons 需要查 WriteVariable
+#include "auth/AuditLog.h"      // ★ C.4.2(2026-09-18):protocol.change 审计事件
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
@@ -103,6 +105,10 @@ hmi::hmi(QWidget *parent)
 	connect(ui.connectBtn, &QPushButton::clicked, this, &hmi::onConnectClicked); // 当 connectBtn 被点击时调用 hmi::onConnectClicked
 	connect(ui.disconnectBtn, &QPushButton::clicked, this, &hmi::onDisconnectClicked);// 当 disconnectBtn 被点击时调用 hmi::onDisconnectClicked
 	connect(ui.sendBtn, &QPushButton::clicked, this, &hmi::onSendClicked);//      当 sendBtn 被点击时调用 hmi::onSendClicked
+
+    // ★ 阶段 C · C.4(2026-09-18):协议选择下拉框信号(教训 1.5 跨协议 UX 锁)
+    connect(ui.protocolComboBox, &QComboBox::currentTextChanged,
+            this, &hmi::onProtocolComboChanged);
 
     // ==================== 阶段 2 第 4 练:重设计 — Qt 统一接口 ====================
     // ★ C.1(2026-09-17):ModbusMaster 包装为 ModbusDriver(IPollDriver*)
@@ -1060,4 +1066,50 @@ void hmi::onAllAlarmsCleared() {
     ui.alarmTable->setRowCount(0);
     alarmBlinkTimer_->stop();
     qDebug() << "[Alarm 全部清除]";
+}
+
+// ==================== ★ 阶段 C · C.4(2026-09-18):协议选择 UI ====================
+//   教训 1.5:不允许跨协议切工程 — Modbus 地址 0x0002 在 S7 是 DBW2,语义完全不同
+//   教训 2026-09-17 4.1:状态/迁移要给 1 个现实类比(让 Wqian 秒懂)
+//   规划 C.4 第 316-348 行:协议选择 UX 规则锁定
+void hmi::onProtocolComboChanged(const QString& protocolName) {
+    const QString normalized = protocolName.trimmed().toLower();
+    const QString current = currentProtocol_;
+
+    // ★ C.4:用 ProtocolGuard 纯逻辑判断(可单测,不耦合 GUI)
+    //   教训 1.5:跨协议切工程 → 弹错误 + audit 记录 rejected + 撤销下拉框
+    if (!qwhmi::drivers::isCrossProtocolChange(current, normalized)) {
+        qDebug() << "[C.4] 协议未变:" << protocolName;
+        return;
+    }
+
+    // ★ 跨协议切换:弹错误对话框 + AuditLog 记录 rejected + 不更新 currentProtocol_
+    QMessageBox::warning(
+        this,
+        QStringLiteral("协议不兼容"),
+        QStringLiteral("当前工程使用 %1,不能切换到 %2。\n\n"
+                       "%1 地址(如 0x0002)在 %2 中没有对应语义。\n\n"
+                       "请创建新工程。")
+            .arg(current.toUpper(), protocolName),
+        QMessageBox::Ok);
+
+    // ★ C.4.2:AuditLog 记录协议切换拒绝事件
+    //   action=protocol.change detail=modbus→s7 result=rejected
+    qwhmi::auth::AuditLog::instance().append(
+        QStringLiteral("protocol.change"),
+        QStringLiteral("system"),
+        QStringLiteral("system"),
+        current,
+        QStringLiteral("%1→%2").arg(current, normalized),
+        QStringLiteral("rejected"));
+
+    qWarning() << "[C.4] 跨协议切工程被阻止:" << current << "→" << protocolName;
+
+    // 撤销下拉框变更(用户没成功切)
+    ui.protocolComboBox->blockSignals(true);
+    const int idx = ui.protocolComboBox->findText(current, Qt::MatchFixedString);
+    if (idx >= 0) {
+        ui.protocolComboBox->setCurrentIndex(idx);
+    }
+    ui.protocolComboBox->blockSignals(false);
 }

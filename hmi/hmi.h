@@ -67,6 +67,10 @@ private slots:
 	// ★ 阶段 6.4(2026-08-08):UI 打开工程按钮 → 弹 QFileDialog 选 .json → loadFromFile(6.3 已实现)
 	void onOpenClicked();
 
+    // ★ 阶段 C · C.4(2026-09-18):协议选择下拉框槽函数
+    //   跨协议切工程 → 弹错误对话框 + AuditLog(教训 1.5)
+    void onProtocolComboChanged(const QString& protocolName);
+
 
 
 private:
@@ -167,4 +171,8 @@ private:
     AlarmManager* alarmMgr_ = nullptr;  // 阶段 5.2:报警管理器(5.3 才注册 Checker 接 Variable)
     ActionManager* actionMgr_ = nullptr;  // 阶段 5.6:报警联动动作(关阀/停机)
     Project*       project_    = nullptr;  // ★ 阶段 6.2:JSON 配置存读入口
+
+    // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
+    //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)
+    QString currentProtocol_ = QStringLiteral("modbus");
 };
