@@ -280,6 +280,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <!-- 阶段 D · D.1 SQLite 历史库(2026-09-18) -->
+    <QtMoc Include="src\history\HistoryRecorder.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
     <ClInclude Include="src\history\HistoryRecorder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
