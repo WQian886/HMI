@@ -210,6 +210,10 @@
     <ClCompile Include="src\drivers\ModbusDriver.cpp" />
     <ClInclude Include="src\drivers\DriverFactory.h" />
     <ClCompile Include="src\drivers\DriverFactory.cpp" />
+    <!-- 阶段 C · C.2 S7 协议适配器(2026-09-18 落地骨架,Q_OBJECT 走 QtMoc) -->
+    <QtMoc Include="src\drivers\S7Driver.h" />
+    <ClInclude Include="src\drivers\S7Driver.h" />
+    <ClCompile Include="src\drivers\S7Driver.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

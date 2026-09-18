@@ -200,7 +200,8 @@ void TestIPollDriver::driverFactory_isSupported_modbus() {
     QVERIFY(DriverFactory::isSupported("modbus"));
     QVERIFY(DriverFactory::isSupported("MODBUS"));    // 大小写不敏感
     QVERIFY(DriverFactory::isSupported("modbus_tcp"));
-    QVERIFY(!DriverFactory::isSupported("s7"));      // C.2 还没实现
+    // ★ 阶段 C · C.2 (2026-09-18):s7 已实现(骨架,真连接在 C.2.4)
+    QVERIFY(DriverFactory::isSupported("s7"));       // C.2 已支持(骨架阶段,真连接 PLCSIM 在 C.2.7)
     QVERIFY(!DriverFactory::isSupported("eip"));     // C.3 还没实现
 }
 

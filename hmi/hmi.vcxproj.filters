@@ -256,5 +256,15 @@
     <ClCompile Include="src\drivers\DriverFactory.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 C · C.2 S7 协议适配器(2026-09-18) -->
+    <QtMoc Include="src\drivers\S7Driver.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\drivers\S7Driver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\drivers\S7Driver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

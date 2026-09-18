@@ -102,6 +102,11 @@ qt_add_executable(hmi ${SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})
 set_target_properties(hmi PROPERTIES WIN32_EXECUTABLE TRUE)
 
 target_include_directories(hmi PRIVATE src)
+# ★ 阶段 C · C.2 Snap7 集成占位
+#   - DLL 到位后启用 3rdparty/snap7/include/ 头文件搜索
+#   - 当前骨架阶段用 QLibrary 动态加载,不静态链 snap7.lib(LGPL 合规)
+#   - include 路径暂不添加,等 C.2.2 真加载 Snap7 函数指针时再开
+# target_include_directories(hmi PRIVATE 3rdparty/snap7/include)  # C.2.2 启用
 
 target_link_libraries(hmi PRIVATE
     Qt6::Core
