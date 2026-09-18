@@ -7,7 +7,7 @@ project(hmi_tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql)
 enable_testing()
 
 # 主程序源码目录(用来 include 头文件)
@@ -57,6 +57,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/S7Driver.cpp
     # 阶段 C · C.3 EIP 协议适配器(2026-09-18)DriverFactory 创建 EipDriver 需要链接 EipDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
+    # 阶段 D · D.1 SQLite 历史库(2026-09-18)
+    ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
 )
 
 function(add_hmi_test test_name)
@@ -71,6 +73,7 @@ function(add_hmi_test test_name)
         Qt6::Widgets   # ★ B4:UIPermission.cpp 需要 QAbstractButton / QAction
         Qt6::Network   # ★ C.0:Project.cpp 间接 include QTcpSocket(TcpClient.h)
         Qt6::SerialBus  # ★ C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 依赖)
+        Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库 + HistoryRecorder
     )
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
@@ -100,5 +103,7 @@ add_hmi_test(tst_ProjectSchema)
 add_hmi_test(tst_IPollDriver)
 # 阶段 C · C.4 协议选择 UX 锁(教训 1.5)
 add_hmi_test(tst_ProtocolSwitch)
+# 阶段 D · D.1 SQLite 历史库
+add_hmi_test(tst_HistoryRecorder)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

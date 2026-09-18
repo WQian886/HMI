@@ -6,6 +6,7 @@
 #include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
+#include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
@@ -355,6 +356,17 @@ hmi::hmi(QWidget *parent)
 
     // ★ 阶段 6.2(2026-08-07):Project 类(saveToFile 入口)—— 等所有管理器都建好后才能 new
     project_ = new Project(varMgr_, alarmMgr_, actionMgr_, pollScheduler_, tcp_, this);
+
+    // ★ 阶段 D · D.1(2026-09-18):SQLite 历史库记录器
+    //   监听所有 Variable 的 valueChanged → 写入 %APPDATA%\QianWei\HMI\history.db
+    historyRecorder_ = new qwhmi::history::HistoryRecorder(this);
+    if (historyRecorder_->open(qwhmi::history::HistoryRecorder::defaultDbPath())) {
+        historyRecorder_->setSource(varMgr_);
+        qInfo() << "[hmi] HistoryRecorder 启动 OK,db="
+                << qwhmi::history::HistoryRecorder::defaultDbPath();
+    } else {
+        qWarning() << "[hmi] HistoryRecorder 启动失败,历史功能禁用";
+    }
 
     // ★ 阶段 6.3(2026-08-07):loadFromFile 完成后重绑 UI(Binding 持的是旧 Variable*)
     connect(project_, &Project::loaded, this, [this](const QString&){

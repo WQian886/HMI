@@ -219,6 +219,9 @@
     <QtMoc Include="src\drivers\EipDriver.h" />
     <ClInclude Include="src\drivers\EipDriver.h" />
     <ClCompile Include="src\drivers\EipDriver.cpp" />
+    <!-- 阶段 D · D.1 SQLite 历史库(2026-09-18) -->
+    <ClInclude Include="src\history\HistoryRecorder.h" />
+    <ClCompile Include="src\history\HistoryRecorder.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

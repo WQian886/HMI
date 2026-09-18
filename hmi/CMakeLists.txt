@@ -9,7 +9,7 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/msvc2022_64")
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets SerialBus)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets SerialBus Sql)
 
 qt_standard_project_setup()
 
@@ -114,6 +114,7 @@ target_link_libraries(hmi PRIVATE
     Qt6::Network
     Qt6::Widgets
     Qt6::SerialBus
+    Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库
 )
 
 # 中文字符串源码用 UTF-8 编码,需告诉 MSVC
