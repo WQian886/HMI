@@ -1,5 +1,11 @@
-// 阶段 3.3:PollScheduler 实现
+// 阶段 3.3 + ★ C.5(2026-09-18):PollScheduler 多 PLC 调度实现
 // 对应 PollScheduler.h
+//
+// C.5 关键变化:
+//   - 单 IPollDriver* 改成 QHash<QString, IPollDriver*>(按 plcId)
+//   - 每个 driver 独立 tick + 独立 readFinished
+//   - 1 driver = 1 PLC,故障隔离(教训 1.5):plc1 挂不影响 plc2/plc3
+//   - 单 driver 构造兼容老工程:默认所有变量 plcId="plc1"
 
 #include "PollScheduler.h"
 #include "Variable.h"
@@ -10,11 +16,48 @@
 #include <algorithm>
 #include <cstring>  // memcpy (Float register 组合用)
 
-PollScheduler::PollScheduler(VariableManager* mgr, qwhmi::drivers::IPollDriver* driver, QObject* parent)
-    : QObject(parent), varMgr_(mgr), driver_(driver)
+// ★ C.5:单 driver 构造 → 包成 QHash{"plc1": driver}(老工程兼容)
+PollScheduler::PollScheduler(VariableManager* mgr,
+                             qwhmi::drivers::IPollDriver* driver,
+                             QObject* parent)
+    : QObject(parent), varMgr_(mgr), legacyDriver_(driver)
 {
+    if (driver) {
+        drivers_.insert(QStringLiteral("plc1"), driver);
+    }
     timer_.setInterval(100);  // 100ms tick 一次
     connect(&timer_, &QTimer::timeout, this, &PollScheduler::onTick);
+}
+
+// ★ C.5:多 driver 构造
+PollScheduler::PollScheduler(VariableManager* mgr,
+                             const QHash<QString, qwhmi::drivers::IPollDriver*>& drivers,
+                             QObject* parent)
+    : QObject(parent), varMgr_(mgr), drivers_(drivers)
+{
+    if (!drivers_.isEmpty()) {
+        legacyDriver_ = drivers_.values().first();  // 兼容指针指向第一个(QHash::first() 不存在)
+    }
+    timer_.setInterval(100);
+    connect(&timer_, &QTimer::timeout, this, &PollScheduler::onTick);
+}
+
+// ★ C.5:运行时添加 driver
+void PollScheduler::addDriver(const QString& plcId, qwhmi::drivers::IPollDriver* driver) {
+    if (plcId.isEmpty() || !driver) return;
+    drivers_.insert(plcId, driver);
+    if (!legacyDriver_) legacyDriver_ = driver;
+    // 启动定时器如果还没启(start() 由调用方决定)
+}
+
+// ★ C.5:运行时移除 driver
+void PollScheduler::removeDriver(const QString& plcId) {
+    drivers_.remove(plcId);
+    if (legacyDriver_ && !drivers_.isEmpty()) {
+        legacyDriver_ = drivers_.values().first();
+    } else if (drivers_.isEmpty()) {
+        legacyDriver_ = nullptr;
+    }
 }
 
 void PollScheduler::start() {
@@ -24,18 +67,29 @@ void PollScheduler::start() {
     for (Variable* v : varMgr_->allVariables()) {
         nextPollAtMs_[v] = 0;
     }
-    // ★ C.1:接 driver 的 readFinished(协议无关信号:QVector<quint16>)
-    connect(driver_, &qwhmi::drivers::IPollDriver::readFinished,
-            this, &PollScheduler::onDriverReadFinished);
+    // ★ C.5:接每个 driver 的 readFinished(协议无关),包 lambda 捕获 plcId
+    //   故障隔离:1 个 driver disconnect 不影响其他 driver 的 reply 处理
+    for (auto it = drivers_.begin(); it != drivers_.end(); ++it) {
+        const QString plcId = it.key();
+        qwhmi::drivers::IPollDriver* drv = it.value();
+        connect(drv, &qwhmi::drivers::IPollDriver::readFinished,
+                this, [this, plcId](quint32 reqId, QVector<quint16> regs, bool success) {
+                    onDriverReadFinished(plcId, reqId, regs, success);
+                });
+    }
     timer_.start();
 }
 
 void PollScheduler::stop() {
     timer_.stop();
-    disconnect(driver_, &qwhmi::drivers::IPollDriver::readFinished,
-               this, &PollScheduler::onDriverReadFinished);
+    for (auto it = drivers_.begin(); it != drivers_.end(); ++it) {
+        qwhmi::drivers::IPollDriver* drv = it.value();
+        disconnect(drv, &qwhmi::drivers::IPollDriver::readFinished,
+                   this, nullptr);  // 断开所有 lambda
+    }
     nextPollAtMs_.clear();
     pending_.clear();
+    pendingPlcId_.clear();
 }
 
 // ★ BUGFIX(2026-07-28):重连时调用,把所有 nextPollAtMs 强制置 0
@@ -48,6 +102,7 @@ void PollScheduler::resetAll() {
     }
     inFlight_.clear();   // ★ IMPROVE-A7:清 in-flight 集合
     pending_.clear();     // 顺手清掉 pending reqId(旧的不会影响新的,清掉更干净)
+    pendingPlcId_.clear();
 }
 
 // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询策略 C —— UI 注册接口实现
@@ -82,79 +137,104 @@ void PollScheduler::clearActiveVariables() {
     qDebug() << "[PollScheduler] clearActiveVariables()";
 }
 
+// ★ C.5(2026-09-18):onTick 多 driver 调度 + 故障隔离
+//   关键:每个 driver 独立检查 isConnected / pendingCount
+//         1 个 PLC 挂 → 只该 plc 的变量 pendingCount 累积,其他 plc 照常 poll
 void PollScheduler::onTick() {
-    // 2026-07-21 防御:driver 未连就别 poll,避免连环弹错
-    if (!driver_->isConnected()) return;
-
-    // ★ BUGFIX(2026-07-28):跟 WriteScheduler 对齐,加 in-flight 防御
-    //
-    //   【背景】Modbus 协议从站串行响应,master 不能同时问 1 又问 2
-    //     1 个 driver(单 in-flight)→ 防御必加
-    //     多个 driver(可并行,未来 S7) → 这层防御无影响
-    //
-    //   【修法】onTick 顶部检查 pendingCount,有未完成的就静默 return,
-    //     等下一帧(100ms)再发
-    //
-    //   【取舍】静默 return 会让 PollScheduler 100ms 内少读一次(最多 1 次),
-    //     对工业 HMI 1 秒轮询周期影响可忽略;比弹窗骚扰操作员好得多
-    if (driver_->pendingCount() > 0) return;
-
     qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-    // 1. 找所有"到期"的 Variable
+    // 1. 找所有"到期"的 Variable,并按 plcId 分组
     // inFlight_.contains(v) → 请求已发,等 reply,跳过
     // nextPollAtMs[v] == 0   → 第一次启动,立即发
     // nextPollAtMs[v] < now → 已到期,再发
-    QList<Variable*> due;
+    // ★ C.5:同时按 Variable.plcId() 找对应 driver
+    QHash<QString, QList<Variable*>> dueByPlc;  // plcId → 该 plc 到期的变量
     for (Variable* v : varMgr_->allVariables()) {
-        // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询 —— 不在 activeVariables_ 且 alwaysPoll=false → 跳过
-        //   alwaysPoll=true 的变量(报警关键)不受 activeVariables_ 限制 —— 报警不漏
+        // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询
         if (!v->alwaysPoll() && !activeVariables_.contains(v)) continue;
-        if (inFlight_.contains(v)) continue;  // ★ IMPROVE-A7:in-flight 用 QSet 替 -1
+        if (inFlight_.contains(v)) continue;
         qint64 next = nextPollAtMs_.value(v, 0);
         if (now >= next) {
-            due.append(v);
-            inFlight_.insert(v);  // ★ IMPROVE-A7:标记 in-flight
+            dueByPlc[v->plcId()].append(v);
+            inFlight_.insert(v);
         }
     }
-    if (due.isEmpty()) return;
+    if (dueByPlc.isEmpty()) return;
 
-    // 2. 按 address 排序,便于合并连续区间
-    std::sort(due.begin(), due.end(), [](Variable* a, Variable* b) {
-        return a->address() < b->address();
-    });
+    // 2. 对每个 plc 独立处理:找 driver + 检查连接 + 合并发请求
+    for (auto it = dueByPlc.begin(); it != dueByPlc.end(); ++it) {
+        const QString plcId = it.key();
+        QList<Variable*> due = it.value();
 
-    // 3. 合并连续区间 → 1 次 driver 读请求
-    while (!due.isEmpty()) {
-        Variable* first = due.takeFirst();
-        QList<Variable*> batch{first};
-        int count = 1;
-        while (!due.isEmpty()
-               && due.first()->address() == first->address() + count) {
-            batch.append(due.takeFirst());
-            count++;
+        // ★ C.5:找不到 driver(变量配置错或 driver 未注册)→ 全部 Bad
+        qwhmi::drivers::IPollDriver* drv = drivers_.value(plcId, nullptr);
+        if (!drv) {
+            qWarning() << "[PollScheduler] onTick: plcId=" << plcId
+                       << "没注册 driver — 跳过" << due.size() << "vars,标 Bad";
+            for (Variable* v : due) {
+                v->setQuality(Variable::Quality::Bad);
+                inFlight_.remove(v);
+                nextPollAtMs_[v] = now + v->pollIntervalMs();
+            }
+            continue;
         }
 
-        // 4. 发读请求(通用 IPollDriver 接口,不再依赖 QModbusDataUnit)
-        // ★ IMPROVE-A2(2026-07-29):++ 前缀 + 跳过 0
-        quint32 reqId = ++nextReqId_;
-        if (reqId == 0) reqId = ++nextReqId_;
-        pending_[reqId] = batch;
+        // ★ C.5 故障隔离:这个 plc 的 driver 没连 → 只跳过该 plc 的变量
+        if (!drv->isConnected()) {
+            for (Variable* v : due) {
+                v->setQuality(Variable::Quality::Bad);
+                inFlight_.remove(v);
+                nextPollAtMs_[v] = now + v->pollIntervalMs();
+            }
+            continue;
+        }
 
-        qwhmi::drivers::IPollDriver::ReadRequest req;
-        req.area      = qwhmi::drivers::RegisterArea::HoldingReg;
-        req.slaveId   = 1;   // slaveId 暂时固定 1,阶段 6 工程文件再做成可配
-        req.addr      = first->address();
-        req.count     = count;
-        req.requestId = reqId;
-        driver_->sendReadRequest(req);
+        // ★ 单 in-flight 防御(同 driver 不能并行问多个请求)
+        if (drv->pendingCount() > 0) {
+            for (Variable* v : due) {
+                inFlight_.remove(v);  // 回滚标记,下一帧再发
+                nextPollAtMs_[v] = now + 100;  // 100ms 后重试
+            }
+            continue;
+        }
+
+        // 3. 按 address 排序,便于合并连续区间(同 plc 内)
+        std::sort(due.begin(), due.end(), [](Variable* a, Variable* b) {
+            return a->address() < b->address();
+        });
+
+        // 4. 合并连续区间 → 1 次 driver 读请求
+        while (!due.isEmpty()) {
+            Variable* first = due.takeFirst();
+            QList<Variable*> batch{first};
+            int count = 1;
+            while (!due.isEmpty()
+                   && due.first()->address() == first->address() + count) {
+                batch.append(due.takeFirst());
+                count++;
+            }
+
+            // 5. 发读请求(通用 IPollDriver 接口,不再依赖 QModbusDataUnit)
+            quint32 reqId = ++nextReqId_;
+            if (reqId == 0) reqId = ++nextReqId_;
+            pending_[reqId] = batch;
+            pendingPlcId_[reqId] = plcId;  // ★ C.5:记 plcId 给 readFinished 分派
+
+            qwhmi::drivers::IPollDriver::ReadRequest req;
+            req.area      = qwhmi::drivers::RegisterArea::HoldingReg;
+            req.slaveId   = 1;   // slaveId 暂时固定 1,阶段 6 工程文件再做成可配
+            req.addr      = first->address();
+            req.count     = count;
+            req.requestId = reqId;
+            drv->sendReadRequest(req);  // ★ C.5:用 per-plc driver 发,不是单 driver_
+        }
     }
 }
 
-// ★ C.1:信号签名从 QModbusDataUnit → QVector<quint16>
-//   PollScheduler 不再依赖 Modbus-特定类型,任何 IPollDriver 都触发得了
-void PollScheduler::onDriverReadFinished(quint32 requestId, QVector<quint16> registers, bool success) {
+// ★ C.5(2026-09-18):readFinished 改签名带 plcId(因为可能 N 个 driver 同时发 reply)
+void PollScheduler::onDriverReadFinished(const QString& plcId, quint32 requestId, QVector<quint16> registers, bool success) {
     QList<Variable*> batch = pending_.take(requestId);
+    pendingPlcId_.remove(requestId);
     if (batch.isEmpty()) return;
 
     qint64 now = QDateTime::currentMSecsSinceEpoch();

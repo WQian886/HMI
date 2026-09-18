@@ -6,11 +6,18 @@
 //   - 不再 include QModbusDataUnit(协议无关)
 //   - 跟 DriverFactory 配合,C.4 加协议 UI 时换 driver 不用改 PollScheduler
 //
+// ★ C.5(2026-09-18):从单 IPollDriver* 改成 QHash<QString, IPollDriver*>
+//   - key = plcId("plc1"/"plc2"/...)
+//   - 每个 driver 独立 tick,故障隔离(教训 1.5)
+//   - 1 driver = 1 PLC
+//   - 老工程所有变量默认 plcId="plc1",所以单 driver 行为不变
+//
 // 设计原则:
 // 1. 单 timer 集中调度(不给每个 Variable 一个 QObject,timer 太多不高效)
 // 2. 按 address 排序后合并连续区间(0x0001+0x0002+0x0003 = 1 次 read holding reg count=3)
 // 3. in-flight 机制:nextPollAtMs[v] = 0 + inFlight_ set(避免 -1 magic number)
 // 4. 失败/超时:由 PollScheduler 自己的下一帧重试(不依赖具体 driver 失败信号)
+// 5. ★ C.5 多 driver 调度:每个 driver 各自发请求,各自等 reply;1 个 driver 挂不影响其他
 
 #pragma once
 
@@ -28,7 +35,22 @@ namespace qwhmi::drivers { class IPollDriver; }
 class PollScheduler : public QObject {
     Q_OBJECT
 public:
-    explicit PollScheduler(VariableManager* mgr, qwhmi::drivers::IPollDriver* driver, QObject* parent = nullptr);
+    // ★ C.5(2026-09-18):构造支持多 driver(向后兼容单 driver)
+    //   - 单 driver 构造:把所有变量当成 plc1(老工程默认)
+    //   - 多 driver 构造:QHash<plcId, IPollDriver*>
+    explicit PollScheduler(VariableManager* mgr,
+                           qwhmi::drivers::IPollDriver* driver,
+                           QObject* parent = nullptr);
+    explicit PollScheduler(VariableManager* mgr,
+                           const QHash<QString, qwhmi::drivers::IPollDriver*>& drivers,
+                           QObject* parent = nullptr);
+
+    // ★ C.5(2026-09-18):运行时添加/移除 PLC(用于切换协议 / 新增 PLC)
+    void addDriver(const QString& plcId, qwhmi::drivers::IPollDriver* driver);
+    void removeDriver(const QString& plcId);
+
+    // 当前 driver 列表(plcId → IPollDriver*)
+    QHash<QString, qwhmi::drivers::IPollDriver*> drivers() const { return drivers_; }
 
 	void start();// 开始轮询调度
 	void stop();// 停止轮询调度
@@ -57,13 +79,15 @@ signals:
 
 private slots:
     void onTick();                                       // 100ms 一次扫描
-    // ★ C.1:readFinished 改成 QVector<quint16>(不再依赖 QModbusDataUnit)
-    void onDriverReadFinished(quint32 requestId, QVector<quint16> registers, bool success);
+    // ★ C.5:readFinished 也带 plcId(因为可能 N 个 driver 同时发 reply)
+    void onDriverReadFinished(const QString& plcId, quint32 requestId, QVector<quint16> registers, bool success);
 
 private:
     VariableManager* varMgr_;
-    // ★ C.1:从 ModbusMaster* 改成 IPollDriver*(协议无关)
-    qwhmi::drivers::IPollDriver* driver_;
+    // ★ C.5:从单 IPollDriver* 改成 QHash<QString, IPollDriver*>
+    //   老代码 driver_ 单指针保留(兼容性指针),drivers_ 是新多 driver 哈希
+    qwhmi::drivers::IPollDriver* legacyDriver_ = nullptr;  // 单 driver 兼容
+    QHash<QString, qwhmi::drivers::IPollDriver*> drivers_;  // 多 driver(按 plcId)
     QTimer timer_;                                       // 100ms tick
     QHash<Variable*, qint64> nextPollAtMs_;            // 下次轮询时刻(0 = 立即可发,>0 = 等到该时刻)
     // ★ IMPROVE-A7(2026-07-29):in-flight 状态独立用 QSet,替原来的 -1 magic number
@@ -76,5 +100,7 @@ private:
     QSet<Variable*> activeVariables_;
     // ★ IMPROVE-A2(2026-07-29):quint32 防回绕(int 跑 2^31 次也会爆)
     quint32 nextReqId_ = 1;
-    QHash<quint32, QList<Variable*>> pending_;         // reqId → 待更新变量列表(合并读用)
+    // ★ C.5:reqId → 待更新变量列表(合并读用)+ plcId(哪个 driver 的 reply)
+    QHash<quint32, QList<Variable*>> pending_;         // reqId → variables
+    QHash<quint32, QString> pendingPlcId_;             // reqId → plcId(分派 readFinished 用)
 };

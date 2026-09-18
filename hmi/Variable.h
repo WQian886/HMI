@@ -59,13 +59,19 @@ public:
                  Access access,
                  QObject* parent = nullptr);//
     // ===== getters =====
-    QString   name()      const { return name_; }//     
+    QString   name()      const { return name_; }//
     quint16   address()   const { return address_; }//
     DataType  dataType()  const { return type_; }
     Access    access()    const { return access_; }
     QVariant  value()     const { return value_; }
     Quality   quality()   const { return quality_; }
     QDateTime timestamp() const { return timestamp_; }
+
+    // ★ 阶段 C · C.5(2026-09-18):plcId — 变量明确属于哪台 PLC(多 PLC 架构)
+    //   教训 1.5:每个变量必须明确归属,1 driver = 1 PLC,故障隔离
+    //   老工程默认 "plc1"(C.0 schema migrateV2ToV3 兼容)
+    QString   plcId()     const { return plcId_; }
+    void      setPlcId(const QString& id) { plcId_ = id; }
 
     // ===== 阶段 3.3:轮询周期(ms),PollScheduler 按此字段调度 =====
     // 默认 1000ms = 1 秒。改这个就改 PollScheduler 多久读一次 PLC
@@ -135,6 +141,7 @@ public:
 private:
 	QString   name_;// PLC 工程师给的名字,唯一标识一个数据点
 	quint16   address_;// PLC 内的地址(寄存器号 / 位号)
+    QString   plcId_ = QStringLiteral("plc1");  // ★ C.5:所属 PLC,默认 plc1(老工程兼容)
 	DataType  type_;// 数据类型(PLC 那边对应的寄存器宽度)
 	Access    access_;// 访问权限(只读 / 可读可写)
 	QVariant  value_;// 当前值(PLC 内的值,可能是 bool/int/float 等)
