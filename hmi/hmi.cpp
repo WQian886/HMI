@@ -506,7 +506,6 @@ void hmi::executePendingModbus() {
 
 // 2026-07-07 重设计:统一的读/写入口
 void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int slaveId, int addr) {
-    bool ok;
     QModbusReply* reply = nullptr;
 
     // ★ C.1(2026-09-17):executeModbus 是 Modbus-特定调试 UI,需要 ModbusMaster 接口

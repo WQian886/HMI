@@ -206,6 +206,7 @@
     <QtMoc Include="src\drivers\IPollDriver.h" />
     <ClInclude Include="src\drivers\IPollDriver.h" />
     <ClCompile Include="src\drivers\IPollDriver.cpp" />
+    <QtMoc Include="src\drivers\ModbusDriver.h" />
     <ClInclude Include="src\drivers\ModbusDriver.h" />
     <ClCompile Include="src\drivers\ModbusDriver.cpp" />
     <ClInclude Include="src\drivers\DriverFactory.h" />

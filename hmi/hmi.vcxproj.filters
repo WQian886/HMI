@@ -244,6 +244,9 @@
     <ClCompile Include="src\drivers\IPollDriver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <QtMoc Include="src\drivers\ModbusDriver.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
     <ClInclude Include="src\drivers\ModbusDriver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
