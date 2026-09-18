@@ -47,7 +47,8 @@ bool HistoryRecorder::open(const QString& dbPath) {
     }
     db_ = new QSqlDatabase(QSqlDatabase::addDatabase("QSQLITE", "hmi_history"));
     db_->setDatabaseName(dbPath);
-    if (!db_->open()) {
+    const bool ok = db_->open();
+    if (!ok) {
         qCritical() << "[HistoryRecorder] 打开失败:" << db_->lastError().text()
                     << "path=" << dbPath;
         delete db_;
@@ -240,7 +241,10 @@ QVector<QPair<QDateTime, double>> HistoryRecorder::query(
 
 // ★ D.1.2:默认路径 %APPDATA%\QianWei\HMI\history.db
 QString HistoryRecorder::defaultDbPath() {
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    // ★ 改用 AppLocalDataLocation(Qt6)— 跟 users.json / audit log 同目录
+    //   Qt6 默认 AppDataLocation → Roaming(Qt5 是 Local),但其他配置都在 Local
+    //   AppLocalDataLocation 在所有 Qt 版本都返 Local
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     return base + "/history.db";
 }
 

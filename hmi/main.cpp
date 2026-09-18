@@ -109,6 +109,9 @@ int main(int argc, char *argv[])
 
     QApplication app(argc, argv);
     qCInfo(hmiApp) << "[main-early] QApplication created";
+    // ★ D.1 fix (2026-09-18):显式加 Qt plugins 路径,避免 SQLite driver 找不到(开发环境)
+    QCoreApplication::addLibraryPath(QStringLiteral("D:/Qt/6.8.3/msvc2022_64/plugins"));
+    qInfo() << "[main] Qt plugins path:" << QCoreApplication::libraryPaths();
     QApplication::setQuitOnLastWindowClosed(false);
 
     // 5. 命令行参数
