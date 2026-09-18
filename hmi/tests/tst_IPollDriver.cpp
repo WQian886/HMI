@@ -202,7 +202,9 @@ void TestIPollDriver::driverFactory_isSupported_modbus() {
     QVERIFY(DriverFactory::isSupported("modbus_tcp"));
     // ★ 阶段 C · C.2 (2026-09-18):s7 已实现(骨架,真连接在 C.2.4)
     QVERIFY(DriverFactory::isSupported("s7"));       // C.2 已支持(骨架阶段,真连接 PLCSIM 在 C.2.7)
-    QVERIFY(!DriverFactory::isSupported("eip"));     // C.3 还没实现
+    // ★ 阶段 C · C.3 (2026-09-18):eip 已实现(骨架,真连接在 C.3.4)
+    QVERIFY(DriverFactory::isSupported("eip"));      // C.3 已支持(骨架阶段,真连接 Logix Designer 在 C.6a)
+    QVERIFY(DriverFactory::isSupported("ethernet_ip")); // 大小写/别名
 }
 
 void TestIPollDriver::readRequest_passesAllFourAreas() {

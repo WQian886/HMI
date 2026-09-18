@@ -266,5 +266,15 @@
     <ClCompile Include="src\drivers\S7Driver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- 阶段 C · C.3 EIP 协议适配器(2026-09-18) -->
+    <QtMoc Include="src\drivers\EipDriver.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\drivers\EipDriver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\drivers\EipDriver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

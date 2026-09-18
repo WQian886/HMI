@@ -214,6 +214,10 @@
     <QtMoc Include="src\drivers\S7Driver.h" />
     <ClInclude Include="src\drivers\S7Driver.h" />
     <ClCompile Include="src\drivers\S7Driver.cpp" />
+    <!-- 阶段 C · C.3 EIP 协议适配器(2026-09-18 落地骨架) -->
+    <QtMoc Include="src\drivers\EipDriver.h" />
+    <ClInclude Include="src\drivers\EipDriver.h" />
+    <ClCompile Include="src\drivers\EipDriver.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

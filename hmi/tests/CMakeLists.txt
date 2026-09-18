@@ -55,6 +55,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/DriverFactory.cpp
     # 阶段 C · C.2 S7 协议适配器(2026-09-18)DriverFactory 创建 S7Driver 需要链接 S7Driver.cpp
     ${HMI_SRC_DIR}/src/drivers/S7Driver.cpp
+    # 阶段 C · C.3 EIP 协议适配器(2026-09-18)DriverFactory 创建 EipDriver 需要链接 EipDriver.cpp
+    ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
 )
 
 function(add_hmi_test test_name)
