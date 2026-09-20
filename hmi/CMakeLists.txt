@@ -34,6 +34,9 @@ set(SOURCES
     Project.cpp         # 项目(保存/加载)
     # ★ D.2(2026-09-20):QCustomPlot 曲线控件(LGPL v2.1,3rdparty/qcustomplot/)
     3rdparty/qcustomplot/qcustomplot.cpp
+    # ★ E.1(2026-09-20):控件基类 + 第 1 个显示控件 LabelControl(QGraphicsObject 派生)
+    src/widgets/base/ControlBase.cpp
+    src/widgets/LabelControl.cpp
 )
 
 set(HEADERS
@@ -55,6 +58,9 @@ set(HEADERS
     Project.h
     # ★ D.2:QCustomPlot 头文件
     3rdparty/qcustomplot/qcustomplot.h
+    # ★ E.1:控件基类 + 第 1 个显示控件 LabelControl
+    src/widgets/base/ControlBase.h
+    src/widgets/LabelControl.h
 )
 
 set(HEADERS

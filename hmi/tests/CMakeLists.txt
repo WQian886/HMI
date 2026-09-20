@@ -72,6 +72,9 @@ set(HMI_CORE_SOURCES
     # ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot
     ${HMI_SRC_DIR}/src/widgets/TrendWidget.cpp
     ${HMI_SRC_DIR}/3rdparty/qcustomplot/qcustomplot.cpp
+    # ★ E.1(2026-09-20):控件基类 + LabelControl
+    ${HMI_SRC_DIR}/src/widgets/base/ControlBase.cpp
+    ${HMI_SRC_DIR}/src/widgets/LabelControl.cpp
 )
 
 function(add_hmi_test test_name)
@@ -127,6 +130,8 @@ add_hmi_test(tst_CsvExporter)
 add_hmi_test(tst_ExpressionParser)
 # 阶段 D · D.7 标签导入(CSV-based,零三方依赖)
 add_hmi_test(tst_TagImporter)
+# 阶段 E · E.1a 第 1 个控件 LabelControl(测试需要 QApplication + offscreen)
+add_hmi_test(tst_LabelControl)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

@@ -240,6 +240,13 @@
     <QtMoc Include="src\widgets\TrendWidget.h" />
     <ClInclude Include="src\widgets\TrendWidget.h" />
     <ClCompile Include="src\widgets\TrendWidget.cpp" />
+    <!-- ★ E.1(2026-09-20):控件基类 ControlBase(Q_OBJECT 走 QtMoc)+ 第 1 个显示控件 LabelControl -->
+    <QtMoc Include="src\widgets\base\ControlBase.h" />
+    <ClInclude Include="src\widgets\base\ControlBase.h" />
+    <ClCompile Include="src\widgets\base\ControlBase.cpp" />
+    <QtMoc Include="src\widgets\LabelControl.h" />
+    <ClInclude Include="src\widgets\LabelControl.h" />
+    <ClCompile Include="src\widgets\LabelControl.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

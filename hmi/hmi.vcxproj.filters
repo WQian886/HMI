@@ -339,5 +339,24 @@
     <ClCompile Include="3rdparty\qcustomplot\qcustomplot.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.1(2026-09-20):控件基类 + 第 1 个显示控件 LabelControl -->
+    <QtMoc Include="src\widgets\base\ControlBase.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\base\ControlBase.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\base\ControlBase.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\LabelControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\LabelControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\LabelControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
