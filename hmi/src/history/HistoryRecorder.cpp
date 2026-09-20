@@ -14,6 +14,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
+#include <QTimer>          // ★ D.2:心跳 timer
 #include <QVariant>
 
 namespace qwhmi::history {
@@ -85,14 +86,15 @@ bool HistoryRecorder::ensureSchema() {
     if (!db_) return false;
     QSqlQuery q(*db_);
 
-    // history 表
+    // history 表(★ D.2:加 is_heartbeat INTEGER DEFAULT 0 列)
     const QString createHistory = R"(
         CREATE TABLE IF NOT EXISTS history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             variable_name TEXT NOT NULL,
             timestamp INTEGER NOT NULL,    -- Unix 毫秒
             value REAL NOT NULL,
-            quality INTEGER NOT NULL        -- 0=Bad, 1=Good, 2=Stale
+            quality INTEGER NOT NULL,       -- 0=Bad, 1=Good, 2=Stale
+            is_heartbeat INTEGER DEFAULT 0 -- ★ D.2:1=心跳(60s 一次确认数据流活着),0=变化检测
         )
     )";
     if (!q.exec(createHistory)) {
@@ -110,6 +112,44 @@ bool HistoryRecorder::ensureSchema() {
         return false;
     }
 
+    // ★ D.2:对 D.1 时期生成的旧 DB(无 is_heartbeat 列)做轻量 ALTER
+    if (!migrateAddHeartbeatColumn()) {
+        return false;
+    }
+
+    return true;
+}
+
+// ★ D.2:对 D.1 时期生成的旧 DB 做 ALTER TABLE 兼容升级
+//   用 PRAGMA table_info 探测列存在性,缺则 ALTER TABLE history ADD COLUMN is_heartbeat INTEGER DEFAULT 0;
+//   幂等 — 已存在列则跳过。
+bool HistoryRecorder::migrateAddHeartbeatColumn() {
+    if (!db_) return false;
+    QSqlQuery q(*db_);
+
+    // 探测 is_heartbeat 列是否存在
+    if (!q.exec("PRAGMA table_info(history)")) {
+        qCritical() << "[HistoryRecorder] PRAGMA table_info 失败:" << q.lastError().text();
+        return false;
+    }
+    bool columnExists = false;
+    while (q.next()) {
+        if (q.value(1).toString() == QLatin1String("is_heartbeat")) {
+            columnExists = true;
+            break;
+        }
+    }
+    if (columnExists) {
+        return true;   // 已存在 — 无需迁移
+    }
+
+    // 旧 DB → ALTER TABLE 加列(SQLite 加列支持 DEFAULT 0,不需要重写表)
+    QSqlQuery alter(*db_);
+    if (!alter.exec("ALTER TABLE history ADD COLUMN is_heartbeat INTEGER DEFAULT 0")) {
+        qCritical() << "[HistoryRecorder] ALTER TABLE 加 is_heartbeat 失败:" << alter.lastError().text();
+        return false;
+    }
+    qInfo() << "[HistoryRecorder] 已升级旧 DB schema,新增 is_heartbeat 列";
     return true;
 }
 
@@ -137,6 +177,79 @@ void HistoryRecorder::setSource(VariableManager* varMgr) {
     }
     qInfo() << "[HistoryRecorder] 绑定 VariableManager 数据源,共"
             << varMgr->allVariables().size() << "个变量";
+
+    // ★ D.2:首次绑定 → 启动心跳 timer(允许重复 setSource 时不重启)
+    if (!heartbeatTimer_) {
+        heartbeatTimer_ = new QTimer(this);
+        // ★ CoarseTimer 精度 5%(50ms 最小)— 兼顾生产 60s(±3s)+ 测试 200ms(可命中);
+        //   不用 VeryCoarseTimer 是因为它会被四舍五入到 1000ms,测试心跳永远触发不了。
+        heartbeatTimer_->setTimerType(Qt::CoarseTimer);
+        connect(heartbeatTimer_, &QTimer::timeout,
+                this, &HistoryRecorder::onHeartbeatTick);
+    }
+    if (heartbeatIntervalMs_ > 0 && !heartbeatTimer_->isActive()) {
+        heartbeatTimer_->start(heartbeatIntervalMs_);
+        qInfo() << "[HistoryRecorder] 心跳 timer 已启动,间隔" << heartbeatIntervalMs_ << "ms";
+    }
+}
+
+// ★ D.2:start / stop / isRunning 控制心跳 timer
+void HistoryRecorder::start() {
+    if (!heartbeatTimer_) {
+        heartbeatTimer_ = new QTimer(this);
+        heartbeatTimer_->setTimerType(Qt::CoarseTimer);
+        connect(heartbeatTimer_, &QTimer::timeout,
+                this, &HistoryRecorder::onHeartbeatTick);
+    }
+    if (heartbeatIntervalMs_ > 0) {
+        heartbeatTimer_->start(heartbeatIntervalMs_);
+        qInfo() << "[HistoryRecorder] 心跳 timer start," << heartbeatIntervalMs_ << "ms";
+    }
+}
+
+void HistoryRecorder::stop() {
+    if (heartbeatTimer_ && heartbeatTimer_->isActive()) {
+        heartbeatTimer_->stop();
+        qInfo() << "[HistoryRecorder] 心跳 timer stop";
+    }
+}
+
+bool HistoryRecorder::isRunning() const {
+    return heartbeatTimer_ && heartbeatTimer_->isActive();
+}
+
+// ★ D.2:心跳 tick — 遍历所有 Variable 各写一行 is_heartbeat=1
+//   关键设计:心跳是"确认数据流还活着"的标志,即使值不变也写;
+//   D.2 Trend 画曲线时不必区分 is_heartbeat(两种都画),但做"健康度检查"时可只查心跳行。
+void HistoryRecorder::onHeartbeatTick() {
+    if (!isOpen() || !varMgr_) return;
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    int written = 0;
+    for (Variable* v : varMgr_->allVariables()) {
+        if (!v) continue;
+        const QString varName = v->plcId() + "." + v->name();  // "plc1.Speed"
+
+        QSqlQuery q(*db_);
+        q.prepare(R"(
+            INSERT INTO history (variable_name, timestamp, value, quality, is_heartbeat)
+            VALUES (?, ?, ?, ?, 1)
+        )");
+        q.addBindValue(varName);
+        q.addBindValue(now);
+        q.addBindValue(v->value().toDouble());
+        q.addBindValue(static_cast<int>(v->quality()));
+
+        if (q.exec()) {
+            ++written;
+        } else {
+            qWarning() << "[HistoryRecorder] 心跳 INSERT 失败:" << q.lastError().text()
+                       << "var=" << varName;
+        }
+    }
+    if (written > 0) {
+        qInfo() << "[HistoryRecorder] 心跳写了" << written << "行";
+    }
 }
 
 // ★ D.1.2:采样策略判断
@@ -158,7 +271,7 @@ bool HistoryRecorder::shouldWrite(const QString& varName, double value) {
     return true;
 }
 
-// ★ D.1.2:valueChanged 槽
+// ★ D.1.2:valueChanged 槽(★ D.2:写 is_heartbeat=0 — 区别于心跳行)
 void HistoryRecorder::onVariableChanged(const Variable& v) {
     if (!isOpen()) return;
 
@@ -169,8 +282,8 @@ void HistoryRecorder::onVariableChanged(const Variable& v) {
 
     QSqlQuery q(*db_);
     q.prepare(R"(
-        INSERT INTO history (variable_name, timestamp, value, quality)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO history (variable_name, timestamp, value, quality, is_heartbeat)
+        VALUES (?, ?, ?, ?, 0)
     )");
     q.addBindValue(varName);
     q.addBindValue(QDateTime::currentMSecsSinceEpoch());

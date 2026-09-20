@@ -35,6 +35,10 @@ private slots:
     void changeThreshold_ignoresSmallChanges();
     void query_returnsTimeRangeCorrectly();
     void cleanupExpired_deletesOldRecords();
+
+    // ★ D.2(2026-09-20):心跳 + schema 升级
+    void heartbeat_writesAllVariablesEveryInterval();
+    void heartbeatField_migratesFromOldDbWithoutColumn();
 };
 
 void TestHistoryRecorder::initTestCase() {
@@ -218,6 +222,113 @@ void TestHistoryRecorder::cleanupExpired_deletesOldRecords() {
     QDateTime to = QDateTime::currentDateTime().addMSecs(1000);
     auto records = r.query("plc1.Old", from, to);
     QCOMPARE(records.size(), 0);
+}
+
+// ★ D.2 用例 7:心跳 timer 触发后,所有 Variable 各写一行 is_heartbeat=1
+//   用 setHeartbeatInterval(200) + 手动调 onHeartbeatTick() 模拟 timer timeout
+//   (不真等 60s,跑得快)
+void TestHistoryRecorder::heartbeat_writesAllVariablesEveryInterval() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString dbPath = tmp.path() + "/test.db";
+
+    HistoryRecorder r;
+    QVERIFY(r.open(dbPath));
+    r.setHeartbeatInterval(200);  // 200ms 测试间隔(生产 60000)
+    VariableManager vm;
+
+    Variable v1("Speed", 0, Variable::DataType::Float, Variable::Access::ReadOnly, &vm);
+    v1.setPlcId("plc1");
+    Variable v2("Temp", 0, Variable::DataType::Float, Variable::Access::ReadOnly, &vm);
+    v2.setPlcId("plc1");
+    vm.addVariable(&v1);
+    vm.addVariable(&v2);
+    r.setSource(&vm);
+    QVERIFY(r.isRunning());
+
+    // 等一次心跳 tick(用 QTest::qWait 比真等 timer 更稳)
+    QTest::qWait(300);
+
+    // query 应该看到 2 行心跳(各变量 1 行,is_heartbeat=1)
+    QSqlQuery check(QSqlDatabase::database("hmi_history"));
+    check.prepare("SELECT variable_name, is_heartbeat FROM history WHERE is_heartbeat = 1 ORDER BY variable_name");
+    QVERIFY(check.exec());
+    int heartbeatRows = 0;
+    QStringList varNames;
+    while (check.next()) {
+        varNames << check.value(0).toString();
+        QCOMPARE(check.value(1).toInt(), 1);  // is_heartbeat 必须是 1
+        ++heartbeatRows;
+    }
+    QCOMPARE(heartbeatRows, 2);
+    QVERIFY(varNames.contains("plc1.Speed"));
+    QVERIFY(varNames.contains("plc1.Temp"));
+
+    r.stop();
+    QVERIFY(!r.isRunning());
+}
+
+// ★ D.2 用例 8:旧 DB(无 is_heartbeat 列)打开后能 ALTER TABLE 升级
+//   模拟 D.1 时期生成的 DB:CREATE TABLE 时不含 is_heartbeat
+//   打开后 isOpen() == true 且 INSERT/UPDATE 都仍可用
+void TestHistoryRecorder::heartbeatField_migratesFromOldDbWithoutColumn() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString dbPath = tmp.path() + "/test_legacy.db";
+
+    // 1. 模拟 D.1 旧 DB:手动创建无 is_heartbeat 列的 history 表
+    {
+        QSqlDatabase legacy(QSqlDatabase::addDatabase("QSQLITE", "legacy_setup"));
+        legacy.setDatabaseName(dbPath);
+        QVERIFY(legacy.open());
+        QSqlQuery q(legacy);
+        QVERIFY(q.exec(R"(
+            CREATE TABLE history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                variable_name TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                value REAL NOT NULL,
+                quality INTEGER NOT NULL
+            )
+        )"));
+        QVERIFY(q.exec("CREATE INDEX idx_history_var_time ON history(variable_name, timestamp)"));
+        legacy.close();
+        QSqlDatabase::removeDatabase("legacy_setup");
+    }
+
+    // 2. 用 HistoryRecorder 打开旧 DB(应触发 migrateAddHeartbeatColumn)
+    HistoryRecorder r;
+    QVERIFY(r.open(dbPath));   // 不应崩,应自动 ALTER 成功
+    QVERIFY(r.isOpen());
+
+    // 4. 验证 is_heartbeat 列已存在(用 PRAGMA table_info 查)
+    QSqlQuery check(QSqlDatabase::database("hmi_history"));
+    QVERIFY(check.exec("PRAGMA table_info(history)"));
+    bool found = false;
+    while (check.next()) {
+        if (check.value(1).toString() == QLatin1String("is_heartbeat")) {
+            found = true;
+            // 默认值应为 0
+            QCOMPARE(check.value(3).toInt(), 0);  // dflt_value 列
+            break;
+        }
+    }
+    QVERIFY(found);
+
+    // 5. 验证旧数据兼容 — 插入一条 is_heartbeat=0 的数据不报错
+    VariableManager vm;
+    Variable v("Legacy", 0, Variable::DataType::Float, Variable::Access::ReadOnly, &vm);
+    v.setPlcId("plc1");
+    vm.addVariable(&v);
+    r.setSource(&vm);
+    v.setValue(QVariant::fromValue<float>(42.0f));
+    QTest::qWait(50);
+
+    QDateTime from = QDateTime::currentDateTime().addMSecs(-1000);
+    QDateTime to = QDateTime::currentDateTime().addMSecs(1000);
+    auto records = r.query("plc1.Legacy", from, to);
+    QCOMPARE(records.size(), 1);
+    QVERIFY(qAbs(records[0].second - 42.0) < 0.001);
 }
 
 // ★ QTEST_GUILESS_MAIN(创建 QCoreApplication,Qt SQL 需要)

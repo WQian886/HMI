@@ -50,6 +50,14 @@ public:
     void setSampleInterval(int ms) { sampleIntervalMs_ = ms; }
     void setChangeThreshold(double t) { changeThreshold_ = t; }
 
+    // ★ D.2(2026-09-20):心跳策略(60 秒一次"即使没变化也写")
+    //   心跳行在 history 表里 is_heartbeat=1,让 D.2 实时曲线不会因为变量长期不变化而出现 > 60s 死区;
+    //   默认 60000ms(0 = 禁用心跳);start() 后才开始计时,跟 setSource 解耦(允许"open 后先不监听")
+    void setHeartbeatInterval(int ms) { heartbeatIntervalMs_ = ms; }
+    void start();           // 启动心跳 timer(setSource 之后调)
+    void stop();            // 停止心跳 timer
+    bool isRunning() const;
+
     // ★ D.1.2:环形缓冲保留天数(> N 天的记录自动删除,默认 30 天)
     void setRetentionDays(int days) { retentionDays_ = days; }
     void cleanupExpired();   // 手动触发清理
@@ -68,15 +76,22 @@ private slots:
     // ★ D.1.2:监听 Variable.valueChanged(由 setSource 内部 connect)
     void onVariableChanged(const Variable& v);
 
+    // ★ D.2(2026-09-20):心跳 tick — 遍历所有 Variable 各写一行 is_heartbeat=1
+    void onHeartbeatTick();
+
 private:
     // ★ D.1.2:初始化数据库 schema
     bool ensureSchema();
+
+    // ★ D.2:对旧 DB(无 is_heartbeat 列)做轻量 ALTER 兼容升级
+    bool migrateAddHeartbeatColumn();
 
     // ★ D.1.2:采样策略判断(满足任一就写)
     bool shouldWrite(const QString& varName, double value);
 
     QSqlDatabase* db_ = nullptr;     // heap 持有 QSqlDatabase(QObject 生命周期复杂)
     VariableManager* varMgr_ = nullptr;
+    class QTimer* heartbeatTimer_ = nullptr;  // ★ D.2:心跳 timer(60s)
 
     // ★ D.1.2:采样状态
     QHash<QString, QDateTime> lastWrite_;      // varName → 上次写时间
@@ -85,6 +100,7 @@ private:
     int sampleIntervalMs_ = 1000;  // 默认 1 秒
     double changeThreshold_ = 0.0;  // 默认不启用
     int retentionDays_ = 30;        // 默认保留 30 天
+    int heartbeatIntervalMs_ = 60000;  // ★ D.2:默认 60 秒心跳(0 = 禁用)
 };
 
 } // namespace qwhmi::history
