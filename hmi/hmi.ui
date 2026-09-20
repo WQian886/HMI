@@ -286,27 +286,95 @@
      </layout>
     </item>
     <item>
-     <widget class="QTextEdit" name="recvText">
-      <property name="readOnly"><bool>true</bool></property>
+     <!-- ★ D.2(2026-09-20):主窗口底部 QTabWidget,3 个标签 — 实时 / 曲线 / 报警历史
+          实时 tab 沿用原 recvText + auditTable + alarmTable(对象名不变,hmi.cpp 不动);
+          曲线 / 报警历史 tab 留 placeholder,D.2/D.3 接 TrendWidget / 报警历史表后填 widget。
+          整体高度给 420,等于原来 3 个 widget 的 minimumSize 之和,避免 UI 缩崩。 -->
+     <widget class="QTabWidget" name="bottomTabs">
       <property name="minimumSize">
-       <size><width>0</width><height>150</height></size>
+       <size><width>0</width><height>420</height></size>
       </property>
-     </widget>
-    </item>
-    <item>
-     <!-- 阶段 4.x 写审计日志(2026-07-28):只 UI,显示最近写操作记录 -->
-     <widget class="QTableWidget" name="auditTable">
-      <property name="minimumSize">
-       <size><width>0</width><height>120</height></size>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <!-- 阶段 5.4:报警列表 UI(最小版本:5 列 + 严重级闪烁,留等级过滤下次) -->
-     <widget class="QTableWidget" name="alarmTable">
-      <property name="minimumSize">
-       <size><width>0</width><height>150</height></size>
-      </property>
+      <widget class="QWidget" name="tabLive">
+       <attribute name="title">
+        <string>实时</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="tabLiveLayout">
+        <item>
+         <widget class="QTextEdit" name="recvText">
+          <property name="readOnly"><bool>true</bool></property>
+          <property name="minimumSize">
+           <size><width>0</width><height>150</height></size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <!-- 阶段 4.x 写审计日志(2026-07-28):只 UI,显示最近写操作记录 -->
+         <widget class="QTableWidget" name="auditTable">
+          <property name="minimumSize">
+           <size><width>0</width><height>120</height></size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <!-- 阶段 5.4:报警列表 UI(最小版本:5 列 + 严重级闪烁,留等级过滤下次) -->
+         <widget class="QTableWidget" name="alarmTable">
+          <property name="minimumSize">
+           <size><width>0</width><height>150</height></size>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tabTrend">
+       <attribute name="title">
+        <string>曲线</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="tabTrendLayout">
+        <item>
+         <!-- ★ D.2 placeholder:D.2 Trend 完成后用 QCustomPlot 替换这个 QLabel,
+              hmi.cpp 里:bottomTabs->widget(1)->layout()->replaceWidget(labelWith +
+                趋势控件);对象名 trendChartPlaceholder 方便后续 findChild -->
+         <widget class="QLabel" name="trendChartPlaceholder">
+          <property name="text">
+           <string>(D.2 Trend 控件占位 — 接入后此 Label 会被替换为 QCustomPlot 曲线)</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignmentFlag::AlignCenter</set>
+          </property>
+          <property name="styleSheet">
+           <string>color: #888; font-size: 14px; background-color: #fafafa;</string>
+          </property>
+          <property name="minimumSize">
+           <size><width>0</width><height>380</height></size>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tabAlarmHistory">
+       <attribute name="title">
+        <string>报警历史</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="tabAlarmHistoryLayout">
+        <item>
+         <!-- ★ D.3 placeholder:alarmHistoryTable 落库后接进这里,对象名保留方便 findChild -->
+         <widget class="QLabel" name="alarmHistoryPlaceholder">
+          <property name="text">
+           <string>(D.3 报警历史占位 — alarm_history 表 + AlarmRecorder 接入后填这里)</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignmentFlag::AlignCenter</set>
+          </property>
+          <property name="styleSheet">
+           <string>color: #888; font-size: 14px; background-color: #fafafa;</string>
+          </property>
+          <property name="minimumSize">
+           <size><width>0</width><height>380</height></size>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
    </layout>
