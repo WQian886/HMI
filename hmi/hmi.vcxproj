@@ -37,12 +37,12 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="QtSettings">
     <QtInstall>6.8.3_msvc2022_64</QtInstall>
-    <QtModules>core;gui;network;serialbus;serialport;sql;websockets;widgets</QtModules>
+    <QtModules>core;gui;network;serialbus;serialport;sql;websockets;widgets;printsupport</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>6.8.3_msvc2022_64</QtInstall>
-    <QtModules>core;gui;network;serialbus;serialport;sql;websockets;widgets</QtModules>
+    <QtModules>core;gui;network;serialbus;serialport;sql;websockets;widgets;printsupport</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -69,13 +69,13 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>src;3rdparty\qcustomplot;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 /wd4996 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>      <!-- 阶段 A:全配置 Windows,启动无控制台,看 hmi.log 看 qDebug -->
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DbgHelp.lib;D:\Qt\6.8.3\msvc2022_64\lib\Qt6PrintSupportd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="Configuration">
@@ -86,15 +86,15 @@
       <ConformanceMode>true</ConformanceMode>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>src;3rdparty\qcustomplot;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 /wd4996 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>DbgHelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>DbgHelp.lib;D:\Qt\6.8.3\msvc2022_64\lib\Qt6PrintSupportd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -223,6 +223,16 @@
     <QtMoc Include="src\history\HistoryRecorder.h" />
     <ClInclude Include="src\history\HistoryRecorder.h" />
     <ClCompile Include="src\history\HistoryRecorder.cpp" />
+    <!-- ★ D.2(2026-09-20):历史曲线控件 TrendWidget(Q_OBJECT 走 QtMoc)+ QCustomPlot(LGPL v2.1) -->
+    <QtMoc Include="src\widgets\TrendWidget.h" />
+    <ClInclude Include="src\widgets\TrendWidget.h" />
+    <ClCompile Include="src\widgets\TrendWidget.cpp" />
+    <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
+         vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
+         否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->
+    <QtMoc Include="3rdparty\qcustomplot\qcustomplot.h" />
+    <ClInclude Include="3rdparty\qcustomplot\qcustomplot.h" />
+    <ClCompile Include="3rdparty\qcustomplot\qcustomplot.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

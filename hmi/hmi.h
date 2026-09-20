@@ -7,6 +7,7 @@
 #include "ModbusMaster.h" // 阶段 2 第 3 练:手写 ModbusMaster 接入 UI
 namespace qwhmi::drivers { class IPollDriver; }  // ★ C.1(2026-09-17):协议抽象层,modbus_ 改为 IPollDriver*
 namespace qwhmi::history { class HistoryRecorder; }  // ★ D.1(2026-09-18):SQLite 历史库
+namespace qwhmi::widgets { class TrendWidget; }  // ★ D.2(2026-09-20):历史曲线控件
 #include "VariableManager.h"  // 阶段 3.2:把 VariableManager 接入主工程
 #include "PollScheduler.h"  // 阶段 3.3:定时轮询调度器
 #include "WriteScheduler.h" // 阶段 4.3.0:写调度器(Variable.dirty_ → Modbus 写 PLC)
@@ -175,6 +176,9 @@ private:
 
     // ★ 阶段 D · D.1(2026-09-18):SQLite 历史库记录器
     qwhmi::history::HistoryRecorder* historyRecorder_ = nullptr;
+
+    // ★ 阶段 D · D.2(2026-09-20):历史曲线控件(QCustomPlot)— 接 HistoryRecorder + VariableManager
+    qwhmi::widgets::TrendWidget* trendWidget_ = nullptr;
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)

@@ -9,7 +9,7 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/msvc2022_64")
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets SerialBus Sql)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets PrintSupport SerialBus Sql)
 
 qt_standard_project_setup()
 
@@ -32,6 +32,29 @@ set(SOURCES
     WriteFailChecker.cpp # 写入失败检查
     JsonSerializer.cpp  # JSON 序列化
     Project.cpp         # 项目(保存/加载)
+    # ★ D.2(2026-09-20):QCustomPlot 曲线控件(LGPL v2.1,3rdparty/qcustomplot/)
+    3rdparty/qcustomplot/qcustomplot.cpp
+)
+
+set(HEADERS
+    hmi.h
+    TcpClient.h
+    ModbusDemo.h
+    ModbusMaster.h
+    Variable.h
+    VariableManager.h
+    PollScheduler.h
+    Binding.h
+    WriteScheduler.h
+    ActionManager.h
+    Alarm.h
+    AlarmManager.h
+    ThresholdAlarmChecker.h
+    WriteFailChecker.h
+    JsonSerializer.h
+    Project.h
+    # ★ D.2:QCustomPlot 头文件
+    3rdparty/qcustomplot/qcustomplot.h
 )
 
 set(HEADERS
@@ -102,6 +125,8 @@ qt_add_executable(hmi ${SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})
 set_target_properties(hmi PROPERTIES WIN32_EXECUTABLE TRUE)
 
 target_include_directories(hmi PRIVATE src)
+# ★ D.2(2026-09-20):QCustomPlot 头文件路径(LGPL v2.1)
+target_include_directories(hmi PRIVATE 3rdparty/qcustomplot)
 # ★ 阶段 C · C.2 Snap7 集成占位
 #   - DLL 到位后启用 3rdparty/snap7/include/ 头文件搜索
 #   - 当前骨架阶段用 QLibrary 动态加载,不静态链 snap7.lib(LGPL 合规)
@@ -113,6 +138,7 @@ target_link_libraries(hmi PRIVATE
     Qt6::Gui
     Qt6::Network
     Qt6::Widgets
+    Qt6::PrintSupport  # ★ D.2:QCustomPlot 需要 QPrinter(虽然我们不打印,但 QCP 头文件 include)
     Qt6::SerialBus
     Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库
 )

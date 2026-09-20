@@ -7,6 +7,7 @@
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
+#include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
@@ -366,6 +367,28 @@ hmi::hmi(QWidget *parent)
                 << qwhmi::history::HistoryRecorder::defaultDbPath();
     } else {
         qWarning() << "[hmi] HistoryRecorder 启动失败,历史功能禁用";
+    }
+
+    // ★ 阶段 D · D.2(2026-09-20):历史曲线控件
+    //   new TrendWidget → 接 HistoryRecorder + VariableManager → 替换"曲线"tab 占位 QLabel
+    //   D.2 起步:默认绑 "plc1.Speed"(跟主窗口 demo 变量对齐),用户切工程时可改
+    trendWidget_ = new qwhmi::widgets::TrendWidget(this);
+    trendWidget_->setHistoryRecorder(historyRecorder_);
+    trendWidget_->setVariableManager(varMgr_);
+    trendWidget_->setVariable("plc1", "Speed");
+
+    {
+        // ★ 找到 hmi.ui 里"曲线"tab 的占位 QLabel(trendChartPlaceholder)
+        //   layout->replaceWidget 后,旧 Label 自动 delete
+        QLabel* placeholder = ui.bottomTabs->findChild<QLabel*>("trendChartPlaceholder");
+        QVBoxLayout* trendLayout = qobject_cast<QVBoxLayout*>(
+            ui.bottomTabs->widget(1)->layout());
+        if (placeholder && trendLayout) {
+            trendLayout->replaceWidget(placeholder, trendWidget_);
+            placeholder->deleteLater();
+        } else {
+            qWarning() << "[hmi] 找不到 trendChartPlaceholder / 曲线 tab layout,D.2 曲线未接入";
+        }
     }
 
     // ★ 阶段 6.3(2026-08-07):loadFromFile 完成后重绑 UI(Binding 持的是旧 Variable*)

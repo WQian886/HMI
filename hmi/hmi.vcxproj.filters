@@ -289,5 +289,24 @@
     <ClCompile Include="src\history\HistoryRecorder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot -->
+    <QtMoc Include="src\widgets\TrendWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\TrendWidget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\TrendWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="3rdparty\qcustomplot\qcustomplot.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="3rdparty\qcustomplot\qcustomplot.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="3rdparty\qcustomplot\qcustomplot.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

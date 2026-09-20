@@ -7,7 +7,7 @@ project(hmi_tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql PrintSupport)
 enable_testing()
 
 # 主程序源码目录(用来 include 头文件)
@@ -15,6 +15,8 @@ set(HMI_SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 include_directories(${HMI_SRC_DIR})
 # 阶段 B · B1:src/auth/ 头文件(#include "auth/Role.h" 风格)
 include_directories(${HMI_SRC_DIR}/src)
+# ★ D.2(2026-09-20):QCustomPlot 头文件路径(TrendWidget.h include "qcustomplot.h")
+include_directories(${HMI_SRC_DIR}/3rdparty/qcustomplot)
 
 # 测试要链接的核心源文件
 set(HMI_CORE_SOURCES
@@ -59,6 +61,9 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
     # 阶段 D · D.1 SQLite 历史库(2026-09-18)
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
+    # ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot
+    ${HMI_SRC_DIR}/src/widgets/TrendWidget.cpp
+    ${HMI_SRC_DIR}/3rdparty/qcustomplot/qcustomplot.cpp
 )
 
 function(add_hmi_test test_name)
@@ -74,6 +79,7 @@ function(add_hmi_test test_name)
         Qt6::Network   # ★ C.0:Project.cpp 间接 include QTcpSocket(TcpClient.h)
         Qt6::SerialBus  # ★ C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 依赖)
         Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库 + HistoryRecorder
+        Qt6::PrintSupport  # ★ D.2(2026-09-20):QCustomPlot 需要 QPrinter
     )
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
@@ -105,5 +111,7 @@ add_hmi_test(tst_IPollDriver)
 add_hmi_test(tst_ProtocolSwitch)
 # 阶段 D · D.1 SQLite 历史库
 add_hmi_test(tst_HistoryRecorder)
+# 阶段 D · D.2 历史曲线控件(QCustomPlot)
+add_hmi_test(tst_Trend)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
