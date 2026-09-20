@@ -233,6 +233,9 @@
     <!-- ★ D.6(2026-09-20):派生表达式解析器(Pratt 手写,无 Q_OBJECT) -->
     <ClInclude Include="src\tag\ExpressionParser.h" />
     <ClCompile Include="src\tag\ExpressionParser.cpp" />
+    <!-- ★ D.7(2026-09-20):标签导入器(CSV-based,零三方依赖) -->
+    <ClInclude Include="src\tag\TagImporter.h" />
+    <ClCompile Include="src\tag\TagImporter.cpp" />
     <!-- ★ D.2(2026-09-20):历史曲线控件 TrendWidget(Q_OBJECT 走 QtMoc)+ QCustomPlot(LGPL v2.1) -->
     <QtMoc Include="src\widgets\TrendWidget.h" />
     <ClInclude Include="src\widgets\TrendWidget.h" />

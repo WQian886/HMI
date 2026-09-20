@@ -313,6 +313,13 @@
     <ClCompile Include="src\tag\ExpressionParser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ D.7(2026-09-20):标签导入器(CSV-based) -->
+    <ClInclude Include="src\tag\TagImporter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\tag\TagImporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot -->
     <QtMoc Include="src\widgets\TrendWidget.h">
       <Filter>Header Files</Filter>
