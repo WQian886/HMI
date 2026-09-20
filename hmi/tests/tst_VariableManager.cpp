@@ -27,6 +27,7 @@ private slots:
     void add_find_remove();
     void replace_sameName_emits();
     void duplicate_null_or_empty();
+    void findByAlias_returnsCorrectVariable();   // D.5
 };
 
 void tst_VariableManager::empty() {
@@ -68,6 +69,26 @@ void tst_VariableManager::duplicate_null_or_empty() {
     auto* v = new Variable("", 0, Variable::DataType::Int16, Variable::Access::ReadOnly);
     QVERIFY(!mgr.addVariable(v));
     delete v;
+}
+
+// ★ D.5:按别名反查 — 不同 var 的别名不能重,空 alias 返 nullptr
+void tst_VariableManager::findByAlias_returnsCorrectVariable() {
+    VariableManager mgr;
+    auto* speed = new Variable("Speed", 0, Variable::DataType::Float, Variable::Access::ReadOnly, &mgr);
+    speed->addAlias("转速");
+    speed->addAlias("RPM");
+    auto* temp = new Variable("Temp", 1, Variable::DataType::Float, Variable::Access::ReadOnly, &mgr);
+    temp->addAlias("温度");
+
+    QVERIFY(mgr.addVariable(speed));
+    QVERIFY(mgr.addVariable(temp));
+
+    QCOMPARE(mgr.findByAlias("转速"), speed);
+    QCOMPARE(mgr.findByAlias("RPM"), speed);
+    QCOMPARE(mgr.findByAlias("温度"), temp);
+    QCOMPARE(mgr.findByAlias("Speed"), nullptr);  // 别名不匹配 name_
+    QCOMPARE(mgr.findByAlias(""), nullptr);
+    QCOMPARE(mgr.findByAlias("nonexistent"), nullptr);
 }
 
 QTEST_MAIN(tst_VariableManager)

@@ -6,17 +6,10 @@
 // 为什么需要:Variable 是整个数据层基础,改一行就有连锁影响(UI、报警、
 //   报表、轮询都依赖)。把行为锁在测试里 = 改动时不会无声破坏。
 //
-// 覆盖用例(10 个):
-//   construction()              构造默认值(name/address/quality=Bad/dirty=false)
-//   setValue_accepted()         正常赋值 → Accepted + emit valueChanged
-//   setValue_noChange()         同值 → NoChange(不 emit)
-//   setValue_deadband_filtered  |新-旧| < deadband → NoChange
-//   setValue_deadband_passed    |新-旧| > deadband → Accepted
-//   setValue_typeMismatch       类型不匹配 → Rejected
-//   setValue_rangeCheck_rejected 超出 [min,max] → Rejected
-//   setValue_rangeCheck_skipped checkRange=false 跳过范围(PLC 原始值可能超)
-//   markDirty_clearDirty        dirty 标记双向
-//   quality_noSpam              同 quality 不 emit(避免信号风暴)
+// 覆盖用例(12 个):原有 10 + D.5 别名 2 个
+//   ...
+//   alias_addAndLookup           D.5:addAlias 后 aliases_ 列表 + displayName 用首个别名
+//   alias_removeAndEdgeCases     D.5:removeAlias + 空/重复/==name 都跳过
 //
 // 怎么跑:
 //   cd tests
@@ -43,6 +36,8 @@ private slots:
     void setValue_rangeCheck_skipped();
     void markDirty_clearDirty();
     void quality_noSpam();
+    void alias_addAndLookup();         // D.5
+    void alias_removeAndEdgeCases();   // D.5
 };
 
 void tst_Variable::construction() {
@@ -136,6 +131,37 @@ void tst_Variable::quality_noSpam() {
     QCOMPARE(spy.count(), 0);
     v.setQuality(Variable::Quality::Bad);
     QCOMPARE(spy.count(), 1);
+}
+
+// ★ D.5:别名增 + displayName 用首个别名
+void tst_Variable::alias_addAndLookup() {
+    Variable v("Speed", 0, Variable::DataType::Float, Variable::Access::ReadOnly);
+    QCOMPARE(v.displayName(), QString("Speed"));   // 无别名 → 用 name_
+
+    v.addAlias("转速");
+    QCOMPARE(v.aliases().size(), 1);
+    QCOMPARE(v.displayName(), QString("转速"));     // 首个别名 = 转速
+
+    v.addAlias("RPM");                              // 多个别名
+    QCOMPARE(v.aliases().size(), 2);
+    QCOMPARE(v.displayName(), QString("转速"));     // 仍是第一个
+}
+
+// ★ D.5:别名删除 + 边界(空字符串 / ==name / 重复添加都跳过)
+void tst_Variable::alias_removeAndEdgeCases() {
+    Variable v("Speed", 0, Variable::DataType::Float, Variable::Access::ReadOnly);
+
+    v.addAlias("");        // 空字符串 → 跳过
+    v.addAlias("Speed");   // == name_ → 跳过(避免重名)
+    QCOMPARE(v.aliases().size(), 0);
+
+    v.addAlias("转速");
+    v.addAlias("转速");    // 重复 → 跳过
+    QCOMPARE(v.aliases().size(), 1);
+
+    v.removeAlias("转速");
+    QCOMPARE(v.aliases().size(), 0);
+    v.removeAlias("nonexistent");  // 删除不存在 → 不崩
 }
 
 QTEST_MAIN(tst_Variable)

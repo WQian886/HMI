@@ -28,6 +28,9 @@ public:
     int  count() const;//   
     Variable* findVariable(const QString& name) const;  // 没找到返回 nullptr
 
+    // ★ D.5(2026-09-20):按别名反查(操作员 UI 看 "转速" 反查到 plc1.Speed)
+    Variable* findByAlias(const QString& alias) const;  // 没找到返回 nullptr
+
     // 批量访问
     QList<Variable*> allVariables() const;
 

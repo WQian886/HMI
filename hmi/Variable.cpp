@@ -3,6 +3,19 @@
 #include "Variable.h"
 #include <cmath>  // 阶段 3.x:std::abs(死区过滤用)
 
+// ★ D.5:别名增删(去重 + 跳过 name_)
+void Variable::addAlias(const QString& alias) {
+    if (alias.isEmpty() || alias == name_) return;
+    if (!aliases_.contains(alias)) aliases_.append(alias);
+}
+
+void Variable::removeAlias(const QString& alias) {
+    aliases_.removeAll(alias);
+}
+
+#include "Variable.h"
+#include <cmath>  // 阶段 3.x:std::abs(死区过滤用)
+
 namespace {
 // 判断 QVariant 是否匹配指定的 DataType
 // 用匿名 namespace,不暴露到 .h

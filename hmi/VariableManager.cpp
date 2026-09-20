@@ -19,6 +19,16 @@ bool VariableManager::addVariable(Variable* v) {
     if (!v)                       return false;  // 空指针
     const QString name = v->name();
     if (name.isEmpty())           return false;  // name 为空
+
+    // ★ D.5:检查 alias 是否跟其他 variable 重名(操作员 UI 唯一性)
+    for (const QString& alias : v->aliases()) {
+        if (findByAlias(alias) != nullptr) {
+            qWarning() << "[VariableManager] alias 冲突:" << alias
+                       << "(新 var:" << name << ")";
+            return false;
+        }
+    }
+
     if (vars_.contains(name)) {
         // ★ 6.3 FIX:同 name 替换时,emit variableReplaced 让监听者更新 Variable* 指针
         //   emit 在 delete 之前,让监听者能读 old 的字段做最后处理
@@ -71,6 +81,17 @@ int VariableManager::count() const {
 Variable* VariableManager::findVariable(const QString& name) const {
     return vars_.value(name, nullptr);  // QHash::value 默认值是默认构造的 value 类型
                                         // 这里 Variable* 默认是 nullptr
+}
+
+// ★ D.5:按别名反查 — 遍历所有 var 找 alias 匹配
+//   不用额外 hash 表(别名 < 5 个/var,空间换复杂度不划算)
+//   重复 alias 不允许:duplicate 在 addVariable 时已 check
+Variable* VariableManager::findByAlias(const QString& alias) const {
+    if (alias.isEmpty()) return nullptr;
+    for (Variable* v : vars_.values()) {
+        if (v->aliases().contains(alias)) return v;
+    }
+    return nullptr;
 }
 
 QList<Variable*> VariableManager::allVariables() const {

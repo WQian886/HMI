@@ -85,7 +85,15 @@ public:
     double     deadband() const { return deadband_; }
     void       setDeadband(double d) { deadband_ = d; }
 
-    // ===== setters 返回值(★ IMPROVE-A6 2026-07-29) =====
+    // ===== ★ D.5(2026-09-20)别名(operator-facing display name)=====
+    //   PLC 工程师起内部名(name_:"Speed"),操作员看屏幕想看"转速(rpm)"
+    //   → 给 Variable 加 aliases_ 字段(可多个别名,如中英文)
+    //   VariableManager 用 name 索引 + 别名反查(findByAlias)
+    void addAlias(const QString& alias);
+    void removeAlias(const QString& alias);
+    QStringList aliases() const { return aliases_; }
+    // ★ 便捷:首个别名(给 UI 单行显示用);空则返 name_
+    QString displayName() const { return aliases_.isEmpty() ? name_ : aliases_.first(); }
     // 之前返 bool 语义模糊:死区过滤(值没真改)返 true 但没 emit valueChanged → 调用方误以为「改了」
     // 现在 3 态分清楚:
     //   Accepted  = 接受 + 真改了(emit valueChanged)
@@ -157,4 +165,5 @@ private:
     int         writeFailCount_ = 0;           // ★ IMPROVE-A4(2026-07-29):写失败累计,达上限触发报警
     QVariant    minValue_;                      // 阶段 4.x:范围下限(无效 QVariant = 未配)
     QVariant    maxValue_;                      // 阶段 4.x:范围上限
+    QStringList aliases_;                       // ★ D.5:别名列表(可空,默认空 = 用 name_ 显示)
 };
