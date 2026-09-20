@@ -61,6 +61,24 @@
        </widget>
       </item>
       <item>
+       <!-- ★ D.4.1(2026-09-20):导出历史 CSV(D.4 CsvExporter 接 UI) -->
+       <widget class="QPushButton" name="exportVariablesBtn">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>导出历史CSV</string></property>
+       </widget>
+      </item>
+      <item>
+       <!-- ★ D.4.1(2026-09-20):导出报警 CSV(D.4 CsvExporter 接 UI) -->
+       <widget class="QPushButton" name="exportAlarmsBtn">
+        <property name="minimumSize">
+         <size><width>80</width><height>32</height></size>
+        </property>
+        <property name="text"><string>导出报警CSV</string></property>
+       </widget>
+      </item>
+      <item>
        <widget class="QLineEdit" name="numberLineEdit">
         <property name="minimumSize">
          <size><width>80</width><height>32</height></size>

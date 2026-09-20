@@ -9,6 +9,7 @@
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
 #include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
+#include "export/CsvExporter.h"      // ★ D.4(2026-09-20):CSV 导出(QTextStream)
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
@@ -29,6 +30,7 @@
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
+#include <QStandardPaths>    // ★ D.4.1:CSV 导出默认路径(桌面)
 #include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
@@ -72,6 +74,10 @@ hmi::hmi(QWidget *parent)
 	connect(ui.startButton, &QPushButton::clicked, this, &hmi::onStartClicked);// 当 startButton 被点击时调用 hmi::onStartClicked
 	connect(ui.stopButton, &QPushButton::clicked, this, &hmi::onStopClicked);// 当 stopButton 被点击时调用 hmi::onStopClicked
 	connect(ui.resetButton, &QPushButton::clicked, this, &hmi::onResetClicked);//   当 resetButton 被点击时调用 hmi::onResetClicked
+
+    // ★ D.4.1(2026-09-20):D.4 CSV 导出按钮 — QFileDialog → CsvExporter
+    connect(ui.exportVariablesBtn, &QPushButton::clicked, this, &hmi::onExportVariablesClicked);
+    connect(ui.exportAlarmsBtn,    &QPushButton::clicked, this, &hmi::onExportAlarmsClicked);
 
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
@@ -704,6 +710,86 @@ void hmi::onResetFinished() {
     // 阶段 5.1 改造:3 秒定时器到,从 Resetting 触发转 Stopped(走 tryTransition)
     // 注:Fault → Stopped 不经过 Resetting,所以不会触发 onResetFinished
     tryTransition(Trigger::ResetTimerFinished);
+}
+
+// ★ D.4.1(2026-09-20):D.4 CSV 导出 UI 集成
+//   默认文件名带时间戳,避免覆盖前次导出
+//   from/to 用最近 1 天(后续可加日期选择对话框;先做 MVP)
+void hmi::onExportVariablesClicked() {
+    if (!historyRecorder_ || !historyRecorder_->isOpen()) {
+        QMessageBox::warning(this, "导出失败", "HistoryRecorder 未启动,无法导出");
+        return;
+    }
+    // ★ 默认变量 = TrendWidget 当前绑的变量(操作员直观)
+    const QString varName = trendWidget_ ? trendWidget_->currentVariable() : QString("plc1.Speed");
+
+    // ★ 默认文件名:hmi-variables-<var>-<timestamp>.csv
+    const QString defaultName = QString("hmi-variables-%1-%2.csv")
+                                    .arg(varName).arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss"));
+
+    // ★ QFileDialog 选路径(默认 Desktop)
+    const QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    const QString path = QFileDialog::getSaveFileName(
+        this, "导出变量历史 CSV",
+        desktop + "/" + defaultName,
+        "CSV files (*.csv);;All files (*)");
+    if (path.isEmpty()) return;   // 用户取消
+
+    // ★ from = 当前时间 - 1 天(历史数据范围;后续 UI 可加日期选择)
+    const QDateTime to = QDateTime::currentDateTime();
+    const QDateTime from = to.addDays(-1);
+
+    QString err;
+    const bool ok = qwhmi::export_::writeVariablesCsv(historyRecorder_, varName,
+                                                     from, to, path, &err);
+    if (!ok) {
+        QMessageBox::critical(this, "导出失败", err);
+        return;
+    }
+    QMessageBox::information(this, "导出成功",
+        QString("已导出 %1\n变量: %2\n时间窗: %3 → %4")
+            .arg(path).arg(varName)
+            .arg(from.toString("yyyy-MM-dd HH:mm:ss"))
+            .arg(to.toString("yyyy-MM-dd HH:mm:ss")));
+}
+
+void hmi::onExportAlarmsClicked() {
+    if (!alarmRecorder_ || !alarmRecorder_->totalCount()) {
+        // ★ totalCount=0 不阻断,导出空 CSV(只有表头)— 操作员可能想看列名
+        //   但若 alarmRecorder_ 本身没起,要阻断
+        if (!alarmRecorder_) {
+            QMessageBox::warning(this, "导出失败", "AlarmRecorder 未启动,无法导出");
+            return;
+        }
+    }
+
+    const QString defaultName = QString("hmi-alarms-%1.csv")
+                                    .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss"));
+    const QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    const QString path = QFileDialog::getSaveFileName(
+        this, "导出报警历史 CSV",
+        desktop + "/" + defaultName,
+        "CSV files (*.csv);;All files (*)");
+    if (path.isEmpty()) return;
+
+    // ★ from = 7 天前,to = now;minLevel=0 全收
+    const QDateTime to = QDateTime::currentDateTime();
+    const QDateTime from = to.addDays(-7);
+
+    QString err;
+    const bool ok = qwhmi::export_::writeAlarmsCsv(alarmRecorder_,
+                                                   from, to, /*minLevel=*/0,
+                                                   path, &err);
+    if (!ok) {
+        QMessageBox::critical(this, "导出失败", err);
+        return;
+    }
+    QMessageBox::information(this, "导出成功",
+        QString("已导出 %1\n时间窗: %2 → %3\n总报警数: %4")
+            .arg(path)
+            .arg(from.toString("yyyy-MM-dd HH:mm:ss"))
+            .arg(to.toString("yyyy-MM-dd HH:mm:ss"))
+            .arg(alarmRecorder_->totalCount()));
 }
 
 void hmi::onTimerTick() 

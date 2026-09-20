@@ -141,6 +141,12 @@ private:
     void updateButtons();          // state + connState_ → 业务三键 + 网络按钮 enabled
     void updateModbusLabel();      // lastResultText_ → modbusResultLabel
 
+    // ★ D.4.1(2026-09-20):D.4 CSV 导出 UI 集成
+    //   QFileDialog 选路径 → 调 qwhmi::export_::writeVariablesCsv / writeAlarmsCsv
+    //   失败用 QMessageBox 提示(便于操作员看到)
+    void onExportVariablesClicked();
+    void onExportAlarmsClicked();
+
     // ★ IMPROVE-B4(2026-07-29):magic number 提常量,改超时/提示时长集中一处
     //   【背景】原代码 statusBar(...) 调 13 处,timeout 参数 1500/3000/5000 散落;timer interval 1000/3000 散落
     //          改任何一处超时都要全文搜数字,易漏
