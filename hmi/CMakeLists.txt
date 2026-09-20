@@ -49,6 +49,11 @@ set(SOURCES
     src/widgets/RectangleControl.cpp
     src/widgets/LineControl.cpp
     src/widgets/GroupControl.cpp
+    # ★ E.1b(2026-09-20):Button + Toggle + Slider + InputEdit(4 个控制控件)
+    src/widgets/ButtonControl.cpp
+    src/widgets/ToggleControl.cpp
+    src/widgets/SliderControl.cpp
+    src/widgets/InputEditControl.cpp
 )
 
 set(HEADERS
@@ -85,6 +90,11 @@ set(HEADERS
     src/widgets/RectangleControl.h
     src/widgets/LineControl.h
     src/widgets/GroupControl.h
+    # ★ E.1b:Button + Toggle + Slider + InputEdit
+    src/widgets/ButtonControl.h
+    src/widgets/ToggleControl.h
+    src/widgets/SliderControl.h
+    src/widgets/InputEditControl.h
 )
 
 set(HEADERS

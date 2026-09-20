@@ -277,6 +277,19 @@
     <QtMoc Include="src\widgets\GroupControl.h" />
     <ClInclude Include="src\widgets\GroupControl.h" />
     <ClCompile Include="src\widgets\GroupControl.cpp" />
+    <!-- ★ E.1b(2026-09-20):Button + Toggle + Slider + InputEdit(4 个控制) -->
+    <QtMoc Include="src\widgets\ButtonControl.h" />
+    <ClInclude Include="src\widgets\ButtonControl.h" />
+    <ClCompile Include="src\widgets\ButtonControl.cpp" />
+    <QtMoc Include="src\widgets\ToggleControl.h" />
+    <ClInclude Include="src\widgets\ToggleControl.h" />
+    <ClCompile Include="src\widgets\ToggleControl.cpp" />
+    <QtMoc Include="src\widgets\SliderControl.h" />
+    <ClInclude Include="src\widgets\SliderControl.h" />
+    <ClCompile Include="src\widgets\SliderControl.cpp" />
+    <QtMoc Include="src\widgets\InputEditControl.h" />
+    <ClInclude Include="src\widgets\InputEditControl.h" />
+    <ClCompile Include="src\widgets\InputEditControl.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

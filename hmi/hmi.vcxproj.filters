@@ -442,5 +442,42 @@
     <ClCompile Include="src\widgets\GroupControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.1b(2026-09-20):Button + Toggle + Slider + InputEdit -->
+    <QtMoc Include="src\widgets\ButtonControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\ButtonControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\ButtonControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\ToggleControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\ToggleControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\ToggleControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\SliderControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\SliderControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\SliderControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\InputEditControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\InputEditControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\InputEditControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

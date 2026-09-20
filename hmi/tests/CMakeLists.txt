@@ -87,6 +87,11 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/widgets/RectangleControl.cpp
     ${HMI_SRC_DIR}/src/widgets/LineControl.cpp
     ${HMI_SRC_DIR}/src/widgets/GroupControl.cpp
+    # ★ E.1b(2026-09-20):Button + Toggle + Slider + InputEdit
+    ${HMI_SRC_DIR}/src/widgets/ButtonControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/ToggleControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/SliderControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/InputEditControl.cpp
 )
 
 function(add_hmi_test test_name)
@@ -153,6 +158,10 @@ add_hmi_test(tst_ImageControl)
 add_hmi_test(tst_RectangleControl)
 add_hmi_test(tst_LineControl)
 add_hmi_test(tst_GroupControl)
+add_hmi_test(tst_ButtonControl)
+add_hmi_test(tst_ToggleControl)
+add_hmi_test(tst_SliderControl)
+add_hmi_test(tst_InputEditControl)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 
