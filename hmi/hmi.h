@@ -190,6 +190,9 @@ private:
     // ★ 阶段 D · D.3(2026-09-20):报警持久化(同 history.db 的 alarm_history 表 + 接 AlarmManager)
     qwhmi::history::AlarmRecorder* alarmRecorder_ = nullptr;
 
+    // ★ E.1a(2026-09-20):演示画布按钮触发(6 控件实时数据 demo)
+    void onDemoCanvasClicked();
+
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)
     QString currentProtocol_ = QStringLiteral("modbus");

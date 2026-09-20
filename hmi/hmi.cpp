@@ -9,7 +9,17 @@
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
 #include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
+#include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
+#include "widgets/NumberDisplay.h"
+#include "widgets/TextDisplay.h"
+#include "widgets/BarControl.h"
+#include "widgets/GaugeControl.h"
+#include "widgets/LedControl.h"
 #include "export/CsvExporter.h"      // ★ D.4(2026-09-20):CSV 导出(QTextStream)
+
+#include <QGraphicsView>            // ★ E.1a demo 画布
+#include <QGraphicsScene>
+#include <QGraphicsSimpleTextItem>
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
@@ -78,6 +88,13 @@ hmi::hmi(QWidget *parent)
     // ★ D.4.1(2026-09-20):D.4 CSV 导出按钮 — QFileDialog → CsvExporter
     connect(ui.exportVariablesBtn, &QPushButton::clicked, this, &hmi::onExportVariablesClicked);
     connect(ui.exportAlarmsBtn,    &QPushButton::clicked, this, &hmi::onExportAlarmsClicked);
+
+    // ★ E.1a 演示画布(2026-09-20)— 1-2 h 临时 demo,挂 6 控件到主窗口
+    //   hmi.ui 没改;程序化建按钮 + 绑 onClicked
+    auto* demoBtn = new QPushButton(QStringLiteral("演示画布"), this);
+    demoBtn->setMinimumSize(80, 32);
+    ui.buttonRowLayout->addWidget(demoBtn);
+    connect(demoBtn, &QPushButton::clicked, this, &hmi::onDemoCanvasClicked);
 
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
@@ -715,6 +732,96 @@ void hmi::onResetFinished() {
 // ★ D.4.1(2026-09-20):D.4 CSV 导出 UI 集成
 //   默认文件名带时间戳,避免覆盖前次导出
 //   from/to 用最近 1 天(后续可加日期选择对话框;先做 MVP)
+// ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable
+//   临时 demo,后续 E.4 WYSIWYG 完整编辑器替换
+//   点击"演示画布"按钮 → 切换显示/隐藏 demoWindow_
+void hmi::onDemoCanvasClicked() {
+    static QWidget* demoWindow_ = nullptr;       // 进程内单例
+    if (demoWindow_ && demoWindow_->isVisible()) {
+        demoWindow_->hide();
+        return;
+    }
+    if (!demoWindow_) {
+        demoWindow_ = new QWidget(nullptr, Qt::Window);   // 独立顶层窗口
+        demoWindow_->setWindowTitle("E.1a 演示画布 — 6 控件实时数据");
+        demoWindow_->resize(900, 600);
+
+        auto* view = new QGraphicsView(demoWindow_);
+        auto* scene = new QGraphicsScene(view);
+        scene->setSceneRect(0, 0, 880, 580);
+        view->setScene(scene);
+        view->setRenderHint(QPainter::Antialiasing);
+        view->setBackgroundBrush(QColor(245, 245, 245));
+
+        // ★ 6 控件:3 显示 3 演示(放画布上)
+        using namespace qwhmi::widgets;
+        // 1. LabelControl 静态文字
+        auto* lbl = new LabelControl;
+        lbl->setPosition({20, 20});
+        lbl->setVariableName("plc1.demo");
+        lbl->setValue(QStringLiteral("演示画布 — E.1a"));
+        scene->addItem(lbl);
+
+        // 2. NumberDisplay 绑 plc1.Speed
+        auto* num = new NumberDisplay;
+        num->setPosition({20, 80});
+        num->setUnit(" rpm");
+        if (Variable* v = varMgr_->findVariable("Speed")) num->bind(v);
+        scene->addItem(num);
+
+        // 3. TextDisplay 绑 plc1.Temperature
+        auto* txt = new TextDisplay;
+        txt->setPosition({20, 140});
+        txt->setPrefix("温度:");
+        txt->setSuffix(" ℃");
+        if (Variable* v = varMgr_->findVariable("Temperature")) txt->bind(v);
+        scene->addItem(txt);
+
+        // 4. BarControl 绑 plc1.Pressure (0-10 bar)
+        auto* bar = new BarControl;
+        bar->setPosition({220, 80});
+        bar->setSize({300, 30});
+        bar->setMinimum(0); bar->setMaximum(10);
+        bar->setFillColor(QColor(40, 180, 40));
+        if (Variable* v = varMgr_->findVariable("Pressure")) bar->bind(v);
+        scene->addItem(bar);
+
+        // 5. GaugeControl 绑 plc1.Speed (0-3000 rpm)
+        auto* gauge = new GaugeControl;
+        gauge->setPosition({550, 30});
+        gauge->setSize({180, 180});
+        gauge->setMinimum(0); gauge->setMaximum(3000);
+        if (Variable* v = varMgr_->findVariable("Speed")) gauge->bind(v);
+        scene->addItem(gauge);
+
+        // 6. LedControl 绑 plc1.Temperature(>50 亮)
+        auto* led = new LedControl;
+        led->setPosition({780, 30});
+        led->setSize({40, 40});
+        if (Variable* v = varMgr_->findVariable("Temperature")) {
+            led->bind(v);
+            led->setOnColor(QColor(40, 200, 40));
+            led->setOffColor(QColor(80, 80, 80));
+        }
+        scene->addItem(led);
+
+        // 标注文字(纯 QGraphicsSimpleTextItem 即可)
+        auto addLabel = [&](const QString& text, qreal x, qreal y) {
+            auto* item = scene->addSimpleText(text);
+            item->setPos(x, y);
+        };
+        addLabel(QStringLiteral("LabelControl"),           150,   5);
+        addLabel(QStringLiteral("NumberDisplay"),          150,  65);
+        addLabel(QStringLiteral("TextDisplay"),            190, 125);
+        addLabel(QStringLiteral("BarControl (Pressure 0-10 bar)"), 540, 65);
+        addLabel(QStringLiteral("GaugeControl (Speed 0-3000 rpm)"), 770, 215);
+        addLabel(QStringLiteral("LED (>50 亮)"),            830,  75);
+    }
+    demoWindow_->show();
+    demoWindow_->raise();
+    demoWindow_->activateWindow();
+}
+
 void hmi::onExportVariablesClicked() {
     if (!historyRecorder_ || !historyRecorder_->isOpen()) {
         QMessageBox::warning(this, "导出失败", "HistoryRecorder 未启动,无法导出");
