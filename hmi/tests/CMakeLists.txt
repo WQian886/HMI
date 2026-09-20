@@ -78,6 +78,10 @@ set(HMI_CORE_SOURCES
     # ★ E.1a-2(2026-09-20):NumberDisplay + TextDisplay
     ${HMI_SRC_DIR}/src/widgets/NumberDisplay.cpp
     ${HMI_SRC_DIR}/src/widgets/TextDisplay.cpp
+    # ★ E.1a-3(2026-09-20):Bar + Gauge + LED
+    ${HMI_SRC_DIR}/src/widgets/BarControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/GaugeControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/LedControl.cpp
 )
 
 function(add_hmi_test test_name)
@@ -137,6 +141,9 @@ add_hmi_test(tst_TagImporter)
 add_hmi_test(tst_LabelControl)
 add_hmi_test(tst_NumberDisplay)
 add_hmi_test(tst_TextDisplay)
+add_hmi_test(tst_BarControl)
+add_hmi_test(tst_GaugeControl)
+add_hmi_test(tst_LedControl)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

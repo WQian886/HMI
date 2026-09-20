@@ -40,6 +40,10 @@ set(SOURCES
     # ★ E.1a-2(2026-09-20):NumberDisplay + TextDisplay(2 个显示控件)
     src/widgets/NumberDisplay.cpp
     src/widgets/TextDisplay.cpp
+    # ★ E.1a-3(2026-09-20):Bar + Gauge + LED(3 个显示控件)
+    src/widgets/BarControl.cpp
+    src/widgets/GaugeControl.cpp
+    src/widgets/LedControl.cpp
 )
 
 set(HEADERS
@@ -67,6 +71,10 @@ set(HEADERS
     # ★ E.1a-2:NumberDisplay + TextDisplay
     src/widgets/NumberDisplay.h
     src/widgets/TextDisplay.h
+    # ★ E.1a-3:Bar + Gauge + LED
+    src/widgets/BarControl.h
+    src/widgets/GaugeControl.h
+    src/widgets/LedControl.h
 )
 
 set(HEADERS
