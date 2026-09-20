@@ -223,6 +223,10 @@
     <QtMoc Include="src\history\HistoryRecorder.h" />
     <ClInclude Include="src\history\HistoryRecorder.h" />
     <ClCompile Include="src\history\HistoryRecorder.cpp" />
+    <!-- ★ D.3(2026-09-20):报警持久化(SQLite + alarm_history 表 + 接 AlarmManager) -->
+    <QtMoc Include="src\history\AlarmRecorder.h" />
+    <ClInclude Include="src\history\AlarmRecorder.h" />
+    <ClCompile Include="src\history\AlarmRecorder.cpp" />
     <!-- ★ D.2(2026-09-20):历史曲线控件 TrendWidget(Q_OBJECT 走 QtMoc)+ QCustomPlot(LGPL v2.1) -->
     <QtMoc Include="src\widgets\TrendWidget.h" />
     <ClInclude Include="src\widgets\TrendWidget.h" />

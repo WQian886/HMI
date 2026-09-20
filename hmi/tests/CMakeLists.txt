@@ -61,6 +61,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
     # 阶段 D · D.1 SQLite 历史库(2026-09-18)
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
+    # ★ D.3(2026-09-20):报警持久化(对称 HistoryRecorder + alarm_history 表)
+    ${HMI_SRC_DIR}/src/history/AlarmRecorder.cpp
     # ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot
     ${HMI_SRC_DIR}/src/widgets/TrendWidget.cpp
     ${HMI_SRC_DIR}/3rdparty/qcustomplot/qcustomplot.cpp
@@ -111,6 +113,8 @@ add_hmi_test(tst_IPollDriver)
 add_hmi_test(tst_ProtocolSwitch)
 # 阶段 D · D.1 SQLite 历史库
 add_hmi_test(tst_HistoryRecorder)
+# 阶段 D · D.3 报警持久化
+add_hmi_test(tst_AlarmRecorder)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

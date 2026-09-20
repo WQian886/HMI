@@ -7,6 +7,7 @@
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
+#include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
@@ -389,6 +390,16 @@ hmi::hmi(QWidget *parent)
         } else {
             qWarning() << "[hmi] 找不到 trendChartPlaceholder / 曲线 tab layout,D.2 曲线未接入";
         }
+    }
+
+    // ★ 阶段 D · D.3(2026-09-20):报警持久化(同 history.db + alarm_history 表)
+    //   new AlarmRecorder → open(同 DB) + setSource(alarmMgr_) → 4 个信号自动落表
+    alarmRecorder_ = new qwhmi::history::AlarmRecorder(this);
+    if (alarmRecorder_->open(qwhmi::history::HistoryRecorder::defaultDbPath())) {
+        alarmRecorder_->setSource(alarmMgr_);
+        qInfo() << "[hmi] AlarmRecorder 启动 OK,DB=" << qwhmi::history::HistoryRecorder::defaultDbPath();
+    } else {
+        qWarning() << "[hmi] AlarmRecorder 启动失败,报警历史功能禁用";
     }
 
     // ★ 阶段 6.3(2026-08-07):loadFromFile 完成后重绑 UI(Binding 持的是旧 Variable*)
