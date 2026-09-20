@@ -405,5 +405,42 @@
     <ClCompile Include="src\widgets\LedControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.1a-4(2026-09-20):Image + Rectangle + Line + Group -->
+    <QtMoc Include="src\widgets\ImageControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\ImageControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\ImageControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\RectangleControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\RectangleControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\RectangleControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\LineControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\LineControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\LineControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\GroupControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\GroupControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\GroupControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

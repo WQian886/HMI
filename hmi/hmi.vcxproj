@@ -264,6 +264,19 @@
     <QtMoc Include="src\widgets\LedControl.h" />
     <ClInclude Include="src\widgets\LedControl.h" />
     <ClCompile Include="src\widgets\LedControl.cpp" />
+    <!-- ★ E.1a-4(2026-09-20):Image + Rectangle + Line + Group(4 个元件) -->
+    <QtMoc Include="src\widgets\ImageControl.h" />
+    <ClInclude Include="src\widgets\ImageControl.h" />
+    <ClCompile Include="src\widgets\ImageControl.cpp" />
+    <QtMoc Include="src\widgets\RectangleControl.h" />
+    <ClInclude Include="src\widgets\RectangleControl.h" />
+    <ClCompile Include="src\widgets\RectangleControl.cpp" />
+    <QtMoc Include="src\widgets\LineControl.h" />
+    <ClInclude Include="src\widgets\LineControl.h" />
+    <ClCompile Include="src\widgets\LineControl.cpp" />
+    <QtMoc Include="src\widgets\GroupControl.h" />
+    <ClInclude Include="src\widgets\GroupControl.h" />
+    <ClCompile Include="src\widgets\GroupControl.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

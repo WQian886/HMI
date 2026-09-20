@@ -82,6 +82,11 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/widgets/BarControl.cpp
     ${HMI_SRC_DIR}/src/widgets/GaugeControl.cpp
     ${HMI_SRC_DIR}/src/widgets/LedControl.cpp
+    # ★ E.1a-4(2026-09-20):Image + Rectangle + Line + Group
+    ${HMI_SRC_DIR}/src/widgets/ImageControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/RectangleControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/LineControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/GroupControl.cpp
 )
 
 function(add_hmi_test test_name)
@@ -144,6 +149,10 @@ add_hmi_test(tst_TextDisplay)
 add_hmi_test(tst_BarControl)
 add_hmi_test(tst_GaugeControl)
 add_hmi_test(tst_LedControl)
+add_hmi_test(tst_ImageControl)
+add_hmi_test(tst_RectangleControl)
+add_hmi_test(tst_LineControl)
+add_hmi_test(tst_GroupControl)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

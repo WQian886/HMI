@@ -44,6 +44,11 @@ set(SOURCES
     src/widgets/BarControl.cpp
     src/widgets/GaugeControl.cpp
     src/widgets/LedControl.cpp
+    # ★ E.1a-4(2026-09-20):Image + Rectangle + Line + Group(4 个元件控件)
+    src/widgets/ImageControl.cpp
+    src/widgets/RectangleControl.cpp
+    src/widgets/LineControl.cpp
+    src/widgets/GroupControl.cpp
 )
 
 set(HEADERS
@@ -75,6 +80,11 @@ set(HEADERS
     src/widgets/BarControl.h
     src/widgets/GaugeControl.h
     src/widgets/LedControl.h
+    # ★ E.1a-4:Image + Rectangle + Line + Group
+    src/widgets/ImageControl.h
+    src/widgets/RectangleControl.h
+    src/widgets/LineControl.h
+    src/widgets/GroupControl.h
 )
 
 set(HEADERS
