@@ -299,6 +299,13 @@
     <ClCompile Include="src\history\AlarmRecorder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ D.4(2026-09-20):CSV 导出 -->
+    <ClInclude Include="src\export\CsvExporter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\export\CsvExporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot -->
     <QtMoc Include="src\widgets\TrendWidget.h">
       <Filter>Header Files</Filter>

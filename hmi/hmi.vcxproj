@@ -227,6 +227,9 @@
     <QtMoc Include="src\history\AlarmRecorder.h" />
     <ClInclude Include="src\history\AlarmRecorder.h" />
     <ClCompile Include="src\history\AlarmRecorder.cpp" />
+    <!-- ★ D.4(2026-09-20):CSV 导出(QTextStream,零三方依赖) -->
+    <ClInclude Include="src\export\CsvExporter.h" />
+    <ClCompile Include="src\export\CsvExporter.cpp" />
     <!-- ★ D.2(2026-09-20):历史曲线控件 TrendWidget(Q_OBJECT 走 QtMoc)+ QCustomPlot(LGPL v2.1) -->
     <QtMoc Include="src\widgets\TrendWidget.h" />
     <ClInclude Include="src\widgets\TrendWidget.h" />
