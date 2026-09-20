@@ -247,6 +247,13 @@
     <QtMoc Include="src\widgets\LabelControl.h" />
     <ClInclude Include="src\widgets\LabelControl.h" />
     <ClCompile Include="src\widgets\LabelControl.cpp" />
+    <!-- ★ E.1a-2(2026-09-20):NumberDisplay + TextDisplay(2 个显示控件) -->
+    <QtMoc Include="src\widgets\NumberDisplay.h" />
+    <ClInclude Include="src\widgets\NumberDisplay.h" />
+    <ClCompile Include="src\widgets\NumberDisplay.cpp" />
+    <QtMoc Include="src\widgets\TextDisplay.h" />
+    <ClInclude Include="src\widgets\TextDisplay.h" />
+    <ClCompile Include="src\widgets\TextDisplay.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

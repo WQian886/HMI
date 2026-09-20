@@ -75,6 +75,9 @@ set(HMI_CORE_SOURCES
     # ★ E.1(2026-09-20):控件基类 + LabelControl
     ${HMI_SRC_DIR}/src/widgets/base/ControlBase.cpp
     ${HMI_SRC_DIR}/src/widgets/LabelControl.cpp
+    # ★ E.1a-2(2026-09-20):NumberDisplay + TextDisplay
+    ${HMI_SRC_DIR}/src/widgets/NumberDisplay.cpp
+    ${HMI_SRC_DIR}/src/widgets/TextDisplay.cpp
 )
 
 function(add_hmi_test test_name)
@@ -132,6 +135,8 @@ add_hmi_test(tst_ExpressionParser)
 add_hmi_test(tst_TagImporter)
 # 阶段 E · E.1a 第 1 个控件 LabelControl(测试需要 QApplication + offscreen)
 add_hmi_test(tst_LabelControl)
+add_hmi_test(tst_NumberDisplay)
+add_hmi_test(tst_TextDisplay)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

@@ -37,6 +37,9 @@ set(SOURCES
     # ★ E.1(2026-09-20):控件基类 + 第 1 个显示控件 LabelControl(QGraphicsObject 派生)
     src/widgets/base/ControlBase.cpp
     src/widgets/LabelControl.cpp
+    # ★ E.1a-2(2026-09-20):NumberDisplay + TextDisplay(2 个显示控件)
+    src/widgets/NumberDisplay.cpp
+    src/widgets/TextDisplay.cpp
 )
 
 set(HEADERS
@@ -61,6 +64,9 @@ set(HEADERS
     # ★ E.1:控件基类 + 第 1 个显示控件 LabelControl
     src/widgets/base/ControlBase.h
     src/widgets/LabelControl.h
+    # ★ E.1a-2:NumberDisplay + TextDisplay
+    src/widgets/NumberDisplay.h
+    src/widgets/TextDisplay.h
 )
 
 set(HEADERS
