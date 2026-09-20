@@ -34,6 +34,18 @@ public:
     // 批量访问
     QList<Variable*> allVariables() const;
 
+    // ★ D.6(2026-09-20):添加派生变量(基于其他变量计算)
+    //   expr: 表达式(如 "a + b * 2")
+    //   自动解析依赖 + setDependencies + 添加到 manager
+    //   依赖的 variable setValue 时自动触发重算
+    bool addDerivedVariable(const QString& name,
+                           const QString& expr,
+                           Variable::DataType type = Variable::DataType::Float,
+                           Variable::Access access = Variable::Access::ReadOnly);
+
+    // 手动触发所有派生变量重算(也由 valueChanged 自动触发)
+    void recomputeDerivedVariables();
+
     // 按地址升序返回(3.3 轮询分组:连续地址合并成一次读请求)
     QList<Variable*> variablesByAddress() const;
 

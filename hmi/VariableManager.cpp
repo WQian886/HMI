@@ -1,6 +1,7 @@
 // 阶段 3.1:VariableManager 实现
 
 #include "VariableManager.h"
+#include "tag/ExpressionParser.h"
 #include <algorithm>
 
 VariableManager::VariableManager(QObject* parent)
@@ -96,6 +97,59 @@ Variable* VariableManager::findByAlias(const QString& alias) const {
 
 QList<Variable*> VariableManager::allVariables() const {
     return vars_.values();
+}
+
+// ★ D.6:添加派生变量
+bool VariableManager::addDerivedVariable(const QString& name, const QString& expr,
+                                       Variable::DataType type, Variable::Access access) {
+    // ★ 解析依赖
+    QStringList deps;
+    QString err;
+    if (!qwhmi::tag::ExpressionParser::collectDependencies(expr, &deps, &err)) {
+        qWarning() << "[VariableManager] 表达式解析失败:" << err << "expr=" << expr;
+        return false;
+    }
+    // ★ 检查依赖是否存在
+    for (const QString& dep : deps) {
+        if (!vars_.contains(dep)) {
+            qWarning() << "[VariableManager] 依赖变量不存在:" << dep << "(in" << name << ")";
+            return false;
+        }
+    }
+    auto* v = new Variable(name, /*address=*/0, type, access, this);
+    v->setExpression(expr);
+    v->setDependencies(deps);
+    if (!addVariable(v)) {
+        // addVariable 失败(名字或别名冲突)→ addVariable 已 delete v
+        return false;
+    }
+    // ★ 立即计算一次初值
+    recomputeDerivedVariables();
+    return true;
+}
+
+// ★ D.6:重算所有派生变量(变量多,O(n*m) 但 n < 50)
+void VariableManager::recomputeDerivedVariables() {
+    for (Variable* v : vars_.values()) {
+        if (!v->isDerived()) continue;
+        // ★ 用 evaluate 拿值
+        QString err;
+        const double val = qwhmi::tag::ExpressionParser::evaluate(
+            v->expression(),
+            [this](const QString& name) -> const QVariant {
+                Variable* dep = vars_.value(name, nullptr);
+                if (!dep) return {};
+                return dep->value();
+            },
+            &err);
+        if (qIsNaN(val)) {
+            if (!err.isEmpty()) {
+                qWarning() << "[VariableManager] 派生" << v->name() << "求值失败:" << err;
+            }
+            continue;
+        }
+        v->recomputeAsDerived(val);
+    }
 }
 
 // ★ 阶段 6.3(2026-08-07):加载前清空所有 variables(Q4-A 全删干净)

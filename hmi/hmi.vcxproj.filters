@@ -306,6 +306,13 @@
     <ClCompile Include="src\export\CsvExporter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ D.6(2026-09-20):派生表达式解析器 -->
+    <ClInclude Include="src\tag\ExpressionParser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\tag\ExpressionParser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot -->
     <QtMoc Include="src\widgets\TrendWidget.h">
       <Filter>Header Files</Filter>

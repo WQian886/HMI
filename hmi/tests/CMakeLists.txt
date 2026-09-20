@@ -65,6 +65,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/history/AlarmRecorder.cpp
     # ★ D.4(2026-09-20):CSV 导出
     ${HMI_SRC_DIR}/src/export/CsvExporter.cpp
+    # ★ D.6(2026-09-20):派生表达式解析器(Pratt 手写)
+    ${HMI_SRC_DIR}/src/tag/ExpressionParser.cpp
     # ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot
     ${HMI_SRC_DIR}/src/widgets/TrendWidget.cpp
     ${HMI_SRC_DIR}/3rdparty/qcustomplot/qcustomplot.cpp
@@ -119,6 +121,8 @@ add_hmi_test(tst_HistoryRecorder)
 add_hmi_test(tst_AlarmRecorder)
 # 阶段 D · D.4 CSV 导出
 add_hmi_test(tst_CsvExporter)
+# 阶段 D · D.6 派生表达式解析
+add_hmi_test(tst_ExpressionParser)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

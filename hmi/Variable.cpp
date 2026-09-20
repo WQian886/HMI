@@ -13,6 +13,19 @@ void Variable::removeAlias(const QString& alias) {
     aliases_.removeAll(alias);
 }
 
+// ★ D.6:派生变量被重算时调 — 跳过类型/死区检查(外部算好的值)
+void Variable::recomputeAsDerived(double value) {
+    QVariant v = QVariant::fromValue<float>(static_cast<float>(value));
+    // 派生变量 setValue 不走类型校验 + 不走范围 + 直接 emit(类似 checkRange=false)
+    QDateTime oldTimestamp = timestamp_;
+    Quality   oldQuality = quality_;
+    value_ = v;
+    timestamp_ = QDateTime::currentDateTime();
+    quality_ = Quality::Good;
+    emit valueChanged(*this);
+    (void)oldTimestamp; (void)oldQuality;  // 派生值未来可对比变化率,留接口
+}
+
 #include "Variable.h"
 #include <cmath>  // 阶段 3.x:std::abs(死区过滤用)
 

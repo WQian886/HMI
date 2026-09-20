@@ -94,6 +94,17 @@ public:
     QStringList aliases() const { return aliases_; }
     // ★ 便捷:首个别名(给 UI 单行显示用);空则返 name_
     QString displayName() const { return aliases_.isEmpty() ? name_ : aliases_.first(); }
+
+    // ★ D.6(2026-09-20):派生表达式(空 = 普通 Variable)
+    //   表达式格式:"a + b * 2" 这种基本 4 则运算 + 变量引用
+    //   依赖的变量名集合(由 ExpressionParser 解析后填)— 用于 VariableManager 自动重算
+    void   setExpression(const QString& expr) { expression_ = expr; isDerived_ = !expr.isEmpty(); }
+    QString expression() const { return expression_; }
+    bool   isDerived() const { return isDerived_; }
+    QStringList dependencies() const { return deps_; }
+    void   setDependencies(const QStringList& deps) { deps_ = deps; }
+    // 派生变量被外部重算时调(setValue 不需要,因为派生变量不被 PLC 读)
+    void   recomputeAsDerived(double value);
     // 之前返 bool 语义模糊:死区过滤(值没真改)返 true 但没 emit valueChanged → 调用方误以为「改了」
     // 现在 3 态分清楚:
     //   Accepted  = 接受 + 真改了(emit valueChanged)
@@ -166,4 +177,7 @@ private:
     QVariant    minValue_;                      // 阶段 4.x:范围下限(无效 QVariant = 未配)
     QVariant    maxValue_;                      // 阶段 4.x:范围上限
     QStringList aliases_;                       // ★ D.5:别名列表(可空,默认空 = 用 name_ 显示)
+    QString     expression_;                    // ★ D.6:派生表达式(空 = 普通 Variable)
+    bool        isDerived_ = false;              // ★ D.6:是否派生(有 expression)
+    QStringList deps_;                          // ★ D.6:依赖的变量名集合(解析后填)
 };
