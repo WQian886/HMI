@@ -5,6 +5,7 @@
 #include "editor/EditorMainWindow.h"
 #include "editor/PaletteWidget.h"
 #include "editor/PropertySheet.h"
+#include "editor/ResizeHandleItem.h"
 #include "widgets/base/ControlBase.h"
 // ★ E.3 修复:加载 JSON 时需要所有控件已注册,这里一次性实例化各控件
 //   (delete new 触发构造函数里的 registerControlType,填好注册表)
@@ -181,10 +182,20 @@ void EditorMainWindow::removeControl(qwhmi::widgets::ControlBase* c) {
 
 void EditorMainWindow::setTarget(qwhmi::widgets::ControlBase* target) {
     if (target_ == target) return;
+
+    // ★ E.4b:旧 target 卸 handle
+    if (target_) removeHandlesFor(target_);
+
     target_ = target;
     if (propertySheet_) propertySheet_->setTarget(target);
-    // 注:不在这里改 scene 选中状态 — 选中→setTarget 是单向的(由场景触发),
-    //     反向同步会引入循环。E.4a 调色板拖入时直接调 setTarget + 同步选中。
+
+    // ★ E.4b:新 target 挂 handle
+    if (target_) {
+        installHandlesFor(target_);
+        // ★ 监听 target 移动/缩放 → 重排 handle
+        connect(target_, &qwhmi::widgets::ControlBase::sizeChanged,
+                this, [this, target]() { refreshHandlesFor(target); });
+    }
 }
 
 void EditorMainWindow::onSceneSelectionChanged() {
@@ -211,6 +222,21 @@ void EditorMainWindow::handlePaletteDrop(const QString& typeName, const QPointF&
     }
     ctrl->setPosition(scenePos);
     addControl(ctrl);
+}
+
+// ===== E.4b:8 handle 管理 =====
+//   这些薄包装委托给 ResizeHandleItem 静态方法,避免重复实现
+
+void EditorMainWindow::installHandlesFor(qwhmi::widgets::ControlBase* target) {
+    ResizeHandleItem::installHandlesFor(target);
+}
+
+void EditorMainWindow::removeHandlesFor(qwhmi::widgets::ControlBase* target) {
+    ResizeHandleItem::removeHandlesFor(target);
+}
+
+void EditorMainWindow::refreshHandlesFor(qwhmi::widgets::ControlBase* target) {
+    ResizeHandleItem::layoutHandlesFor(target);
 }
 
 bool EditorMainWindow::eventFilter(QObject* watched, QEvent* event) {

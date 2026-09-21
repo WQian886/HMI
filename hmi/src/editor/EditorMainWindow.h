@@ -28,7 +28,7 @@ class QDropEvent;
 class Project;            // ★ E.3:文件菜单保存/加载用
 
 namespace qwhmi::widgets { class ControlBase; }
-namespace qwhmi::editor  { class PropertySheet; class PaletteWidget; }
+namespace qwhmi::editor  { class PropertySheet; class PaletteWidget; class ResizeHandleItem; }
 
 namespace qwhmi::editor {
 
@@ -93,6 +93,11 @@ private:
     QUndoStack*     undoStack_     = nullptr;
     Project*        project_       = nullptr;     // ★ E.3
     QString         currentPath_;                // ★ E.3:当前打开的 .hmi.json 路径
+
+    // ★ E.4b:8 handle 管理(target → 8 ResizeHandleItem 实例)
+    void installHandlesFor(qwhmi::widgets::ControlBase* target);
+    void removeHandlesFor(qwhmi::widgets::ControlBase* target);
+    void refreshHandlesFor(qwhmi::widgets::ControlBase* target);
 
     QList<qwhmi::widgets::ControlBase*> controls_;
     qwhmi::widgets::ControlBase* target_ = nullptr;

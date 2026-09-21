@@ -103,6 +103,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/editor/EditorMainWindow.cpp
     # ★ E.4a:PaletteWidget
     ${HMI_SRC_DIR}/src/editor/PaletteWidget.cpp
+    # ★ E.4b:ResizeHandleItem
+    ${HMI_SRC_DIR}/src/editor/ResizeHandleItem.cpp
 )
 
 function(add_hmi_test test_name)
@@ -182,6 +184,8 @@ add_hmi_test(tst_PropertySheet)
 add_hmi_test(tst_EditorMainWindow)
 # 阶段 E · E.4a 控件调色板 PaletteWidget
 add_hmi_test(tst_PaletteWidget)
+# 阶段 E · E.4b 8 handle 缩放 ResizeHandleItem
+add_hmi_test(tst_ResizeHandle)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

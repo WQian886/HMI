@@ -65,6 +65,8 @@ set(SOURCES
     src/editor/EditorMainWindow.cpp
     # ★ E.4a:控件调色板 PaletteWidget
     src/editor/PaletteWidget.cpp
+    # ★ E.4b:8 handle 缩放 ResizeHandleItem
+    src/editor/ResizeHandleItem.cpp
 )
 
 set(HEADERS
@@ -117,6 +119,8 @@ set(HEADERS
     src/editor/EditorMainWindow.h
     # ★ E.4a:PaletteWidget
     src/editor/PaletteWidget.h
+    # ★ E.4b:ResizeHandleItem
+    src/editor/ResizeHandleItem.h
 )
 
 set(FORMS
