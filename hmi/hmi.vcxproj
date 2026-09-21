@@ -301,11 +301,16 @@
     <ClInclude Include="src\widgets\AlarmListControl.h" />
     <ClCompile Include="src\widgets\AlarmListControl.cpp" />
     <!-- ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand -->
+    <!-- ★ QtMoc 三件套(教训 5.1):每个 Q_OBJECT 头都要 <QtMoc> + <ClInclude> + <ClCompile>,
+         否则 LNK2001 找不到 metaObject()/qt_metacast()/qt_metacall()/staticMetaObject -->
+    <QtMoc Include="src\editor\PropertySheet.h" />
     <ClInclude Include="src\editor\PropertySheet.h" />
     <ClCompile Include="src\editor\PropertySheet.cpp" />
+    <QtMoc Include="src\editor\PropertyChangeCommand.h" />
     <ClInclude Include="src\editor\PropertyChangeCommand.h" />
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp" />
     <!-- ★ E.2 周 11:EditorMainWindow -->
+    <QtMoc Include="src\editor\EditorMainWindow.h" />
     <ClInclude Include="src\editor\EditorMainWindow.h" />
     <ClCompile Include="src\editor\EditorMainWindow.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
