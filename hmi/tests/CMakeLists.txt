@@ -190,5 +190,7 @@ add_hmi_test(tst_ResizeHandle)
 add_hmi_test(tst_HandleVisualAlignment)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
+# 调试 QGraphicsObject Q_PROPERTY 行为
+add_hmi_test(tst_GraphicsObjectProperty)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

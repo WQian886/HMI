@@ -40,6 +40,9 @@ class ControlBase : public QGraphicsObject {
     Q_PROPERTY(QString  variableName READ variableName WRITE setVariableName NOTIFY variableChanged)
     Q_PROPERTY(QVariant value READ value WRITE setValue NOTIFY valueChanged)
     Q_PROPERTY(QString  displayText READ displayText NOTIFY valueChanged)  // ★ derived
+    // ★ 重定义 QGraphicsObject 内建的 width/height 让它们跟 size_ 同步
+    Q_PROPERTY(qreal width  READ width  WRITE setWidth  NOTIFY sizeChanged)
+    Q_PROPERTY(qreal height READ height WRITE setHeight NOTIFY sizeChanged)
 
 public:
     explicit ControlBase(QGraphicsItem* parent = nullptr);
@@ -51,6 +54,14 @@ public:
 
     QSizeF  size() const { return size_; }
     void    setSize(const QSizeF& s);
+
+    // ★ 覆盖 QGraphicsObject 的 width/height Q_PROPERTY(默认是独立属性,不绑 boundingRect)
+    //   PropertySheet 反射时显示 width/height 而不是 ControlBase 的 size(QSizeF 不支持),
+    //   必须让 width/height 跟着 size_ 走,否则属性面板永远显示 0
+    qreal   width() const { return size_.width(); }
+    qreal   height() const { return size_.height(); }
+    void    setWidth(qreal w);
+    void    setHeight(qreal h);
 
     QString variableName() const { return variableName_; }
     void    setVariableName(const QString& name);

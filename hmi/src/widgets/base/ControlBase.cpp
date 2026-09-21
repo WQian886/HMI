@@ -79,9 +79,19 @@ void ControlBase::setPosition(const QPointF& p) {
 
 void ControlBase::setSize(const QSizeF& s) {
     if (s == size_) return;
+    // ★ Qt QGraphicsItem 强制要求:boundingRect 变化前必须调 prepareGeometryChange,
+    //   否则 BspTreeIndex/sceneBoundingRect cache 不会更新,缩小时旧区域内容残留(残影)。
+    prepareGeometryChange();
     size_ = s;
     update();          // 触发重绘
     emit sizeChanged();
+}
+
+void ControlBase::setWidth(qreal w) {
+    setSize(QSizeF(w, size_.height()));
+}
+void ControlBase::setHeight(qreal h) {
+    setSize(QSizeF(size_.width(), h));
 }
 
 void ControlBase::setVariableName(const QString& name) {
