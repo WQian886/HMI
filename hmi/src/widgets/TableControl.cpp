@@ -28,6 +28,16 @@ TableControl::TableControl(QGraphicsItem* parent)
     proxy_->setWidget(table_);
     proxy_->setAcceptedMouseButtons(Qt::NoButton);   // ★ 同源修复:Table 也吞事件
 
+    // ★ 修复:监听 sizeChanged → 同时调 resize,强制 widget 跟缩(否则 user 看到 widget 视觉不缩)
+    connect(this, &ControlBase::sizeChanged, this, [this]() {
+        if (table_) {
+            const int w = static_cast<int>(size().width());
+            const int h = static_cast<int>(size().height());
+            table_->setMinimumSize(w, h);
+            table_->resize(w, h);
+        }
+    });
+
     registerControlType("Table", []() -> ControlBase* { return new TableControl(); });
 }
 

@@ -33,10 +33,16 @@ AlarmListControl::AlarmListControl(QGraphicsItem* parent)
     proxy_->setWidget(table_);
     proxy_->setAcceptedMouseButtons(Qt::NoButton);   // ★ 修复:让父收事件,父才能选中/拖动
 
-    // ★ 修复:E.4b 缩放后 table widget 不跟变 — 监听 sizeChanged 更新 table minSize
+    // ★ 修复:E.4b 缩放后 table widget 不跟变 — 监听 sizeChanged 更新 table minSize + resize
+    //   setMinimumSize 只能限制最小值,不强制 resize;必须同时调 resize 才能让 widget
+    //   视觉跟缩,否则用户看到的是 "data 缩了但 widget 视觉没缩" 的撕裂状态
     connect(this, &ControlBase::sizeChanged, this, [this]() {
-        if (table_) table_->setMinimumSize(static_cast<int>(size().width()),
-                                           static_cast<int>(size().height()));
+        if (table_) {
+            const int w = static_cast<int>(size().width());
+            const int h = static_cast<int>(size().height());
+            table_->setMinimumSize(w, h);
+            table_->resize(w, h);
+        }
     });
 
     registerControlType("AlarmList", []() -> ControlBase* { return new AlarmListControl(); });

@@ -192,5 +192,7 @@ add_hmi_test(tst_HandleVisualAlignment)
 add_hmi_test(tst_Trend)
 # 调试 QGraphicsObject Q_PROPERTY 行为
 add_hmi_test(tst_GraphicsObjectProperty)
+# 端到端 AlarmList 缩小失效调试
+add_hmi_test(tst_AlarmListShrinkE2E)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
