@@ -178,6 +178,7 @@ add_hmi_test(tst_AlarmListControl)
 add_hmi_test(tst_PropertySheet)
 # 阶段 E · E.2 周 11 EditorMainWindow
 add_hmi_test(tst_EditorMainWindow)
+add_hmi_test(tst_dump)   # 临时调试,看完删
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

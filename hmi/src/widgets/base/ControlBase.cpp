@@ -30,6 +30,22 @@ ControlBase* ControlBase::create(const QString& typeName) {
     return it.value()();
 }
 
+// ★ E.3:用 className 反查注册表短名 — 通过 typeid 比对
+//   实例化临时控件只为比对类型,代价值得(只在 save 时调一次)
+QString ControlBase::registryKeyFor(const QMetaObject* meta) {
+    if (!meta) return {};
+    const QString target = QString::fromUtf8(meta->className());
+    for (auto it = registry().begin(); it != registry().end(); ++it) {
+        ControlBase* probe = it.value()();
+        if (QString::fromUtf8(probe->metaObject()->className()) == target) {
+            delete probe;
+            return it.key();
+        }
+        delete probe;
+    }
+    return target;   // 找不到时回退到 className
+}
+
 ControlBase::ControlBase(QGraphicsItem* parent)
     : QGraphicsObject(parent)
 {
@@ -95,9 +111,22 @@ QJsonObject ControlBase::propertiesToJson() const {
     for (int i = 0; i < meta->propertyCount(); ++i) {
         QMetaProperty prop = meta->property(i);
         if (!prop.isReadable()) continue;
-        // ★ QJsonValue::fromVariant(Qt 6 内置支持 QPointF/QSizeF/QColor/QStringList)
-        o.insert(QString::fromUtf8(prop.name()),
-                 QJsonValue::fromVariant(prop.read(this)));
+        const QString name = QString::fromUtf8(prop.name());
+        // ★ E.3 已知坑修复:Qt 6.5 的 QJsonValue::fromVariant 对 QPointF/QSizeF
+        //   支持不完整(可能返回 null)— 手动构造 JSON 对象保证一致性
+        //   (跟 propertiesFromJson 互逆)
+        const int type = prop.userType();
+        QJsonValue value;
+        if (type == QMetaType::QPointF) {
+            QPointF p = prop.read(this).toPointF();
+            value = QJsonObject{{"x", p.x()}, {"y", p.y()}};
+        } else if (type == QMetaType::QSizeF) {
+            QSizeF s = prop.read(this).toSizeF();
+            value = QJsonObject{{"width", s.width()}, {"height", s.height()}};
+        } else {
+            value = QJsonValue::fromVariant(prop.read(this));
+        }
+        o.insert(name, value);
     }
     return o;
 }
@@ -109,7 +138,21 @@ void ControlBase::propertiesFromJson(const QJsonObject& obj) {
         if (!prop.isWritable()) continue;
         const QString name = QString::fromUtf8(prop.name());
         if (!obj.contains(name)) continue;
-        prop.write(this, obj.value(name).toVariant());
+        // ★ E.3 已知坑修复:Qt 6.5+ QPointF/QSizeF 通过 setProperty 写入需要
+        //   QVariant::fromValue 显式构造 — QJsonValue::toVariant 把 JSON object
+        //   转成 QVariantMap,不是 QPointF。手动检测类型并重新包装。
+        QVariant value = obj.value(name).toVariant();
+        const int type = prop.userType();
+        if (type == QMetaType::QPointF) {
+            QVariantMap m = value.toMap();
+            value = QVariant::fromValue(QPointF(m.value("x").toDouble(),
+                                              m.value("y").toDouble()));
+        } else if (type == QMetaType::QSizeF) {
+            QVariantMap m = value.toMap();
+            value = QVariant::fromValue(QSizeF(m.value("width").toDouble(),
+                                              m.value("height").toDouble()));
+        }
+        prop.write(this, value);
     }
 }
 

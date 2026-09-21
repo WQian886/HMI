@@ -22,6 +22,7 @@ class QGraphicsScene;
 class QGraphicsView;
 class QDockWidget;
 class QUndoStack;
+class Project;            // ★ E.3:文件菜单保存/加载用
 
 namespace qwhmi::widgets { class ControlBase; }
 namespace qwhmi::editor  { class PropertySheet; }
@@ -55,6 +56,13 @@ public:
     QGraphicsScene* scene() const { return scene_; }
     PropertySheet* propertySheet() const { return propertySheet_; }
     QDockWidget* rightDock() const { return rightDock_; }
+    Project* project() const { return project_; }
+
+    // ★ E.3:文件菜单槽
+    void onFileSave();        // 保存到 currentPath_(或弹 Save As)
+    void onFileSaveAs();      // 弹 QFileDialog
+    void onFileOpen();        // 弹 QFileDialog + loadFromFile
+    QString currentPath() const { return currentPath_; }
 
 private slots:
     void onSceneSelectionChanged();
@@ -63,12 +71,15 @@ private:
     void setupCentralWidget();
     void setupDockWidgets();
     void setupMenuBar();
+    void clearControls();   // ★ E.3:删所有 controls_(load 时清理旧画布)
 
     QGraphicsView*  view_          = nullptr;
     QGraphicsScene* scene_         = nullptr;
     PropertySheet*  propertySheet_ = nullptr;
     QDockWidget*    rightDock_     = nullptr;
     QUndoStack*     undoStack_     = nullptr;
+    Project*        project_       = nullptr;     // ★ E.3
+    QString         currentPath_;                // ★ E.3:当前打开的 .hmi.json 路径
 
     QList<qwhmi::widgets::ControlBase*> controls_;
     qwhmi::widgets::ControlBase* target_ = nullptr;

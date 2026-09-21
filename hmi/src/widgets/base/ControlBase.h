@@ -104,6 +104,10 @@ public:
     using FactoryFn = ControlBase* (*)();
     static void registerControlType(const QString& typeName, FactoryFn factory);
     static ControlBase* create(const QString& typeName);
+
+    // ★ E.3:用 className 反查注册表里的短名(如 "BarControl" → "Bar")
+    //   给 controlsToJson 存 JSON 的 type 字段用 — 跟 create() 配对
+    static QString registryKeyFor(const QMetaObject* meta);
 };
 
 } // namespace qwhmi::widgets

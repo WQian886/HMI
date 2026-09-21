@@ -1,4 +1,8 @@
 // 阶段 6.2(2026-08-07):Project 类实现
+//   ★ E.3(2026-09-21):JSON 存读扩展
+//   - schema_version 2 → 3 + migrateV2ToV3
+//   - 加 controls JSON 序列化(走 ControlBase::propertiesToJson 反射)
+//   - 加 controlsLoaded 信号
 
 #include "Project.h"
 #include "VariableManager.h"
@@ -10,6 +14,8 @@
 #include "ThresholdAlarmChecker.h"   // ★ 6.2 需要:dynamic_cast 用
 #include "TcpClient.h"
 #include "JsonSerializer.h"
+// ★ E.3:controls JSON 序列化走反射
+#include "widgets/base/ControlBase.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -19,6 +25,8 @@
 #include <QDateTime>
 #include <QSaveFile>
 #include <QDebug>
+
+namespace qwhmi::widgets { class ControlBase; }
 
 Project::Project(VariableManager* varMgr,
                  AlarmManager* alarmMgr,
@@ -35,115 +43,74 @@ Project::Project(VariableManager* varMgr,
 
 Project::~Project() = default;
 
-// ===== saveToFile 主实现 =====
-bool Project::saveToFile(const QString& path) {
-    if (!varMgr_ || !alarmMgr_ || !actionMgr_) {
-        emit loadError("管理器指针为空,saveToFile 中止");
-        return false;
+// ===== E.3:静态工具:控件列表 ↔ JSON 数组 =====
+
+// ★ 反射遍历每个控件 → QJsonObject(走 ControlBase::propertiesToJson)+ type 字段
+QJsonArray Project::controlsToJson(const QList<qwhmi::widgets::ControlBase*>& controls) {
+    QJsonArray arr;
+    for (const auto* c : controls) {
+        if (!c) continue;
+        QJsonObject obj = c->propertiesToJson();
+        // ★ E.3:type 字段存注册表短名("Bar" 而不是 "BarControl"),
+        //   loadControlsFromJson 用 ControlBase::create(type) 反查注册表
+        obj["type"] = qwhmi::widgets::ControlBase::registryKeyFor(c->metaObject());
+        arr.append(obj);
     }
+    return arr;
+}
 
-    // ★ IMPROVE-6.2(2026-08-07):构造顶层 JSON
-    QJsonObject root;
-
-    // ★ C.0(2026-09-17):schema_version 从 "1.0"(字符串)→ 2(数字)
-    //   原因:C.5 多 PLC 准备 + 字符串版本号不好比较
-    root["schema_version"] = kCurrentSchemaVersion;  // 2
-
-    // project_name / 时间戳(暂时硬编码,6.3 加用户输入)
-    root["project_name"] = "HMI Demo Project";
-    QString nowIso = QDateTime::currentDateTime().toString(Qt::ISODate);
-    root["created_at"]   = nowIso;
-    root["updated_at"]   = nowIso;
-
-    // ★ C.0(2026-09-17):plcs 顶级数组(替代原 communications 单 PLC)
-    //   - 现在 C 阶段只有 modbus_tcp,但 schema 提前留多 PLC 位置
-    //   - 通讯参数从 tcp_ 拿;C.1 协议抽象层完成后改成 IPollDriver
-    {
-        QJsonArray plcsArr;
-        QJsonObject plc;
-        plc["id"] = "plc1";                        // ★ C.5 多 PLC 时改成实际 ID
-        plc["protocol"] = "modbus_tcp";             // 当前只支持 modbus_tcp(C.1 后会扩展)
-        if (tcp_) {
-            plc["host"] = tcp_->host();
-            plc["port"] = tcp_->port();
-        } else {
-            plc["host"] = "127.0.0.1";              // 没 tcp_ 时 fallback
-            plc["port"] = 502;
+// ★ 反向:JSON 数组 → 控件列表
+//   factory 决定 type → ControlBase* 的映射(由调用方决定所有权;本函数不 delete 返回的指针)
+//   失败 type(unknown)跳过 + log warning,继续处理后面的
+int Project::loadControlsFromJson(const QJsonArray& arr,
+                                  qwhmi::widgets::ControlBase* (*factory)(const QString& typeName),
+                                  QList<qwhmi::widgets::ControlBase*>& outControls) {
+    outControls.clear();
+    int okCount = 0;
+    for (const QJsonValue& v : arr) {
+        QJsonObject obj = v.toObject();
+        QString typeName = obj["type"].toString();
+        if (typeName.isEmpty()) {
+            qWarning() << "[Project] loadControlsFromJson:控件缺 type 字段,跳过";
+            continue;
         }
-        QJsonObject modbus;
-        modbus["timeout_ms"]       = TcpClient::kConnectTimeoutMs;
-        modbus["max_retries"]      = TcpClient::kMaxRetries;
-        modbus["poll_interval_ms"] = 100;
-        plc["modbus"] = modbus;
-        plcsArr.append(plc);
-        root["plcs"] = plcsArr;
-    }
-
-    // ===== variables(遍历 varMgr_)=====
-    {
-        QJsonArray variablesArr;
-        for (Variable* v : varMgr_->allVariables()) {
-            if (v) variablesArr.append(JsonSerializer::toJson(*v));
+        qwhmi::widgets::ControlBase* c = factory(typeName);
+        if (!c) {
+            qWarning() << "[Project] loadControlsFromJson:未知控件类型" << typeName << ",跳过";
+            continue;
         }
-        root["variables"] = variablesArr;
+        // ★ 反射写回所有属性
+        c->propertiesFromJson(obj);
+        outControls.append(c);
+        okCount++;
     }
+    return okCount;
+}
 
-    // ===== alarms(遍历 alarmMgr_->checkers(),从 ThresholdAlarmChecker 拿 CheckerConfig)=====
-    {
-        QJsonArray alarmsArr;
-        for (AlarmChecker* c : alarmMgr_->checkers()) {
-            // ★ 6.2 阶段只处理 ThresholdAlarmChecker(目前唯一具体 Checker 子类)
-            //   5.x 以后加新 Checker 子类,要扩展这里或加 virtual getter
-            auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
-            if (!tc) continue;
-            QJsonObject alarmObj = JsonSerializer::toJson(tc->config());
-            alarmObj["name"]     = c->name();                    // 报警名
-            alarmObj["variable"] = tc->variable() ? tc->variable()->name() : QString();
-            alarmsArr.append(alarmObj);
-        }
-        root["alarms"] = alarmsArr;
-    }
-
-    // ===== actions(遍历 actionMgr_->mappings())=====
-    {
-        QJsonArray actionsArr;
-        for (const ActionManager::Mapping& m : actionMgr_->mappings()) {
-            // ★ E #29(2026-09-15):Mapping.variableName 直接用,不再走裸指针
-            actionsArr.append(JsonSerializer::toActionMappingJson(m.alarmName, m.variableName, m.value));
-        }
-        root["actions"] = actionsArr;
-    }
-
-    // ===== 写文件 =====
-    //   ★ 用 QSaveFile(原子写:先写临时文件,fsync,再 rename —— 防止写到一半断电)
-    //   【取舍】比 QFile::write() 安全,代价多一次磁盘 IO,但工程文件值得
+// ===== 私有 saveRootToFile:把 root QJsonObject 写文件(原子写)=====
+bool Project::saveRootToFile(const QString& path, const QJsonObject& root) {
     QJsonDocument doc(root);
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
         emit loadError(QString("打开文件失败: %1").arg(f.errorString()));
         return false;
     }
-    f.write(doc.toJson(QJsonDocument::Indented));   // Indented = 人类可读
-    if (!f.commit()) {   // commit() 做 rename + 失败回滚
+    f.write(doc.toJson(QJsonDocument::Indented));
+    if (!f.commit()) {
         emit loadError(QString("写入文件失败: %1").arg(f.errorString()));
         return false;
     }
-
-    qDebug() << "[Project] saved to" << path;
-    emit saved(path);
     return true;
 }
 
-// ===== loadFromFile 主实现(6.3)=====
-//   【背景】Q4-A 拍板:JSON = 唯一真理,加载后内存 = JSON(全删干净 + 重建)
-//   【流程】读文件 → 解析 JSON → 校验 schema_version → 清空现有状态 → 重建 4 类 → 失败 abort
-//   【取舍】失败严格:任何引用错误(variables 不存在)立即 abort,不留半成品状态
-//   【参照】Wqian 2026-08-07 阶段 6.3 开干;docs/专题/阶段6_schema设计.md
-bool Project::loadFromFile(const QString& path) {
-    if (!varMgr_ || !alarmMgr_ || !actionMgr_ || !pollScheduler_) {
-        emit loadError("管理器指针为空,loadFromFile 中止");
-        return false;
-    }
+// ===== 私有 loadRootFromFile:读文件 + 解析 + schema 校验 + migrate =====
+//   返回 true 表示成功(应用 vars/alarms/actions/plcs 到管理器);
+//   成功时 outRoot 是 migrate 后的完整 JSON(供 E.3 进一步解析 screens[0].controls)
+//   ★ E.3:对 manager null 容错 — 只在非 null 时执行对应 section
+bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
+    outRoot = {};
+    // 不强制要求 manager 至少一个非 null — E.3 阶段 EditorMainWindow 全传 nullptr
+    // 也能加载纯 controls JSON(只解 schema + screens,不做 vars/alarms/actions 应用)
 
     // 1. 读文件
     QFile f(path);
@@ -167,22 +134,15 @@ bool Project::loadFromFile(const QString& path) {
     }
     QJsonObject root = doc.object();
 
-    // 3. ★ C.0(2026-09-17):schema_version 校验 + 自动迁移
-    //   v1: 字符串 "1.0" → 调 migrateV1ToV2
-    //   v2: 整数 2(当前版本)→ 直接通过
-    //   v3+: 整数 > 2 → 拒绝(新版本,旧 hmi 不支持)
-    //   缺字段: 默认当 v1 处理(migrate)
+    // 3. schema_version 校验 + 自动迁移
     QJsonValue schemaVal = root["schema_version"];
     int schemaVerInt = 0;
     if (schemaVal.isString()) {
-        // 老格式:"1.0" 字符串
         QString s = schemaVal.toString();
         if (s.startsWith("1.")) schemaVerInt = 1;
     } else if (schemaVal.isDouble()) {
-        // 新格式:整数(实际是 int,QJsonValue 用 double 存)
         schemaVerInt = schemaVal.toInt();
     }
-    // 没有 schema_version 字段也当 v1(最老的格式,默认走迁移)
     if (schemaVal.isUndefined()) schemaVerInt = 1;
 
     if (schemaVerInt > kCurrentSchemaVersion) {
@@ -190,7 +150,6 @@ bool Project::loadFromFile(const QString& path) {
                        .arg(schemaVerInt).arg(kCurrentSchemaVersion));
         return false;
     }
-    // ★ C.0:按需调迁移函数链 v1 → v2 → ... → vN
     if (schemaVerInt < kCurrentSchemaVersion) {
         if (!migrateTo(root, schemaVerInt, kCurrentSchemaVersion)) {
             emit loadError(QString("schema 迁移失败:从 v%1 到 v%2").arg(schemaVerInt).arg(kCurrentSchemaVersion));
@@ -200,75 +159,75 @@ bool Project::loadFromFile(const QString& path) {
     }
 
     // 4. 清空现有状态(Q4-A 全删干净)
-    varMgr_->clear();
-    alarmMgr_->clearAll();
-    actionMgr_->clear();
+    if (varMgr_)   varMgr_->clear();
+    if (alarmMgr_) alarmMgr_->clearAll();
+    if (actionMgr_) actionMgr_->clear();
 
-    // 5. 解析 variables(variables 必须先建好,因为 alarms/actions 引用它们)
-    QJsonArray variablesArr = root["variables"].toArray();
-    for (const QJsonValue& v : variablesArr) {
-        Variable* var = JsonSerializer::fromJsonVariable(v.toObject(), varMgr_);
-        if (!var) {
-            emit loadError("variable 字段缺失或类型错误");
-            return false;
-        }
-        if (!varMgr_->addVariable(var)) {
-            delete var;   // addVariable 失败,name 重复,清理资源
-            emit loadError(QString("variable \"%1\" 重复或非法").arg(var->name()));
-            return false;
-        }
-    }
-
-    // 6. 解析 alarms(依赖 variables 已建好)
-    QJsonArray alarmsArr = root["alarms"].toArray();
-    for (const QJsonValue& a : alarmsArr) {
-        QJsonObject aObj = a.toObject();
-        QString alarmName = aObj["name"].toString();
-        QString varName   = aObj["variable"].toString();
-
-        Variable* var = varMgr_->findVariable(varName);
-        if (!var) {
-            emit loadError(QString("alarm \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
-            return false;
-        }
-        CheckerConfig cfg = JsonSerializer::checkerConfigFromJson(aObj);
-        auto* checker = new ThresholdAlarmChecker(alarmName, var, pollScheduler_, cfg, alarmMgr_);
-        if (!alarmMgr_->addChecker(checker)) {
-            delete checker;
-            emit loadError(QString("alarm \"%1\" 重复或 addChecker 失败").arg(alarmName));
-            return false;
+    // 5. 解析 variables
+    if (varMgr_) {
+        QJsonArray variablesArr = root["variables"].toArray();
+        for (const QJsonValue& v : variablesArr) {
+            Variable* var = JsonSerializer::fromJsonVariable(v.toObject(), varMgr_);
+            if (!var) {
+                emit loadError("variable 字段缺失或类型错误");
+                return false;
+            }
+            if (!varMgr_->addVariable(var)) {
+                delete var;
+                emit loadError(QString("variable \"%1\" 重复或非法").arg(var->name()));
+                return false;
+            }
         }
     }
 
-    // 7. 解析 actions(依赖 variables + alarms 都已建好)
-    QJsonArray actionsArr = root["actions"].toArray();
-    for (const QJsonValue& ac : actionsArr) {
-        QJsonObject acObj = ac.toObject();
-        QString alarmName = acObj["alarm_name"].toString();
-        QString varName   = acObj["variable"].toString();
-        QVariant writeValue = acObj["write_value"].toVariant();
+    // 6. 解析 alarms(依赖 varMgr_)
+    if (alarmMgr_ && varMgr_ && pollScheduler_) {
+        QJsonArray alarmsArr = root["alarms"].toArray();
+        for (const QJsonValue& a : alarmsArr) {
+            QJsonObject aObj = a.toObject();
+            QString alarmName = aObj["name"].toString();
+            QString varName   = aObj["variable"].toString();
 
-        Variable* var = varMgr_->findVariable(varName);
-        if (!var) {
-            emit loadError(QString("action \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
-            return false;
+            Variable* var = varMgr_->findVariable(varName);
+            if (!var) {
+                emit loadError(QString("alarm \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
+                return false;
+            }
+            CheckerConfig cfg = JsonSerializer::checkerConfigFromJson(aObj);
+            auto* checker = new ThresholdAlarmChecker(alarmName, var, pollScheduler_, cfg, alarmMgr_);
+            if (!alarmMgr_->addChecker(checker)) {
+                delete checker;
+                emit loadError(QString("alarm \"%1\" 重复或 addChecker 失败").arg(alarmName));
+                return false;
+            }
         }
-        // ★ E #29(2026-09-15):addMapping 收 QString 名,直接传 varName 即可
-        //   【背景】原代码需要先 findVariable 拿指针再传 — 但 Mapping 改存变量名后
-        //          触发时按名查更稳,这里直接传名字更简洁(也保留上面的存在性检查)
-        //   【参照】docs/改善清单.md E #29
-        actionMgr_->addMapping(alarmName, varName, writeValue);
     }
 
-    // 8. 通讯字段应用(★ C.0 改:从 plcs[0] 拿 host/port,而非旧的 communications)
-    //   【背景】v1 字段名 communications,v2 改成 plcs[](多 PLC 准备)
-    //   ★ C.0:migrate 已经在 step 3 把 communications 提到 plcs[0],所以这里统一读 plcs
+    // 7. 解析 actions
+    if (actionMgr_ && varMgr_) {
+        QJsonArray actionsArr = root["actions"].toArray();
+        for (const QJsonValue& ac : actionsArr) {
+            QJsonObject acObj = ac.toObject();
+            QString alarmName = acObj["alarm_name"].toString();
+            QString varName   = acObj["variable"].toString();
+            QVariant writeValue = acObj["write_value"].toVariant();
+
+            Variable* var = varMgr_->findVariable(varName);
+            if (!var) {
+                emit loadError(QString("action \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
+                return false;
+            }
+            actionMgr_->addMapping(alarmName, varName, writeValue);
+        }
+    }
+
+    // 8. 通讯字段应用
     QJsonArray plcsArr = root["plcs"].toArray();
-    if (!plcsArr.isEmpty()) {
+    if (!plcsArr.isEmpty() && tcp_) {
         QJsonObject plc0 = plcsArr[0].toObject();
         QString host = plc0["host"].toString();
         int port = plc0["port"].toInt();
-        if (tcp_ && !host.isEmpty() && port > 0 && port < 65536) {
+        if (!host.isEmpty() && port > 0 && port < 65536) {
             if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
                 qDebug() << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
             } else {
@@ -278,31 +237,137 @@ bool Project::loadFromFile(const QString& path) {
         }
     }
 
+    outRoot = root;
+    return true;
+}
+
+// ===== saveToFile(不带 controls,旧 API)=====
+bool Project::saveToFile(const QString& path) {
+    return saveToFile(path, {});
+}
+
+// ===== saveToFile(带 controls,E.3)=====
+//   ★ E.3:对 varMgr_/alarmMgr_/actionMgr_/pollScheduler_ 容错 — null 时跳过该 section
+//     (EditorMainWindow 在 E.3 阶段暂未持有真实 manager,只保存 controls JSON 也合法)
+//   tcp_ 不影响 IO,只要路径合法就 OK
+bool Project::saveToFile(const QString& path, const QList<qwhmi::widgets::ControlBase*>& controls) {
+    QJsonObject root;
+    root["schema_version"] = kCurrentSchemaVersion;   // 3 (E.3 bump)
+    root["project_name"] = "HMI Demo Project";
+    QString nowIso = QDateTime::currentDateTime().toString(Qt::ISODate);
+    root["created_at"]   = nowIso;
+    root["updated_at"]   = nowIso;
+
+    // plcs
+    {
+        QJsonArray plcsArr;
+        QJsonObject plc;
+        plc["id"] = "plc1";
+        plc["protocol"] = "modbus_tcp";
+        if (tcp_) {
+            plc["host"] = tcp_->host();
+            plc["port"] = tcp_->port();
+        } else {
+            plc["host"] = "127.0.0.1";
+            plc["port"] = 502;
+        }
+        QJsonObject modbus;
+        modbus["timeout_ms"]       = TcpClient::kConnectTimeoutMs;
+        modbus["max_retries"]      = TcpClient::kMaxRetries;
+        modbus["poll_interval_ms"] = 100;
+        plc["modbus"] = modbus;
+        plcsArr.append(plc);
+        root["plcs"] = plcsArr;
+    }
+
+    // variables
+    {
+        QJsonArray variablesArr;
+        if (varMgr_) {
+            for (Variable* v : varMgr_->allVariables()) {
+                if (v) variablesArr.append(JsonSerializer::toJson(*v));
+            }
+        }
+        root["variables"] = variablesArr;
+    }
+
+    // alarms
+    {
+        QJsonArray alarmsArr;
+        if (alarmMgr_) {
+            for (AlarmChecker* c : alarmMgr_->checkers()) {
+                auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
+                if (!tc) continue;
+                QJsonObject alarmObj = JsonSerializer::toJson(tc->config());
+                alarmObj["name"]     = c->name();
+                alarmObj["variable"] = tc->variable() ? tc->variable()->name() : QString();
+                alarmsArr.append(alarmObj);
+            }
+        }
+        root["alarms"] = alarmsArr;
+    }
+
+    // actions
+    {
+        QJsonArray actionsArr;
+        if (actionMgr_) {
+            for (const ActionManager::Mapping& m : actionMgr_->mappings()) {
+                actionsArr.append(JsonSerializer::toActionMappingJson(m.alarmName, m.variableName, m.value));
+            }
+        }
+        root["actions"] = actionsArr;
+    }
+
+    // ★ E.3:screens[0].controls(画布)— 反射遍历控件列表
+    {
+        QJsonArray screensArr;
+        QJsonObject mainScreen;
+        mainScreen["name"] = "主屏";
+        mainScreen["controls"] = controlsToJson(controls);
+        screensArr.append(mainScreen);
+        root["screens"] = screensArr;
+    }
+
+    if (!saveRootToFile(path, root)) return false;
+
+    qDebug() << "[Project] saved to" << path
+             << "(controls:" << controls.size() << ")";
+    emit saved(path);
+    return true;
+}
+
+// ===== loadFromFile(6.3 + E.3)=====
+bool Project::loadFromFile(const QString& path) {
+    QJsonObject root;
+    if (!loadRootFromFile(path, root)) return false;
+
+    // ★ E.3:解析 screens[0].controls → emit controlsLoaded 给 EditorMainWindow
+    QList<qwhmi::widgets::ControlBase*> loadedControls;
+    QJsonArray screensArr = root["screens"].toArray();
+    if (!screensArr.isEmpty()) {
+        QJsonObject screen0 = screensArr[0].toObject();
+        QJsonArray controlsArr = screen0["controls"].toArray();
+
+        // ★ 用 ControlBase::create(typeName) 静态工厂作 factory(E.1 registerControlType 注册表)
+        int n = loadControlsFromJson(controlsArr,
+                                     &qwhmi::widgets::ControlBase::create,
+                                     loadedControls);
+        qDebug() << "[Project] loaded" << n << "controls from" << path;
+    }
+    emit controlsLoaded(loadedControls);   // ★ E.3
+
     qDebug() << "[Project] loaded from" << path;
-    emit loaded(path);   // ★ 6.3:load 成功(hmi 收到后重绑 UI)
+    emit loaded(path);
     return true;
 }
 
 // =============================================================================
-// ★ C.0(2026-09-17):schema 演进函数链
-//
-// 设计原则:
-//   - 迁移在内存里做,不立即写回(用户主动 save 才落盘成新版本)
-//   - 每次 schema_version++ 时,加一个 migrateVxToVxPlus1 函数 + 在 migrateTo 里注册
-//   - 迁移失败不丢数据,返回 false 让 loadFromFile 报错
+// schema 演进函数链
 // =============================================================================
 
-// v1 → v2:communications 单 PLC → plcs[0] 多 PLC 数组准备
-//   - schema_version: "1.0" → 2(数字)
-//   - 新增 plcs[] 顶级数组,内容从 communications 提取
-//   - 删 communications 字段(冗余)
 bool Project::migrateV1ToV2(QJsonObject& root) {
     qDebug() << "[Project] migrateV1ToV2 开始";
-
-    // 1. 改 schema_version 数字
     root["schema_version"] = 2;
-
-    // 2. 如果还没 plcs 字段,从 communications 提取
     if (!root.contains("plcs")) {
         QJsonObject comm = root["communications"].toObject();
         QJsonObject plc;
@@ -310,11 +375,9 @@ bool Project::migrateV1ToV2(QJsonObject& root) {
         plc["protocol"] = comm.value("protocol").toString("modbus_tcp");
         plc["host"] = comm.value("host").toString("127.0.0.1");
         plc["port"] = comm.value("port").toInt(502);
-        // 保留 modbus 子对象(timeout/max_retries/poll_interval_ms)
         if (comm.contains("modbus")) {
             plc["modbus"] = comm["modbus"];
         } else {
-            // 缺 modbus 子对象 → 写默认(避免后续 IPollDriver 找不到 timeout)
             QJsonObject modbus;
             modbus["timeout_ms"] = 3000;
             modbus["max_retries"] = 5;
@@ -325,17 +388,44 @@ bool Project::migrateV1ToV2(QJsonObject& root) {
         plcsArr.append(plc);
         root["plcs"] = plcsArr;
     }
-
-    // 3. 删 communications 字段(冗余,信息已搬到 plcs[0])
     root.remove("communications");
-
     qDebug() << "[Project] migrateV1ToV2 完成(communications → plcs[0])";
     return true;
 }
 
-// 迁移调度器:按版本号差依次调 migrate 函数
-//   设计成"链式":v1→v2→v3→v4...直到目标版本
-//   未来加 v3 时,只加 migrateV2ToV3 + 在这里加一行 case
+// ★ E.3:v2 → v3:screens[] 数组准备(老 v2 工程没有 controls,迁移时给空数组)
+//   旧 v2 工程加载后画布为空,用户重新拖入控件后再保存就是 v3
+bool Project::migrateV2ToV3(QJsonObject& root) {
+    qDebug() << "[Project] migrateV2ToV3 开始";
+
+    // 1. schema_version 数字更新
+    root["schema_version"] = 3;
+
+    // 2. 加 screens[0].controls = []
+    //    如果已有 screens 字段,只确保 controls 数组存在(否则给空)
+    if (!root.contains("screens")) {
+        QJsonArray screensArr;
+        QJsonObject mainScreen;
+        mainScreen["name"] = "主屏";
+        mainScreen["controls"] = QJsonArray();
+        screensArr.append(mainScreen);
+        root["screens"] = screensArr;
+    } else {
+        QJsonArray screensArr = root["screens"].toArray();
+        for (int i = 0; i < screensArr.size(); ++i) {
+            QJsonObject screen = screensArr[i].toObject();
+            if (!screen.contains("controls")) {
+                screen["controls"] = QJsonArray();
+                screensArr.replace(i, screen);
+            }
+        }
+        root["screens"] = screensArr;
+    }
+
+    qDebug() << "[Project] migrateV2ToV3 完成(screens[].controls 已补全)";
+    return true;
+}
+
 bool Project::migrateTo(QJsonObject& root, int fromVersion, int toVersion) {
     int current = fromVersion;
     while (current < toVersion) {
@@ -344,7 +434,10 @@ bool Project::migrateTo(QJsonObject& root, int fromVersion, int toVersion) {
                 if (!migrateV1ToV2(root)) return false;
                 current = 2;
                 break;
-            // case 2: migrateV2ToV3(root); current = 3; break;  // 未来加
+            case 2:
+                if (!migrateV2ToV3(root)) return false;
+                current = 3;
+                break;
             default:
                 qWarning() << "[Project] migrateTo:没有从 v" << current << "到 v" << (current+1) << "的迁移函数";
                 return false;
