@@ -63,6 +63,8 @@ set(SOURCES
     src/editor/PropertyChangeCommand.cpp
     # ★ E.2 周 11:EditorMainWindow 骨架
     src/editor/EditorMainWindow.cpp
+    # ★ E.4a:控件调色板 PaletteWidget
+    src/editor/PaletteWidget.cpp
 )
 
 set(HEADERS
@@ -113,6 +115,8 @@ set(HEADERS
     src/editor/PropertyChangeCommand.h
     # ★ E.2 周 11:EditorMainWindow
     src/editor/EditorMainWindow.h
+    # ★ E.4a:PaletteWidget
+    src/editor/PaletteWidget.h
 )
 
 set(FORMS

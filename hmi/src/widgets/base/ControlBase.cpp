@@ -9,6 +9,7 @@
 
 #include <QHash>
 #include <QJsonObject>
+#include <algorithm>
 
 namespace qwhmi::widgets {
 
@@ -28,6 +29,17 @@ ControlBase* ControlBase::create(const QString& typeName) {
     auto it = registry().find(typeName);
     if (it == registry().end()) return nullptr;
     return it.value()();
+}
+
+// ★ E.4a:返回所有注册键(调色板用)— 按 key 字母序
+QStringList ControlBase::registeredTypeNames() {
+    QStringList keys;
+    keys.reserve(registry().size());
+    for (auto it = registry().begin(); it != registry().end(); ++it) {
+        keys.append(it.key());
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
 }
 
 // ★ E.3:用 className 反查注册表短名 — 通过 typeid 比对

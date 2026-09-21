@@ -18,6 +18,8 @@ namespace qwhmi::widgets { class TrendWidget; }  // ★ D.2(2026-09-20):历史�
 #include "Project.h"          // ★ 阶段 6.2:JSON 配置存读
 #include <QCloseEvent>
 #include "ui_hmi.h"
+// ★ E.4a(2026-09-21):编辑器按钮入口
+#include "editor/EditorMainWindow.h"
 
 class hmi : public QMainWindow
 {
@@ -192,6 +194,8 @@ private:
 
     // ★ E.1a(2026-09-20):演示画布按钮触发(6 控件实时数据 demo)
     void onDemoCanvasClicked();
+    // ★ E.4a:弹/隐藏 EditorMainWindow(调色板 + 画布 + 属性面板 + JSON 存读)
+    void onEditorClicked();
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)

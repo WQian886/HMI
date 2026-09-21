@@ -527,5 +527,15 @@
     <ClCompile Include="src\editor\EditorMainWindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.4a:PaletteWidget 调色板 -->
+    <QtMoc Include="src\editor\PaletteWidget.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\editor\PaletteWidget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\PaletteWidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

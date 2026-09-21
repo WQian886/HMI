@@ -22,10 +22,13 @@ class QGraphicsScene;
 class QGraphicsView;
 class QDockWidget;
 class QUndoStack;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
 class Project;            // ★ E.3:文件菜单保存/加载用
 
 namespace qwhmi::widgets { class ControlBase; }
-namespace qwhmi::editor  { class PropertySheet; }
+namespace qwhmi::editor  { class PropertySheet; class PaletteWidget; }
 
 namespace qwhmi::editor {
 
@@ -56,6 +59,7 @@ public:
     QGraphicsScene* scene() const { return scene_; }
     PropertySheet* propertySheet() const { return propertySheet_; }
     QDockWidget* rightDock() const { return rightDock_; }
+    PaletteWidget* paletteWidget() const { return palette_; }   // ★ 改名避免跟 QWidget::palette() 冲突
     Project* project() const { return project_; }
 
     // ★ E.3:文件菜单槽
@@ -64,8 +68,15 @@ public:
     void onFileOpen();        // 弹 QFileDialog + loadFromFile
     QString currentPath() const { return currentPath_; }
 
+    // ★ E.4a:从 PaletteWidget 拖入时调(测试也可直接调,绕过 QDropEvent 复杂度)
+    void handlePaletteDrop(const QString& typeName, const QPointF& scenePos);
+
 private slots:
     void onSceneSelectionChanged();
+
+protected:
+    // ★ E.4a:画布 drop event(从 PaletteWidget 拖入)
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void setupCentralWidget();
@@ -77,6 +88,8 @@ private:
     QGraphicsScene* scene_         = nullptr;
     PropertySheet*  propertySheet_ = nullptr;
     QDockWidget*    rightDock_     = nullptr;
+    QDockWidget*    leftDock_      = nullptr;     // ★ E.4a:调色板 dock
+    PaletteWidget*  palette_       = nullptr;     // ★ E.4a
     QUndoStack*     undoStack_     = nullptr;
     Project*        project_       = nullptr;     // ★ E.3
     QString         currentPath_;                // ★ E.3:当前打开的 .hmi.json 路径

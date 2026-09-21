@@ -100,6 +100,13 @@ hmi::hmi(QWidget *parent)
     ui.buttonRowLayout->addWidget(demoBtn);
     connect(demoBtn, &QPushButton::clicked, this, &hmi::onDemoCanvasClicked);
 
+    // ★ E.4a(2026-09-21):编辑器按钮 — 弹 EditorMainWindow 画布
+    //   左侧调色板(17 控件)+ 中间画布 + 右侧反射属性面板 + 文件菜单 JSON 存读
+    auto* editorBtn = new QPushButton(QStringLiteral("编辑器"), this);
+    editorBtn->setMinimumSize(80, 32);
+    ui.buttonRowLayout->addWidget(editorBtn);
+    connect(editorBtn, &QPushButton::clicked, this, &hmi::onEditorClicked);
+
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
 
@@ -736,6 +743,24 @@ void hmi::onResetFinished() {
 // ★ D.4.1(2026-09-20):D.4 CSV 导出 UI 集成
 //   默认文件名带时间戳,避免覆盖前次导出
 //   from/to 用最近 1 天(后续可加日期选择对话框;先做 MVP)
+// ★ E.4a(2026-09-21):编辑器入口 — 单例模式 show/hide 切窗
+//   点"编辑器"按钮弹 EditorMainWindow(画布 + 调色板 + 属性面板 + JSON 存读)
+//   再点同一按钮关窗口(类比演示画布的 static QWidget* 单例模式)
+void hmi::onEditorClicked() {
+    // ★ E.4a:EditorMainWindow 在 qwhmi::editor 命名空间,这里用全限定
+    static qwhmi::editor::EditorMainWindow* editorWindow_ = nullptr;
+    if (editorWindow_ && editorWindow_->isVisible()) {
+        editorWindow_->hide();
+        return;
+    }
+    if (!editorWindow_) {
+        editorWindow_ = new qwhmi::editor::EditorMainWindow(nullptr);  // 独立顶层窗口
+        editorWindow_->setAttribute(Qt::WA_DeleteOnClose, false);   // 进程内单例,不随关掉 delete
+    }
+    editorWindow_->show();
+    editorWindow_->raise();
+    editorWindow_->activateWindow();
+}
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable
 //   临时 demo,后续 E.4 WYSIWYG 完整编辑器替换
 //   点击"演示画布"按钮 → 切换显示/隐藏 demoWindow_

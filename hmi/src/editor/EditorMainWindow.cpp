@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "editor/EditorMainWindow.h"
+#include "editor/PaletteWidget.h"
 #include "editor/PropertySheet.h"
 #include "widgets/base/ControlBase.h"
 // ★ E.3 修复:加载 JSON 时需要所有控件已注册,这里一次性实例化各控件
@@ -27,6 +28,9 @@
 #include "../../Project.h"
 
 #include <QAction>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QFileDialog>
 #include <QDockWidget>
 #include <QFileInfo>
@@ -35,6 +39,7 @@
 #include <QKeySequence>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QStatusBar>
 #include <QUndoStack>
 
@@ -85,10 +90,24 @@ void EditorMainWindow::setupCentralWidget() {
     view_ = new QGraphicsView(scene_, this);
     view_->setRenderHint(QPainter::Antialiasing);
     view_->setBackgroundBrush(QColor(245, 245, 245));
+    // ★ E.4a:画布接收拖拽(从 PaletteWidget 拖入新控件)
+    //   QGraphicsView 没有 setDragDropMode — 直接设 viewport 接受 drop
+    //   drop event 实际走 viewport(),所以 eventFilter 装在 viewport 上
+    view_->setAcceptDrops(true);
+    view_->viewport()->setAcceptDrops(true);
+    view_->viewport()->installEventFilter(this);
     setCentralWidget(view_);
 }
 
 void EditorMainWindow::setupDockWidgets() {
+    // ★ E.4a:左侧 dock:控件调色板(拖源)
+    leftDock_ = new QDockWidget(tr("控件调色板"), this);
+    leftDock_->setObjectName("PaletteDock");
+    leftDock_->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    palette_ = new PaletteWidget(leftDock_);
+    leftDock_->setWidget(palette_);
+    addDockWidget(Qt::LeftDockWidgetArea, leftDock_);
+
     // ★ 右侧 dock:PropertySheet(E.2 反射属性面板)
     rightDock_ = new QDockWidget(tr("属性"), this);
     rightDock_->setObjectName("PropertyDock");
@@ -179,6 +198,46 @@ void EditorMainWindow::onSceneSelectionChanged() {
         setTarget(cb);
     }
     // 多选暂不处理(E.4d 范围)
+}
+
+// ===== E.4a:画布 drop event 处理 =====
+
+void EditorMainWindow::handlePaletteDrop(const QString& typeName, const QPointF& scenePos) {
+    if (typeName.isEmpty()) return;
+    auto* ctrl = qwhmi::widgets::ControlBase::create(typeName);
+    if (!ctrl) {
+        qWarning() << "[EditorMainWindow] 未知控件类型:" << typeName;
+        return;
+    }
+    ctrl->setPosition(scenePos);
+    addControl(ctrl);
+}
+
+bool EditorMainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched != view_->viewport()) return QMainWindow::eventFilter(watched, event);
+
+    if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
+        auto* de = static_cast<QDragEnterEvent*>(event);
+        if (de->mimeData()->hasFormat(PaletteWidget::controlMimeType())) {
+            de->acceptProposedAction();
+            return true;
+        }
+        return false;
+    }
+
+    if (event->type() == QEvent::Drop) {
+        auto* de = static_cast<QDropEvent*>(event);
+        const QMimeData* mime = de->mimeData();
+        if (!mime->hasFormat(PaletteWidget::controlMimeType())) return false;
+        const QString typeName = QString::fromUtf8(
+            mime->data(PaletteWidget::controlMimeType()));
+        // ★ 委托给 handlePaletteDrop(也供测试直接调,绕过 QDropEvent 复杂构造)
+        handlePaletteDrop(typeName, view_->mapToScene(de->pos()));
+        de->acceptProposedAction();
+        return true;
+    }
+
+    return QMainWindow::eventFilter(watched, event);
 }
 
 // ===== E.3:文件菜单实现 =====
