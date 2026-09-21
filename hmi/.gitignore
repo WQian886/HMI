@@ -93,3 +93,11 @@ test_save.json
 
 # 个人学习资料(本地保留,不进 git)
 学习计划_智能工厂_24周.html
+
+# 阶段 E · E.1b-2 测试目录(已迁移到 tests/build_ninja/,旧的 build/ 不再追踪)
+# 注释:tests/build_ninja/ 走 CMakeFiles/ 模式匹配,本身已被隐式忽略;这里把 build_ninja 显式列出,避免 IDE 误显示
+build_ninja/
+
+# 阶段 D · D.2 QCustomPlot 第三方库 — 只跟源码 + 许可证,docs/examples 不进库
+3rdparty/qcustomplot/documentation/
+3rdparty/qcustomplot/examples/
