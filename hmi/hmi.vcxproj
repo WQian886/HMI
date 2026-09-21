@@ -305,6 +305,9 @@
     <ClCompile Include="src\editor\PropertySheet.cpp" />
     <ClInclude Include="src\editor\PropertyChangeCommand.h" />
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp" />
+    <!-- ★ E.2 周 11:EditorMainWindow -->
+    <ClInclude Include="src\editor\EditorMainWindow.h" />
+    <ClCompile Include="src\editor\EditorMainWindow.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

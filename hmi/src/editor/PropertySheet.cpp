@@ -37,7 +37,9 @@ PropertySheet::PropertySheet(QUndoStack* undoStack, QWidget* parent)
     // ★ 无选中时的占位
     auto* emptyLabel = new QLabel(tr("(未选中控件)"), this);
     form_->addRow(emptyLabel);
-    setEnabled(false);
+    // 注:不在这里 setEnabled(false)— 让 setTarget 决定。
+    //     EditorMainWindow 默认编辑模式 + 已选中 → enabled;
+    //     否则随 setTarget(nullptr) 自然 disabled。
 }
 
 PropertySheet::~PropertySheet() = default;

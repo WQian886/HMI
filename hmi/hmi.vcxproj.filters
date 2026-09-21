@@ -520,5 +520,12 @@
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.2 周 11:EditorMainWindow -->
+    <ClInclude Include="src\editor\EditorMainWindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\EditorMainWindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
