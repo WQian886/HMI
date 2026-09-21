@@ -507,5 +507,18 @@
     <ClCompile Include="src\widgets\AlarmListControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.2(2026-09-21):PropertySheet + PropertyChangeCommand -->
+    <ClInclude Include="src\editor\PropertySheet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\PropertySheet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\editor\PropertyChangeCommand.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\PropertyChangeCommand.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

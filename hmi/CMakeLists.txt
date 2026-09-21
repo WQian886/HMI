@@ -58,6 +58,9 @@ set(SOURCES
     src/widgets/TrendControl.cpp
     src/widgets/TableControl.cpp
     src/widgets/AlarmListControl.cpp
+    # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand(QUndoCommand)
+    src/editor/PropertySheet.cpp
+    src/editor/PropertyChangeCommand.cpp
 )
 
 set(HEADERS
@@ -103,6 +106,9 @@ set(HEADERS
     src/widgets/TrendControl.h
     src/widgets/TableControl.h
     src/widgets/AlarmListControl.h
+    # ★ E.2:PropertySheet + PropertyChangeCommand
+    src/editor/PropertySheet.h
+    src/editor/PropertyChangeCommand.h
 )
 
 set(FORMS

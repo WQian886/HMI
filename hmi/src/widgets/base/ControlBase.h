@@ -71,6 +71,12 @@ public:
     virtual QJsonObject toJson() const;
     virtual void        fromJson(const QJsonObject& obj);
 
+    // ★ E.2 反射接口(基类实现)— 遍历所有可读 Q_PROPERTY → 输出 JSON
+    //   E.3 序列化复用这条路径;派生类 toJson() 应先调这个再追加自定义字段
+    QJsonObject propertiesToJson() const;
+    // ★ 反向:从 JSON 写回所有同名 Q_PROPERTY(setProperty 走 Q_PROPERTY 反射)
+    void        propertiesFromJson(const QJsonObject& obj);
+
     // ===== Variable 绑定(B.4 Binding 思路的简化版)=====
     void bind(Variable* v);          // 连接 valueChanged → updateDisplay
     void unbind();                    // 解绑

@@ -78,20 +78,39 @@ QString ControlBase::displayText() const {
 
 // ===== E.3 JSON 存读基类默认实现 =====
 QJsonObject ControlBase::toJson() const {
-    QJsonObject o;
-    o["type"] = metaObject()->className();
-    o["x"] = position().x();
-    o["y"] = position().y();
-    o["w"] = size_.width();
-    o["h"] = size_.height();
-    o["variable"] = variableName_;
+    // ★ E.2 用反射统一所有 Q_PROPERTY,派生类追加自定义字段
+    QJsonObject o = propertiesToJson();
+    o["type"] = metaObject()->className();   // 单独保留,便于 E.4 调色板按 type 字符串 new
     return o;
 }
 
 void ControlBase::fromJson(const QJsonObject& obj) {
-    setPosition(QPointF(obj.value("x").toDouble(), obj.value("y").toDouble()));
-    setSize(QSizeF(obj.value("w").toDouble(120), obj.value("h").toDouble(40)));
-    setVariableName(obj.value("variable").toString());
+    // ★ 反射写回:setProperty(name, value) 走 Q_PROPERTY 反射
+    propertiesFromJson(obj);
+}
+
+QJsonObject ControlBase::propertiesToJson() const {
+    QJsonObject o;
+    const QMetaObject* meta = metaObject();
+    for (int i = 0; i < meta->propertyCount(); ++i) {
+        QMetaProperty prop = meta->property(i);
+        if (!prop.isReadable()) continue;
+        // ★ QJsonValue::fromVariant(Qt 6 内置支持 QPointF/QSizeF/QColor/QStringList)
+        o.insert(QString::fromUtf8(prop.name()),
+                 QJsonValue::fromVariant(prop.read(this)));
+    }
+    return o;
+}
+
+void ControlBase::propertiesFromJson(const QJsonObject& obj) {
+    const QMetaObject* meta = metaObject();
+    for (int i = 0; i < meta->propertyCount(); ++i) {
+        QMetaProperty prop = meta->property(i);
+        if (!prop.isWritable()) continue;
+        const QString name = QString::fromUtf8(prop.name());
+        if (!obj.contains(name)) continue;
+        prop.write(this, obj.value(name).toVariant());
+    }
 }
 
 // ===== Variable 绑定 =====

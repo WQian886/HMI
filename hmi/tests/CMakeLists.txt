@@ -96,6 +96,9 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/widgets/TrendControl.cpp
     ${HMI_SRC_DIR}/src/widgets/TableControl.cpp
     ${HMI_SRC_DIR}/src/widgets/AlarmListControl.cpp
+    # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand
+    ${HMI_SRC_DIR}/src/editor/PropertySheet.cpp
+    ${HMI_SRC_DIR}/src/editor/PropertyChangeCommand.cpp
 )
 
 function(add_hmi_test test_name)
@@ -169,6 +172,8 @@ add_hmi_test(tst_InputEditControl)
 add_hmi_test(tst_TrendControl)
 add_hmi_test(tst_TableControl)
 add_hmi_test(tst_AlarmListControl)
+# 阶段 E · E.2 属性面板 PropertySheet
+add_hmi_test(tst_PropertySheet)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 
