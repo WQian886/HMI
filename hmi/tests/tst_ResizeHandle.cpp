@@ -4,6 +4,7 @@
 
 #include <QtTest>
 #include <QApplication>
+#include <QGraphicsProxyWidget>
 #include <QGraphicsSceneMouseEvent>
 
 #include "widgets/AlarmListControl.h"
@@ -36,13 +37,14 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
 
-    // 6 用例
+    // 7 用例
     void constructor_8handlesPerItem();        // 选中 → 8 个 handle
     void dragCornerBR_resizesCorrectly();       // 拖 BR → 两方向变大
     void dragEdgeL_onlyChangesWidth();          // 拖 L 边 → 只改宽
     void shiftDrag_maintainsAspect();           // Shift + 拖角 → 保持纵横比
     void minSizeConstraint_enforces20x20();     // 拖太小 → 限制 20
     void handlesRemovedOnDeselect();            // 取消选中 → handle 删掉
+    void proxyWidgetSyncs_resizeWithControl();   // TrendControl/AlarmListControl 缩放跟 widget
 };
 
 // 注册所有控件(EditorMainWindow + tests 需要)
@@ -55,6 +57,18 @@ void registerAllForTest() {
     delete new GroupControl;       delete new ButtonControl;    delete new ToggleControl;
     delete new SliderControl;      delete new InputEditControl;
     delete new TrendControl;       delete new TableControl;     delete new AlarmListControl;
+}
+}
+
+// ★ 工具:把 TrendControl 内部 proxy widget 找出来,验证它的 minSize 跟 ControlBase 一致
+namespace {
+QWidget* findProxyWidget(ControlBase* c) {
+    for (QGraphicsItem* ch : c->childItems()) {
+        if (auto* proxy = qgraphicsitem_cast<QGraphicsProxyWidget*>(ch)) {
+            return proxy->widget();      // ★ QGraphicsProxyWidget::widget() 拿到被包的真实 QWidget
+        }
+    }
+    return nullptr;
 }
 }
 
@@ -201,6 +215,34 @@ void TestResizeHandle::handlesRemovedOnDeselect() {
 
     emw.setTarget(nullptr);          // 取消选中
     QCOMPARE(countHandleChildren(emw.controls().first()), 0);
+}
+
+// ===== 7. proxyWidgetSyncs_resizeWithControl =====
+//   修复:TrendControl/AlarmListControl 用 QGraphicsProxyWidget 包真实 widget,
+//   缩放后内部 widget 也要跟变(否则 visible 区域错位)
+void TestResizeHandle::proxyWidgetSyncs_resizeWithControl() {
+    TrendControl trend;
+    trend.setSize(QSizeF(280, 100));
+    ResizeHandleItem::installHandlesFor(&trend);
+
+    // ★ 缩放前:proxy widget 的 minSize 应是 (280, 100)
+    QWidget* proxy = findProxyWidget(&trend);
+    QVERIFY(proxy != nullptr);
+    QCOMPARE(proxy->minimumSize().width(),  280);
+    QCOMPARE(proxy->minimumSize().height(), 100);
+
+    // ★ 模拟拖 BR handle (size +30, +20)
+    auto* h = findHandle(&trend, HandleType::BottomRight);
+    QVERIFY(h != nullptr);
+    h->handleMousePress(trend.scenePos() + QPointF(280, 100));
+    h->handleMouseMove(trend.scenePos() + QPointF(310, 120), Qt::NoModifier);
+
+    // ★ ControlBase size 应是 310x120
+    QCOMPARE(trend.size().width(),  310);
+    QCOMPARE(trend.size().height(), 120);
+    // ★ 修复点:proxy widget minSize 也跟变(否则 visible 区域错位)
+    QCOMPARE(proxy->minimumSize().width(),  310);
+    QCOMPARE(proxy->minimumSize().height(), 120);
 }
 
 QTEST_MAIN(TestResizeHandle)

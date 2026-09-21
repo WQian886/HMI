@@ -32,6 +32,12 @@ AlarmListControl::AlarmListControl(QGraphicsItem* parent)
     proxy_ = new QGraphicsProxyWidget(this);
     proxy_->setWidget(table_);
 
+    // ★ 修复:E.4b 缩放后 table widget 不跟变 — 监听 sizeChanged 更新 table minSize
+    connect(this, &ControlBase::sizeChanged, this, [this]() {
+        if (table_) table_->setMinimumSize(static_cast<int>(size().width()),
+                                           static_cast<int>(size().height()));
+    });
+
     registerControlType("AlarmList", []() -> ControlBase* { return new AlarmListControl(); });
 }
 
