@@ -109,6 +109,11 @@ set(FORMS
     hmi.ui
 )
 
+# ★ E.1b-2 修复 AUTOUIC 冲突:
+#   即使从 GLOB 排除了 qcustomplot/examples/,AUTOUIC 默认还会扫描 .cpp/.h
+#   找 ui_*.h include — 这步是为了双保险,把 qcustomplot/examples 排除在 AUTOUIC 搜索之外
+set(CMAKE_AUTOUIC_SEARCH_PATHS "")
+
 set(RESOURCES
     hmi.qrc
 )
@@ -128,8 +133,12 @@ file(GLOB_RECURSE EXTRA_H CONFIGURE_DEPENDS
     "src/*.h"
 )
 # 排除 tests/、x64/、out/ 等构建产物目录
-list(FILTER EXTRA_CPP EXCLUDE REGEX "[/\\](tests|x64|out)[/\\]")
-list(FILTER EXTRA_H   EXCLUDE REGEX "[/\\](tests|x64|out)[/\\]")
+# ★ E.1b-2 还要排除 qcustomplot/examples 和 qcustomplot/documentation:
+#   gitignore 已经不让 git 看到,但 CMake GLOB 不读 .gitignore,
+#   examples 里有多个 mainwindow.cpp 都 include "ui_mainwindow.h",
+#   AUTOUIC 会撞名冲突
+list(FILTER EXTRA_CPP EXCLUDE REGEX "[/\\](tests|x64|out|qcustomplot[/\\](examples|documentation))[/\\]")
+list(FILTER EXTRA_H   EXCLUDE REGEX "[/\\](tests|x64|out|qcustomplot[/\\](examples|documentation))[/\\]")
 list(REMOVE_ITEM EXTRA_CPP ${SOURCES})
 list(REMOVE_ITEM EXTRA_H   ${HEADERS})
 list(APPEND SOURCES ${EXTRA_CPP})
@@ -154,6 +163,13 @@ qt_add_executable(hmi ${SOURCES} ${HEADERS} ${FORMS} ${RESOURCES})
 set_target_properties(hmi PROPERTIES WIN32_EXECUTABLE TRUE)
 
 target_include_directories(hmi PRIVATE src)
+# ★ E.1b-2 修复 CMake 构建历史遗留:
+#   src/{history,auth,tag,export,logging}/ 下的 .cpp 用 `#include "Variable.h"`
+#   /`#include "auth/Permission.h"`/`#include "tag/ExpressionParser.h"` 这种
+#   相对 hmi 根目录的路径。target_include_directories(hmi PRIVATE src) 只把
+#   src/ 加进路径,这些文件会找不到头。vcxproj 是把 hmi/ 根当 include 根的,
+#   CMake 这边一直没补,这次首次用 build.ps1 编 hmi.exe 才暴露。
+target_include_directories(hmi PRIVATE .)
 # ★ D.2(2026-09-20):QCustomPlot 头文件路径(LGPL v2.1)
 target_include_directories(hmi PRIVATE 3rdparty/qcustomplot)
 # ★ 阶段 C · C.2 Snap7 集成占位

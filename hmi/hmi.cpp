@@ -15,6 +15,10 @@
 #include "widgets/BarControl.h"
 #include "widgets/GaugeControl.h"
 #include "widgets/LedControl.h"
+// ★ E.1b-2(2026-09-21):3 个数据控件(Trend/Table/AlarmList)— 演示画布用到
+#include "widgets/TrendControl.h"
+#include "widgets/TableControl.h"
+#include "widgets/AlarmListControl.h"
 #include "export/CsvExporter.h"      // ★ D.4(2026-09-20):CSV 导出(QTextStream)
 
 #include <QGraphicsView>            // ★ E.1a demo 画布
@@ -735,6 +739,7 @@ void hmi::onResetFinished() {
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable
 //   临时 demo,后续 E.4 WYSIWYG 完整编辑器替换
 //   点击"演示画布"按钮 → 切换显示/隐藏 demoWindow_
+// ★ E.1b-2(2026-09-21):加 Trend + Table + AlarmList 3 个数据控件(6 → 9)
 void hmi::onDemoCanvasClicked() {
     static QWidget* demoWindow_ = nullptr;       // 进程内单例
     if (demoWindow_ && demoWindow_->isVisible()) {
@@ -743,23 +748,23 @@ void hmi::onDemoCanvasClicked() {
     }
     if (!demoWindow_) {
         demoWindow_ = new QWidget(nullptr, Qt::Window);   // 独立顶层窗口
-        demoWindow_->setWindowTitle("E.1a 演示画布 — 6 控件实时数据");
-        demoWindow_->resize(900, 600);
+        demoWindow_->setWindowTitle("E.1b 演示画布 — 9 控件实时数据");
+        demoWindow_->resize(900, 800);
 
         auto* view = new QGraphicsView(demoWindow_);
         auto* scene = new QGraphicsScene(view);
-        scene->setSceneRect(0, 0, 880, 580);
+        scene->setSceneRect(0, 0, 880, 780);
         view->setScene(scene);
         view->setRenderHint(QPainter::Antialiasing);
         view->setBackgroundBrush(QColor(245, 245, 245));
 
-        // ★ 6 控件:3 显示 3 演示(放画布上)
+        // ★ 9 控件:3 显示 3 演示 3 数据(放画布上)
         using namespace qwhmi::widgets;
         // 1. LabelControl 静态文字
         auto* lbl = new LabelControl;
         lbl->setPosition({20, 20});
         lbl->setVariableName("plc1.demo");
-        lbl->setValue(QStringLiteral("演示画布 — E.1a"));
+        lbl->setValue(QStringLiteral("演示画布 — E.1b"));
         scene->addItem(lbl);
 
         // 2. NumberDisplay 绑 plc1.Speed
@@ -805,6 +810,37 @@ void hmi::onDemoCanvasClicked() {
         }
         scene->addItem(led);
 
+        // 7. TrendControl(全宽,840x100)— 当前是静态 sin 波演示
+        //   后续 E.4 接 HistoryRecorder 后改成实时数据
+        auto* trend = new TrendControl;
+        trend->setPosition({20, 250});
+        trend->setSize({840, 100});
+        trend->refresh("plc1.Speed");   // ★ refresh 内部会画演示数据 + 记 variableName
+        scene->addItem(trend);
+
+        // 8. TableControl(左半,420x140)— 演示填几行假数据(不接 VariableManager)
+        auto* table = new TableControl;
+        table->setPosition({20, 380});
+        table->setSize({420, 140});
+        table->setHeaders({QStringLiteral("时间"), QStringLiteral("变量"), QStringLiteral("值")});
+        table->setCell(0, 0, "12:00:00");
+        table->setCell(0, 1, "Speed");
+        table->setCell(0, 2, "1234");
+        table->setCell(1, 0, "12:00:01");
+        table->setCell(1, 1, "Pressure");
+        table->setCell(1, 2, "5.6");
+        table->setCell(2, 0, "12:00:02");
+        table->setCell(2, 1, "Temperature");
+        table->setCell(2, 2, "42");
+        scene->addItem(table);
+
+        // 9. AlarmListControl(右半,420x140)— 接 alarmMgr_ 自动刷活动报警
+        auto* alarmList = new AlarmListControl;
+        alarmList->setPosition({460, 380});
+        alarmList->setSize({420, 140});
+        if (alarmMgr_) alarmList->bindAlarmManager(alarmMgr_);
+        scene->addItem(alarmList);
+
         // 标注文字(纯 QGraphicsSimpleTextItem 即可)
         auto addLabel = [&](const QString& text, qreal x, qreal y) {
             auto* item = scene->addSimpleText(text);
@@ -816,6 +852,9 @@ void hmi::onDemoCanvasClicked() {
         addLabel(QStringLiteral("BarControl (Pressure 0-10 bar)"), 540, 65);
         addLabel(QStringLiteral("GaugeControl (Speed 0-3000 rpm)"), 770, 215);
         addLabel(QStringLiteral("LED (>50 亮)"),            830,  75);
+        addLabel(QStringLiteral("TrendControl (sin 波演示)"), 20, 235);
+        addLabel(QStringLiteral("TableControl (3 列演示数据)"), 20, 365);
+        addLabel(QStringLiteral("AlarmListControl (绑 alarmMgr_)"), 460, 365);
     }
     demoWindow_->show();
     demoWindow_->raise();
