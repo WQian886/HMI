@@ -54,6 +54,10 @@ set(SOURCES
     src/widgets/ToggleControl.cpp
     src/widgets/SliderControl.cpp
     src/widgets/InputEditControl.cpp
+    # ★ E.1b-2(2026-09-20):Trend + Table + AlarmList(3 个数据控件)
+    src/widgets/TrendControl.cpp
+    src/widgets/TableControl.cpp
+    src/widgets/AlarmListControl.cpp
 )
 
 set(HEADERS
@@ -95,25 +99,10 @@ set(HEADERS
     src/widgets/ToggleControl.h
     src/widgets/SliderControl.h
     src/widgets/InputEditControl.h
-)
-
-set(HEADERS
-    hmi.h
-    TcpClient.h
-    ModbusDemo.h
-    ModbusMaster.h
-    Variable.h
-    VariableManager.h
-    PollScheduler.h
-    Binding.h
-    WriteScheduler.h
-    ActionManager.h
-    Alarm.h
-    AlarmManager.h
-    ThresholdAlarmChecker.h
-    WriteFailChecker.h
-    JsonSerializer.h
-    Project.h
+    # ★ E.1b-2:Trend + Table + AlarmList
+    src/widgets/TrendControl.h
+    src/widgets/TableControl.h
+    src/widgets/AlarmListControl.h
 )
 
 set(FORMS
