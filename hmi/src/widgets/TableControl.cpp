@@ -26,6 +26,7 @@ TableControl::TableControl(QGraphicsItem* parent)
 
     proxy_ = new QGraphicsProxyWidget(this);
     proxy_->setWidget(table_);
+    proxy_->setAcceptedMouseButtons(Qt::NoButton);   // ★ 同源修复:Table 也吞事件
 
     registerControlType("Table", []() -> ControlBase* { return new TableControl(); });
 }

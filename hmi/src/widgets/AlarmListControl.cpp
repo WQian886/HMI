@@ -31,6 +31,7 @@ AlarmListControl::AlarmListControl(QGraphicsItem* parent)
 
     proxy_ = new QGraphicsProxyWidget(this);
     proxy_->setWidget(table_);
+    proxy_->setAcceptedMouseButtons(Qt::NoButton);   // ★ 修复:让父收事件,父才能选中/拖动
 
     // ★ 修复:E.4b 缩放后 table widget 不跟变 — 监听 sizeChanged 更新 table minSize
     connect(this, &ControlBase::sizeChanged, this, [this]() {

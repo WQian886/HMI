@@ -29,6 +29,7 @@ TrendControl::TrendControl(QGraphicsItem* parent)
 
     proxy_ = new QGraphicsProxyWidget(this);
     proxy_->setWidget(plot_);
+    proxy_->setAcceptedMouseButtons(Qt::NoButton);   // ★ 同源修复:Trend 也吞事件
 
     // ★ 修复:E.4b 缩放后 proxy widget 不跟变 — 监听 sizeChanged 更新 plot minSize
     connect(this, &ControlBase::sizeChanged, this, [this]() {
