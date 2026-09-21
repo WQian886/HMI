@@ -13,6 +13,7 @@
 #pragma once
 
 #include <QGraphicsRectItem>
+#include <QPainterPath>
 
 namespace qwhmi::widgets { class ControlBase; }
 
@@ -56,6 +57,12 @@ protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* e) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent* e) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent* e) override;
+
+    // ★ 方案 A:重写 paint 缩视觉到 4x4(贴边),shape 保持 8x8(易点中)
+    void paint(QPainter* painter,
+               const QStyleOptionGraphicsItem* option,
+               QWidget* widget = nullptr) override;
+    QPainterPath shape() const override;
 
 private:
     void applyResize(const QPointF& delta, bool shift);

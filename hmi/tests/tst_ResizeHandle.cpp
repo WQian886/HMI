@@ -45,6 +45,11 @@ private slots:
     void minSizeConstraint_enforces20x20();     // 拖太小 → 限制 20
     void handlesRemovedOnDeselect();            // 取消选中 → handle 删掉
     void proxyWidgetSyncs_resizeWithControl();   // TrendControl/AlarmListControl 缩放跟 widget
+    void dragCornerBR_upLeft_shrinksCorrectly(); // ★ 拖 BR 向左上 → 缩小
+    void dragEdgeR_left_shrinksWidth();          // ★ 拖 R 边向左 → 缩小
+    void dragEdgeB_up_shrinksHeight();           // ★ 拖 B 边向上 → 缩小
+    void dragEdgeT_down_shrinksHeight();         // ★ 拖 T 边向下 → 缩小
+    void dragCornerTL_downRight_shrinksCorrectly(); // ★ 拖 TL 向右下 → 缩小
 };
 
 // 注册所有控件(EditorMainWindow + tests 需要)
@@ -243,6 +248,115 @@ void TestResizeHandle::proxyWidgetSyncs_resizeWithControl() {
     // ★ 修复点:proxy widget minSize 也跟变(否则 visible 区域错位)
     QCOMPARE(proxy->minimumSize().width(),  310);
     QCOMPARE(proxy->minimumSize().height(), 120);
+}
+
+// ===== 8. dragCornerBR_upLeft_shrinksCorrectly =====
+//   ★ Bug 复现:用户反馈拖 BR handle 只能放大,不能向上缩小。
+//   预期:delta.x < 0, delta.y < 0 → size 缩小。
+void TestResizeHandle::dragCornerBR_upLeft_shrinksCorrectly() {
+    BarControl bar;
+    bar.setSize(QSizeF(200, 100));
+    ResizeHandleItem::installHandlesFor(&bar);
+    auto* h = findHandle(&bar, HandleType::BottomRight);
+    QVERIFY(h != nullptr);
+
+    QPointF pressPos = bar.scenePos() + QPointF(200, 100);     // BR handle
+    h->handleMousePress(pressPos);
+
+    // ★ 拖向左上(缩小方向)
+    QPointF movePos = pressPos + QPointF(-30, -20);
+    h->handleMouseMove(movePos, Qt::NoModifier);
+
+    QCOMPARE(bar.size().width(),  200 - 30);
+    QCOMPARE(bar.size().height(), 100 - 20);
+    QCOMPARE(bar.pos(), QPointF(0, 0));                         // BR 角 pos 不变
+    h->handleMouseRelease(movePos);
+}
+
+// ===== 9. dragEdgeR_left_shrinksWidth =====
+//   ★ 拖 R 边向左 → width 变小
+void TestResizeHandle::dragEdgeR_left_shrinksWidth() {
+    BarControl bar;
+    bar.setSize(QSizeF(200, 100));
+    ResizeHandleItem::installHandlesFor(&bar);
+    auto* h = findHandle(&bar, HandleType::Right);
+    QVERIFY(h != nullptr);
+
+    QPointF pressPos = bar.scenePos() + QPointF(200, 50);      // R 边中点
+    h->handleMousePress(pressPos);
+
+    QPointF movePos = pressPos + QPointF(-40, 0);              // 向左
+    h->handleMouseMove(movePos, Qt::NoModifier);
+
+    QCOMPARE(bar.size().width(),  200 - 40);
+    QCOMPARE(bar.size().height(), 100);
+    QCOMPARE(bar.pos().x(),       0);
+    h->handleMouseRelease(movePos);
+}
+
+// ===== 10. dragEdgeB_up_shrinksHeight =====
+//   ★ 拖 B 边向上 → height 变小(pos 不动,因为 B 是底边)
+void TestResizeHandle::dragEdgeB_up_shrinksHeight() {
+    BarControl bar;
+    bar.setSize(QSizeF(200, 100));
+    ResizeHandleItem::installHandlesFor(&bar);
+    auto* h = findHandle(&bar, HandleType::Bottom);
+    QVERIFY(h != nullptr);
+
+    QPointF pressPos = bar.scenePos() + QPointF(100, 100);     // B 边中点
+    h->handleMousePress(pressPos);
+
+    QPointF movePos = pressPos + QPointF(0, -25);              // 向上
+    h->handleMouseMove(movePos, Qt::NoModifier);
+
+    QCOMPARE(bar.size().width(),  200);
+    QCOMPARE(bar.size().height(), 100 - 25);
+    QCOMPARE(bar.pos().y(),       0);
+    h->handleMouseRelease(movePos);
+}
+
+// ===== 11. dragEdgeT_down_shrinksHeight =====
+//   ★ 拖 T 边向下 → height 变小(pos.y 下移,因为 T 是顶边)
+void TestResizeHandle::dragEdgeT_down_shrinksHeight() {
+    BarControl bar;
+    bar.setSize(QSizeF(200, 100));
+    bar.setPos(QPointF(10, 20));
+    ResizeHandleItem::installHandlesFor(&bar);
+    auto* h = findHandle(&bar, HandleType::Top);
+    QVERIFY(h != nullptr);
+
+    QPointF pressPos = bar.scenePos() + QPointF(100, 0);       // T 边中点
+    h->handleMousePress(pressPos);
+
+    QPointF movePos = pressPos + QPointF(0, 25);               // 向下
+    h->handleMouseMove(movePos, Qt::NoModifier);
+
+    QCOMPARE(bar.size().width(),  200);
+    QCOMPARE(bar.size().height(), 100 - 25);
+    QCOMPARE(bar.pos().y(),       20 + 25);                    // pos.y 下移
+    h->handleMouseRelease(movePos);
+}
+
+// ===== 12. dragCornerTL_downRight_shrinksCorrectly =====
+//   ★ 拖 TL handle 向右下 → 控件缩小,pos 右下移
+void TestResizeHandle::dragCornerTL_downRight_shrinksCorrectly() {
+    BarControl bar;
+    bar.setSize(QSizeF(200, 100));
+    bar.setPos(QPointF(10, 20));
+    ResizeHandleItem::installHandlesFor(&bar);
+    auto* h = findHandle(&bar, HandleType::TopLeft);
+    QVERIFY(h != nullptr);
+
+    QPointF pressPos = bar.scenePos() + QPointF(0, 0);         // TL 角
+    h->handleMousePress(pressPos);
+
+    QPointF movePos = pressPos + QPointF(30, 20);              // 向右下
+    h->handleMouseMove(movePos, Qt::NoModifier);
+
+    QCOMPARE(bar.size().width(),  200 - 30);
+    QCOMPARE(bar.size().height(), 100 - 20);
+    QCOMPARE(bar.pos(), QPointF(10 + 30, 20 + 20));            // TL pos 右下移
+    h->handleMouseRelease(movePos);
 }
 
 QTEST_MAIN(TestResizeHandle)

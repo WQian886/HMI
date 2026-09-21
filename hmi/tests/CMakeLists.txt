@@ -186,6 +186,8 @@ add_hmi_test(tst_EditorMainWindow)
 add_hmi_test(tst_PaletteWidget)
 # 阶段 E · E.4b 8 handle 缩放 ResizeHandleItem
 add_hmi_test(tst_ResizeHandle)
+# handle 视觉对齐调试
+add_hmi_test(tst_HandleVisualAlignment)
 # 阶段 D · D.2 历史曲线控件(QCustomPlot)
 add_hmi_test(tst_Trend)
 

@@ -8,6 +8,8 @@
 #include <QBrush>
 #include <QCursor>
 #include <QGraphicsSceneMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPen>
 
 namespace qwhmi::editor {
@@ -16,6 +18,7 @@ ResizeHandleItem::ResizeHandleItem(HandleType type,
                                    qwhmi::widgets::ControlBase* target,
                                    QGraphicsItem* parent)
     : QGraphicsRectItem(parent), type_(type), target_(target) {
+    // ★ hit area 保持 8x8(用户体验:容易点中);视觉画 4x4(方案 A,贴边)
     setRect(-HANDLE_SIZE / 2, -HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
     setBrush(QBrush(QColor("#0078D7")));
     setPen(QPen(Qt::white, 1));
@@ -36,6 +39,26 @@ ResizeHandleItem::ResizeHandleItem(HandleType type,
         case HandleType::Right:
             setCursor(Qt::SizeHorCursor); break;
     }
+}
+
+// ★ 方案 A:视觉缩到 4x4(贴边),hit area 保持 8x8(易点中)
+//   旧实现:8x8 视觉横跨控件边内外各 4px → "handle 边和控件边不在同一线上"
+//   新实现:4x4 视觉横跨 2px,接近"贴边"感,不再有"半埋半外"的违和感
+void ResizeHandleItem::paint(QPainter* painter,
+                             const QStyleOptionGraphicsItem* option,
+                             QWidget* widget) {
+    Q_UNUSED(option); Q_UNUSED(widget);
+    painter->setBrush(brush());
+    painter->setPen(pen());
+    const qreal inset = HANDLE_SIZE / 4;   // 8 → 内缩 2 → 画 4x4
+    painter->drawRect(rect().adjusted(inset, inset, -inset, -inset));
+}
+
+QPainterPath ResizeHandleItem::shape() const {
+    // ★ hit area 保持完整 8x8(本地坐标),用户点中范围不变
+    QPainterPath p;
+    p.addRect(rect());
+    return p;
 }
 
 void ResizeHandleItem::layoutHandlesFor(qwhmi::widgets::ControlBase* target) {
