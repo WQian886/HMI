@@ -28,10 +28,11 @@ GroupHandleItem::~GroupHandleItem() {
 void GroupHandleItem::setTargets(const QList<qwhmi::widgets::ControlBase*>& targets) {
     targets_ = targets;
     if (targets_.isEmpty()) {
+        setPos(QPointF(0, 0));
         setRect(QRectF(0, 0, 0, 0));
         return;
     }
-    // ★ 计算合并 sceneBoundingRect,设到自己的 rect
+    // ★ 计算合并 sceneBoundingRect
     QRectF unionRect;
     bool first = true;
     for (auto* t : targets_) {
@@ -40,16 +41,32 @@ void GroupHandleItem::setTargets(const QList<qwhmi::widgets::ControlBase*>& targ
         if (first) { unionRect = sb; first = false; }
         else        unionRect = unionRect.united(sb);
     }
-    // ★ group 是 scene 顶层 item,rect 用 scene 坐标
-    setRect(unionRect);
+    // ★ E.4d 续-3 bug fix:把 group 的 pos 设为 unionRect.topLeft,rect 设为本地 (0,0,w,h)
+    //   之前 setRect(unionRect) + 默认 pos=(0,0) → handle 出现在 scene (0,0) 起,
+    //   远离实际控件(蓝色框和元件位置不一致)。
+    //   现在:handle 在 group 本地坐标 (0,0)~(w,h),scene 位置 = pos() + handle.pos
+    //   = unionRect.topLeft + 本地坐标 = 实际控件角点。
+    setPos(unionRect.topLeft());
+    setRect(QRectF(0, 0, unionRect.width(), unionRect.height()));
 }
 
 void GroupHandleItem::captureOriginalRects() {
+    // ★ sceneBoundingRect() 返回 scene 坐标下的真实位置(pos + rect in scene 坐标系)
     originalGroupSceneRect_ = sceneBoundingRect();
     originalSceneRects_.clear();
     for (auto* t : targets_) {
         if (t) originalSceneRects_[t] = t->sceneBoundingRect();
     }
+}
+
+void GroupHandleItem::resizeToGroupRect(const QRectF& newGroupRect) {
+    if (targets_.isEmpty()) return;
+    // ★ 应用:先调 applyProportionalResize 改所有真 targets,再更新 group 自己的 rect + pos
+    //   (否则 handle 在原 rect 上不动,用户感受不到缩放)
+    applyProportionalResize(newGroupRect);
+    // ★ 同步 group 自己的 pos + rect
+    setPos(newGroupRect.topLeft());
+    setRect(QRectF(0, 0, newGroupRect.width(), newGroupRect.height()));
 }
 
 void GroupHandleItem::applyProportionalResize(const QRectF& newSceneRect) {
@@ -89,9 +106,10 @@ void GroupHandleItem::applyProportionalResize(const QRectF& newSceneRect) {
 
 QVariant GroupHandleItem::itemChange(QGraphicsItem::GraphicsItemChange change, const QVariant& value) {
     if (change == QGraphicsItem::ItemPositionChange && !geometryChanging_) {
-        // ★ 自己的 rect/pos 变了(被 handle 拖动 / scene 变换等)→ 按比例重算所有 targets
-        const QRectF newRect = value.toRectF();
-        applyProportionalResize(newRect);
+        // ★ ItemPositionChange 的 value 是新位置(QPointF),不是 rect
+        //   group rect 改变由 resizeToGroupRect 内部处理,这里只备份给可能的
+        //   外部 transform (scene 缩放/旋转) 用
+        Q_UNUSED(value);
     }
     return QGraphicsRectItem::itemChange(change, value);
 }

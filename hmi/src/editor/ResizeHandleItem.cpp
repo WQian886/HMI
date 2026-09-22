@@ -218,18 +218,16 @@ void ResizeHandleItem::applyResize(const QPointF& delta, bool shift) {
     if (newSize.width()  < MIN_SIZE) newSize.setWidth(MIN_SIZE);
     if (newSize.height() < MIN_SIZE) newSize.setHeight(MIN_SIZE);
 
-    // ★ 应用:target 可能是 ControlBase(单选) 或 QGraphicsRectItem(GroupHandleItem 多选)
+    // ★ 应用:target 可能是 ControlBase(单选) 或 GroupHandleItem(多选)
     //   通过 dynamic_cast 分发 — QGraphicsItem* 到 ControlBase* 是合法的向下转型
     if (auto* cb = dynamic_cast<qwhmi::widgets::ControlBase*>(target_)) {
         // ★ 单选 path
         cb->setPos(newPos);
         cb->setSize(newSize);   // 触发 ControlBase::sizeChanged 信号
-    } else if (auto* gri = qgraphicsitem_cast<QGraphicsRectItem*>(target_)) {
-        // ★ 多选 group path:setRect 改 rect(itemGeometryChange 触发
-        //   GroupHandleItem::itemChange → 按比例缩放所有真 targets)
-        gri->setPos(newPos);
-        const QRectF r = gri->rect();
-        gri->setRect(QRectF(r.x(), r.y(), newSize.width(), newSize.height()));
+    } else if (auto* group = dynamic_cast<GroupHandleItem*>(target_)) {
+        // ★ 多选 group path:调 group->resizeToGroupRect,内部按比例重算所有真 targets
+        //   newPos 是 group 在 scene 中的新 topLeft(已含合并 bbox 偏移)
+        group->resizeToGroupRect(QRectF(newPos.x(), newPos.y(), newSize.width(), newSize.height()));
     } else {
         // ★ 兜底:当作普通 QGraphicsItem,只 setPos
         target_->setPos(newPos);

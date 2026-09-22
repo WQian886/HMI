@@ -62,6 +62,7 @@ private slots:
     // ★ E.4d 续-3:多选时挂 8 个组 handle(围合并 boundingRect)
     void groupHandle_installedOnMultiSelect();
     void groupHandle_proportionalResizeAllTargets();
+    void groupHandle_handlesAtCorrectScenePosition();   // ★ bug 回归:之前位置错位
 };
 
 // ===== 1. constructor_createsWindow =====
@@ -399,6 +400,50 @@ void TestEditorMainWindow::selectionFrame_appearsAfterSelect() {
 }
 void TestEditorMainWindow::selectionFrame_surroundsMultiSelectionBounds() {
     QSKIP("TODO: same as above");
+}
+
+// ===== 19. groupHandle_handlesAtCorrectScenePosition =====
+//   ★ E.4d 续-3 bug 回归:
+//   group 的 pos 必须是 unionRect.topLeft,rect 必须是本地 (0,0,w,h)。
+//   之前 setRect(unionRect) + 默认 pos=(0,0) → 8 个 handle 出现在 scene (0,0)
+//   附近而不是控件角点(用户报告 "蓝色框和所选元件位置不一致")。
+void TestEditorMainWindow::groupHandle_handlesAtCorrectScenePosition() {
+    EditorMainWindow w;
+    // ★ 故意把控件放在非零位置,验证 handle 跟着它们的 bbox,不是 scene 零点
+    auto* a = new LabelControl; a->setSize({100, 50}); a->setPosition({150, 80});
+    auto* b = new LabelControl; b->setSize({100, 50}); b->setPosition({350, 200});
+    w.addControl(a); w.addControl(b);
+
+    a->setSelected(true);
+    b->setSelected(true);
+    QVERIFY(w.groupHandle() != nullptr);
+
+    // ★ group 的 sceneBoundingRect 应 = 合并
+    const QRectF expectedGroup = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.groupHandle()->sceneBoundingRect(), expectedGroup);
+
+    // ★ group 的 pos 应 = expectedGroup.topLeft,rect 应 = 本地 (0,0,w,h)
+    QCOMPARE(w.groupHandle()->pos(), expectedGroup.topLeft());
+    QCOMPARE(w.groupHandle()->rect(), QRectF(0, 0, expectedGroup.width(), expectedGroup.height()));
+
+    // ★ 8 个 handle 的 scene 位置:TL=(150,80), TR=(250,80), BR=(350,130)
+    //   (a 的 topLeft=(150,80), b 的 bottomRight=(450,250), unionRect=(150,80,300,170))
+    for (QGraphicsItem* c : w.groupHandle()->childItems()) {
+        auto* h = qgraphicsitem_cast<ResizeHandleItem*>(c);
+        if (!h) continue;
+        const QPointF sceneP = h->scenePos();
+        // ★ handle scene 位置应在 unionRect 边界附近(±handle_size/2 容差)
+        QVERIFY2(sceneP.x() >= expectedGroup.left() - 10 &&
+                 sceneP.x() <= expectedGroup.right() + 10,
+                 qPrintable(QString("handle %1 sceneX=%2 out of [%3,%4]")
+                                .arg(static_cast<int>(h->handleType())).arg(sceneP.x())
+                                .arg(expectedGroup.left()).arg(expectedGroup.right())));
+        QVERIFY2(sceneP.y() >= expectedGroup.top() - 10 &&
+                 sceneP.y() <= expectedGroup.bottom() + 10,
+                 qPrintable(QString("handle %1 sceneY=%2 out of [%3,%4]")
+                                .arg(static_cast<int>(h->handleType())).arg(sceneP.y())
+                                .arg(expectedGroup.top()).arg(expectedGroup.bottom())));
+    }
 }
 
 QTEST_MAIN(TestEditorMainWindow)

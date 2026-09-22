@@ -42,6 +42,11 @@ public:
     // ★ E.4d 续-3:public — ResizeHandleItem::handleMousePress 调这个拍照
     void captureOriginalRects();
 
+    // ★ E.4d 续-3:public — ResizeHandleItem::applyResize 调这个,按比例缩放所有真 targets
+    //   替代通过 setRect + itemChange 触发 — 后者 value 是 QPointF 不是 QRectF,容易误判
+    //   handle 内部已经拍照 snapshot(group->captureOriginalRects 在 handleMousePress 时)
+    void resizeToGroupRect(const QRectF& newGroupRect);
+
     const QList<qwhmi::widgets::ControlBase*>& targets() const { return targets_; }
 
 protected:
