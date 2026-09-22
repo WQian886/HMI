@@ -259,8 +259,8 @@ void EditorMainWindow::onSceneSelectionChanged() {
         target_ = nullptr;       // 多选时无单一 target(单独 handle 暂不实现组 handle)
     }
 
-    // ★ PropertySheet:暂只支持单选 target,多选时传 nullptr(显示"未选中")
-    if (propertySheet_) propertySheet_->setTarget(target_);
+    // ★ PropertySheet:单选/多选用 setTargets(空时显示"未选中控件")
+    if (propertySheet_) propertySheet_->setTargets(targets_);
 
     // ★ 装新 target 的 handle(单选 8 个,多选暂不装 — 后续 commit 加组 handle)
     if (target_) installHandlesFor(target_);

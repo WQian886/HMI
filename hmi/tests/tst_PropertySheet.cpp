@@ -56,6 +56,11 @@ private slots:
     void sizeEditor_appearsInForm();
     void sizeEditor_valueChange_updatesTargetAndUndo();
     void positionEditor_appearsInForm();
+
+    // ★ E.4d-续-2(2026-09-22):多选共同属性
+    void multiSelect_commonValuesShownAndEditable();
+    void multiSelect_diffValuesShownEmptyAndDisabled();
+    void multiSelect_editPushesToAllTargets();
 };
 
 // ===== 1. reflect_findsAllWritableProperties =====
@@ -282,6 +287,75 @@ void TestPropertySheet::positionEditor_appearsInForm() {
     QCOMPARE(stack.count(), 1);
     stack.undo();
     QCOMPARE(bar.position(), QPointF(100, 200));
+}
+
+// ===== 14. multiSelect_commonValuesShownAndEditable =====
+//   ★ E.4d-续-2(2026-09-22):3 个 BarControl maximum 都是 100,
+//     PropertySheet 多选时 maximum 字段显示 100 且可编辑
+void TestPropertySheet::multiSelect_commonValuesShownAndEditable() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+    auto* a = new BarControl; a->setMaximum(100.0);
+    auto* b = new BarControl; b->setMaximum(100.0);
+    auto* c = new BarControl; c->setMaximum(100.0);
+    QList<ControlBase*> targets = {a, b, c};
+    sheet.setTargets(targets);
+    QCOMPARE(sheet.targetsCount(), 3);
+
+    // ★ 找 maximum 字段的 editor(QDoubleSpinBox)
+    auto* spin = sheet.findChild<QDoubleSpinBox*>("maximum");
+    QVERIFY(spin != nullptr);
+    QCOMPARE(spin->value(), 100.0);
+    QVERIFY(spin->isEnabled());   // 共同值,可编辑
+}
+
+// ===== 15. multiSelect_diffValuesShownEmptyAndDisabled =====
+//   ★ E.4d-续-2:3 个 BarControl maximum 不同(100/200/300),
+//     PropertySheet maximum 字段显示空且禁用
+void TestPropertySheet::multiSelect_diffValuesShownEmptyAndDisabled() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+    auto* a = new BarControl; a->setMaximum(100.0);
+    auto* b = new BarControl; b->setMaximum(200.0);
+    auto* c = new BarControl; c->setMaximum(300.0);
+    QList<ControlBase*> targets = {a, b, c};
+    sheet.setTargets(targets);
+
+    auto* spin = sheet.findChild<QDoubleSpinBox*>("maximum");
+    QVERIFY(spin != nullptr);
+    QVERIFY(!spin->isEnabled());    // 异值,禁用
+    QCOMPARE(spin->value(), 0.0);   // 异值时显示为默认值(0)
+}
+
+// ===== 16. multiSelect_editPushesToAllTargets =====
+//   ★ E.4d-续-2:多选时编辑共同属性 → 推所有 target + 进 Undo 栈
+void TestPropertySheet::multiSelect_editPushesToAllTargets() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+    auto* a = new BarControl; a->setMaximum(100.0);
+    auto* b = new BarControl; b->setMaximum(100.0);
+    auto* c = new BarControl; c->setMaximum(100.0);
+    QList<ControlBase*> targets = {a, b, c};
+    sheet.setTargets(targets);
+
+    auto* spin = sheet.findChild<QDoubleSpinBox*>("maximum");
+    QVERIFY(spin != nullptr);
+    spin->setValue(777.0);
+
+    // ★ 推所有 target(值都变了)
+    QCOMPARE(a->maximum(), 777.0);
+    QCOMPARE(b->maximum(), 777.0);
+    QCOMPARE(c->maximum(), 777.0);
+    // ★ 200ms 内 PropertyChangeCommand 合并 → 至少 3 个 command(可能被 merge)
+    QVERIFY(stack.count() >= 3);
+
+    // ★ undo 全部还原
+    stack.undo();
+    stack.undo();
+    stack.undo();
+    QCOMPARE(a->maximum(), 100.0);
+    QCOMPARE(b->maximum(), 100.0);
+    QCOMPARE(c->maximum(), 100.0);
 }
 
 QTEST_MAIN(TestPropertySheet)

@@ -20,6 +20,7 @@
 #include <QMetaType>
 #include <QPointF>
 #include <QPushButton>
+#include <QSet>
 #include <QSizeF>
 #include <QSpinBox>
 #include <QUndoStack>
@@ -49,14 +50,20 @@ PropertySheet::PropertySheet(QUndoStack* undoStack, QWidget* parent)
 PropertySheet::~PropertySheet() = default;
 
 void PropertySheet::setTarget(qwhmi::widgets::ControlBase* target) {
-    if (target_ == target) return;
+    QList<qwhmi::widgets::ControlBase*> list;
+    if (target) list.append(target);
+    setTargets(list);
+}
+
+void PropertySheet::setTargets(const QList<qwhmi::widgets::ControlBase*>& targets) {
+    if (targets_ == targets) return;
 
     // ★ v1 简化:不支持 target → form 自动同步(Qt 6 的 QMetaMethod 信号 + lambda
-    //   重载匹配在 MSVC 上有兼容问题;取消 setTarget 不频繁,用户重选可接受)。
+    //   重载匹配在 MSVC 上有兼容问题;取消 setTargets 不频繁,用户重选可接受)。
     //   connections_ 字段保留,留给未来实现用。
 
-    target_ = target;
-    setEnabled(target_ != nullptr);
+    targets_ = targets;
+    setEnabled(!targets_.isEmpty());
 
     rebuildForm();
 }
@@ -69,29 +76,76 @@ void PropertySheet::rebuildForm() {
         delete item;
     }
     metaProps_.clear();
+    isCommonValue_.clear();
 
-    if (!target_) {
+    if (targets_.isEmpty()) {
         form_->addRow(new QLabel(tr("(未选中控件)")));
         return;
     }
 
-    const QMetaObject* meta = target_->metaObject();
-    for (int i = 0; i < meta->propertyCount(); ++i) {
-        QMetaProperty prop = meta->property(i);
-        if (!prop.isWritable()) continue;       // 跳过 displayText 这类只读
+    // ★ 多选:在表单顶部加提示
+    if (targets_.size() >= 2) {
+        auto* banner = new QLabel(tr("(已选 %1 个控件,共同属性可批量编辑;不同值字段显示为空)")
+                                      .arg(targets_.size()));
+        banner->setStyleSheet("color: #0078D7; font-weight: bold;");
+        form_->addRow(banner);
+    }
 
-        QWidget* editor = createEditorForProperty(prop);
-        if (!editor) continue;                  // 不支持的类型静默跳过
+    // ★ 收集所有 target 的可写 Q_PROPERTY 并集
+    //   (基类 + 派生类一起) → 单一列表(去重 + 跨类同名合并)
+    QHash<QString, QPair<QMetaProperty, QWidget*>> editorByName;  // name → (prop, 第一个创建的 editor)
+    QSet<QString> seen;
 
-        // ★ 初值:target_->property(prop.name())
-        const QVariant val = target_->property(prop.name());
-        setEditorValueFromProperty(editor, prop, val);
+    for (auto* t : targets_) {
+        const QMetaObject* meta = t->metaObject();
+        for (int i = 0; i < meta->propertyCount(); ++i) {
+            QMetaProperty prop = meta->property(i);
+            if (!prop.isWritable()) continue;
+            const QString name = QString::fromUtf8(prop.name());
+            if (seen.contains(name)) continue;
+            seen.insert(name);
 
-        // ★ 修改触发:applyEditorChange
-        connectEditorToProperty(editor, prop);
+            QWidget* editor = createEditorForProperty(prop);
+            if (!editor) continue;
 
-        form_->addRow(QString::fromUtf8(prop.name()) + ":", editor);
-        metaProps_.append(prop);
+            // ★ 共同值检查:读所有 target 的这个 prop 值
+            const QVariant firstVal = t->property(prop.name());
+            bool common = true;
+            for (auto* other : targets_) {
+                if (other == t) continue;
+                if (other->property(prop.name()) != firstVal) {
+                    common = false;
+                    break;
+                }
+            }
+            isCommonValue_[name] = common;
+
+            if (common) {
+                // 共同值:显示该值,可编辑
+                setEditorValueFromProperty(editor, prop, firstVal);
+            } else {
+                // ★ 异值:显示空 + 禁用(视觉上变灰,提示用户"值不同")
+                setEditorValueFromProperty(editor, prop, QVariant());   // 值置空
+                editor->setEnabled(false);
+            }
+
+            connectEditorToProperty(editor, prop);
+            editorByName[name] = qMakePair(prop, editor);
+        }
+    }
+
+    // ★ 按属性名稳定排序后加入表单(便于多选时视觉稳定)
+    QStringList sortedNames = editorByName.keys();
+    sortedNames.sort();
+    for (const QString& name : sortedNames) {
+        const auto pair = editorByName.value(name);
+        QWidget* editor = pair.second;
+        QString label = name;
+        if (!isCommonValue_.value(name)) {
+            label += "  (异值)";
+        }
+        form_->addRow(label + ":", editor);
+        metaProps_.append(pair.first);
     }
 }
 
@@ -315,14 +369,32 @@ QMetaProperty PropertySheet::findProp(const QString& propName) const {
 
 void PropertySheet::applyEditorChange(const QString& propName, const QVariant& newValue) {
     if (suppressApply_) return;
-    if (!target_ || !undoStack_) return;
+    if (targets_.isEmpty() || !undoStack_) return;
 
     const QByteArray nameUtf8 = propName.toUtf8();
-    const QVariant oldValue = target_->property(nameUtf8.constData());
-    if (oldValue == newValue) return;            // 没变,不进 undo
 
-    auto* cmd = new PropertyChangeCommand(target_, propName, oldValue, newValue);
-    undoStack_->push(cmd);
+    if (targets_.size() == 1) {
+        // ★ 单选:1 个 PropertyChangeCommand(走原有 Undo 链路)
+        auto* t = targets_.first();
+        const QVariant oldValue = t->property(nameUtf8.constData());
+        if (oldValue == newValue) return;
+        auto* cmd = new PropertyChangeCommand(t, propName, oldValue, newValue);
+        undoStack_->push(cmd);
+    } else {
+        // ★ 多选:为每个 target 各 push 一个 PropertyChangeCommand
+        //   (Qt UndoStack 按 push 顺序 redo/undo,200ms 内 PropertyChangeCommand
+        //   会自动 mergeWith 合并为 1 个命令,user 感觉是 1 步 Ctrl+Z 全部还原)
+        for (auto* t : targets_) {
+            const QVariant oldValue = t->property(nameUtf8.constData());
+            if (oldValue == newValue) continue;
+            auto* cmd = new PropertyChangeCommand(t, propName, oldValue, newValue);
+            undoStack_->push(cmd);
+        }
+        // ★ 共同属性标记更新:这次所有 target 都是新值了
+        isCommonValue_[propName] = true;
+        // ★ 取消"异值"标签(更新所有行的 label)
+        syncFormFromTarget();
+    }
 }
 
 void PropertySheet::onTargetPropertyChanged() {
@@ -331,16 +403,34 @@ void PropertySheet::onTargetPropertyChanged() {
 }
 
 void PropertySheet::syncFormFromTarget() {
-    if (!target_) return;
+    if (targets_.isEmpty()) return;
     suppressApply_ = true;
+    // ★ 多选时:对每个 prop 重新检查共同值,更新 editor 状态
     for (const QMetaProperty& prop : metaProps_) {
         const QString name = QString::fromUtf8(prop.name());
+        // ★ 重新计算共同值(用户可能刚 push 了 PropertyChangeCommand 让所有 target 值变相同)
+        const QVariant firstVal = targets_.first()->property(name.toUtf8().constData());
+        bool common = true;
+        for (auto* t : targets_) {
+            if (t->property(name.toUtf8().constData()) != firstVal) {
+                common = false;
+                break;
+            }
+        }
+        isCommonValue_[name] = common;
+
         for (int i = 0; i < form_->count(); ++i) {
             QLayoutItem* item = form_->itemAt(i);
             if (!item) continue;
             QWidget* field = item->widget();
             if (field && field->objectName() == name) {
-                setEditorValueFromProperty(field, prop, target_->property(prop.name()));
+                if (common) {
+                    setEditorValueFromProperty(field, prop, firstVal);
+                    field->setEnabled(true);
+                } else {
+                    setEditorValueFromProperty(field, prop, QVariant());
+                    field->setEnabled(false);
+                }
                 break;
             }
         }

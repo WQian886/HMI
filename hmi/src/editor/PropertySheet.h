@@ -35,10 +35,17 @@ public:
     explicit PropertySheet(QUndoStack* undoStack, QWidget* parent = nullptr);
     ~PropertySheet() override;
 
-    // ★ 选中控件时调,反射生成表单
+    // ★ 单选:选中单个控件时调(向后兼容,内部转 setTargets({target}))
     void setTarget(qwhmi::widgets::ControlBase* target);
 
-    qwhmi::widgets::ControlBase* target() const { return target_; }
+    // ★ E.4d-续-2:多选 — 设 0 个 = 空,1 个 = 单选(同 setTarget),>=2 = 多选共同属性
+    void setTargets(const QList<qwhmi::widgets::ControlBase*>& targets);
+
+    // ★ 单选时返回唯一 target,多选/空时返回 nullptr
+    qwhmi::widgets::ControlBase* target() const {
+        return targets_.size() == 1 ? targets_.first() : nullptr;
+    }
+    int targetsCount() const { return targets_.size(); }
 
 private slots:
     // ★ v1 暂不实现 target → form 自动同步(Qt 6 QMetaMethod 重载匹配问题)
@@ -58,7 +65,7 @@ private:
     QMetaProperty findProp(const QString& propName) const;
 
     QFormLayout* form_ = nullptr;
-    qwhmi::widgets::ControlBase* target_ = nullptr;
+    QList<qwhmi::widgets::ControlBase*> targets_;   // ★ E.4d-续-2:取代 target_,支持 0/1/N 个
     QUndoStack*  undoStack_ = nullptr;
 
     // ★ 抑制表单 → target 回写(target → form 单向同步时设 true,避免 undo 回灌)
@@ -66,6 +73,9 @@ private:
 
     // ★ 反射生成时记下的 metaProperty,供 onTargetPropertyChanged 用 name → index
     QList<QMetaProperty> metaProps_;
+
+    // ★ E.4d-续-2:多选时记录每个 property 是否所有 target 值都相同
+    QHash<QString, bool> isCommonValue_;
 
     // ★ 保存所有 connect() 返回的 QMetaObject::Connection 句柄,
     //   setTarget 切换时统一 disconnect
