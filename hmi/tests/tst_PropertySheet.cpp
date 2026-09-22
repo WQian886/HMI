@@ -2,14 +2,19 @@
 // tst_PropertySheet
 //   E.2 属性面板 PropertySheet + PropertyChangeCommand(QUndoCommand) +
 //   ControlBase.propertiesToJson() 反射接口 8 用例
+//   E.4c(2026-09-22): +3 用例覆盖 QSizeF/QPointF SizeEditor/PositionEditor
 // ============================================================================
 
 #include <QtTest>
 #include <QApplication>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QPointF>
 #include <QPushButton>
+#include <QSizeF>
+#include <QSpinBox>
 #include <QUndoStack>
 
 #include "widgets/LabelControl.h"
@@ -22,6 +27,8 @@
 
 #include "editor/PropertySheet.h"
 #include "editor/PropertyChangeCommand.h"
+#include "editor/SizeEditor.h"
+#include "editor/PositionEditor.h"
 
 using namespace qwhmi::widgets;
 using namespace qwhmi::editor;
@@ -44,6 +51,11 @@ private slots:
     void undoRestoresOldValue();
     void redoAppliesNewValue();
     void propertiesToJson_roundTripsThroughFromJson();
+
+    // ★ E.4c(2026-09-22): QSizeF/QPointF 复合编辑器
+    void sizeEditor_appearsInForm();
+    void sizeEditor_valueChange_updatesTargetAndUndo();
+    void positionEditor_appearsInForm();
 };
 
 // ===== 1. reflect_findsAllWritableProperties =====
@@ -198,6 +210,78 @@ void TestPropertySheet::propertiesToJson_roundTripsThroughFromJson() {
     QJsonObject fullObj = num.toJson();
     QVERIFY(fullObj.contains("type"));   // 基类 toJson 加的
     QVERIFY(fullObj.contains("variableName"));
+}
+
+// ===== 9. sizeEditor_appearsInForm =====
+//   ★ E.4c 验证:选中任意 ControlBase,PropertySheet 的表单里应该有 1 个 SizeEditor
+//     (对应 size QSizeF 属性)+ 1 个 PositionEditor(对应 position QPointF)
+void TestPropertySheet::sizeEditor_appearsInForm() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+    LabelControl lbl;
+    lbl.setSize(QSizeF(150, 50));
+    lbl.setPosition(QPointF(20, 30));
+    sheet.setTarget(&lbl);
+
+    auto* sizeE = sheet.findChild<SizeEditor*>();
+    auto* posE  = sheet.findChild<PositionEditor*>();
+    QVERIFY(sizeE != nullptr);
+    QVERIFY(posE  != nullptr);
+
+    // ★ 验证初值正确(从 target 反向灌入)
+    QCOMPARE(sizeE->value(), QSizeF(150, 50));
+    QCOMPARE(posE->value(),  QPointF(20, 30));
+}
+
+// ===== 10. sizeEditor_valueChange_updatesTargetAndUndo =====
+//   ★ E.4c 验证:用户改 SizeEditor 的 width → target.size 跟着变 + 进 undo 栈
+void TestPropertySheet::sizeEditor_valueChange_updatesTargetAndUndo() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+    LabelControl lbl;
+    lbl.setSize(QSizeF(100, 40));
+    sheet.setTarget(&lbl);
+
+    auto* sizeE = sheet.findChild<SizeEditor*>();
+    QVERIFY(sizeE != nullptr);
+
+    // ★ 修改 width 字段(QDoubleSpinBox 是 sizeE 子控件)
+    const QList<QDoubleSpinBox*> spins = sizeE->findChildren<QDoubleSpinBox*>();
+    QVERIFY(spins.size() == 2);   // W + H
+    spins[0]->setValue(200.0);    // 改 width
+
+    // ★ target.size 必须跟变
+    QCOMPARE(lbl.size(), QSizeF(200, 40));
+
+    // ★ undo 栈必须多 1 个命令
+    QCOMPARE(stack.count(), 1);
+
+    // ★ undo 复原
+    stack.undo();
+    QCOMPARE(lbl.size(), QSizeF(100, 40));
+}
+
+// ===== 11. positionEditor_appearsInForm =====
+//   ★ E.4c 验证:PositionEditor 出现在表单中 + 初值正确
+void TestPropertySheet::positionEditor_appearsInForm() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+    BarControl bar;
+    bar.setPosition(QPointF(100, 200));
+    sheet.setTarget(&bar);
+
+    auto* posE = sheet.findChild<PositionEditor*>();
+    QVERIFY(posE != nullptr);
+    QCOMPARE(posE->value(), QPointF(100, 200));
+
+    // ★ 修改 y 字段
+    const QList<QDoubleSpinBox*> spins = posE->findChildren<QDoubleSpinBox*>();
+    QVERIFY(spins.size() == 2);
+    spins[1]->setValue(300.0);
+    QCOMPARE(bar.position(), QPointF(100, 300));
+    QCOMPARE(stack.count(), 1);
+    stack.undo();
+    QCOMPARE(bar.position(), QPointF(100, 200));
 }
 
 QTEST_MAIN(TestPropertySheet)

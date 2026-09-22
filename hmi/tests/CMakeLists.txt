@@ -99,6 +99,9 @@ set(HMI_CORE_SOURCES
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand
     ${HMI_SRC_DIR}/src/editor/PropertySheet.cpp
     ${HMI_SRC_DIR}/src/editor/PropertyChangeCommand.cpp
+    # ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器
+    ${HMI_SRC_DIR}/src/editor/SizeEditor.cpp
+    ${HMI_SRC_DIR}/src/editor/PositionEditor.cpp
     # ★ E.2 周 11:EditorMainWindow
     ${HMI_SRC_DIR}/src/editor/EditorMainWindow.cpp
     # ★ E.4a:PaletteWidget

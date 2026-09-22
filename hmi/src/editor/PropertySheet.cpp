@@ -4,6 +4,8 @@
 
 #include "editor/PropertySheet.h"
 #include "editor/PropertyChangeCommand.h"
+#include "editor/SizeEditor.h"
+#include "editor/PositionEditor.h"
 #include "widgets/base/ControlBase.h"
 
 #include <QCheckBox>
@@ -16,7 +18,9 @@
 #include <QLineEdit>
 #include <QMetaEnum>
 #include <QMetaType>
+#include <QPointF>
 #include <QPushButton>
+#include <QSizeF>
 #include <QSpinBox>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -163,8 +167,22 @@ QWidget* PropertySheet::createEditorForProperty(const QMetaProperty& prop) {
         return edit;
     }
 
-    // ★ QPointF/QSizeF:暂不支持(E.4b 8 handle 拖拽阶段一并做)
-    //   这里静默跳过,后续 TODO
+    // ★ E.4c:QSizeF 复合编辑器(两个 QDoubleSpinBox 拼 W/H)
+    if (type == QMetaType::QSizeF) {
+        auto* e = new SizeEditor;
+        e->setObjectName(QString::fromUtf8(prop.name()));
+        e->setProperty("_kind", "size");
+        return e;
+    }
+
+    // ★ E.4c:QPointF 复合编辑器(两个 QDoubleSpinBox 拼 X/Y)
+    if (type == QMetaType::QPointF) {
+        auto* e = new PositionEditor;
+        e->setObjectName(QString::fromUtf8(prop.name()));
+        e->setProperty("_kind", "position");
+        return e;
+    }
+
     return nullptr;
 }
 
@@ -203,6 +221,10 @@ void PropertySheet::setEditorValueFromProperty(QWidget* editor,
                 break;
             }
         }
+    } else if (auto* sizeE = qobject_cast<SizeEditor*>(editor)) {
+        sizeE->setValue(value.toSizeF());
+    } else if (auto* posE = qobject_cast<PositionEditor*>(editor)) {
+        posE->setValue(value.toPointF());
     }
 }
 
@@ -227,6 +249,10 @@ QVariant PropertySheet::editorValueAsVariant(QWidget* editor, const QMetaPropert
         return QColor(btn->text());
     } else if (auto* combo = qobject_cast<QComboBox*>(editor)) {
         return combo->currentData().toInt();
+    } else if (auto* sizeE = qobject_cast<SizeEditor*>(editor)) {
+        return QVariant::fromValue(sizeE->value());
+    } else if (auto* posE = qobject_cast<PositionEditor*>(editor)) {
+        return QVariant::fromValue(posE->value());
     }
     return {};
 }
@@ -265,6 +291,17 @@ void PropertySheet::connectEditorToProperty(QWidget* editor,
         connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this,
                 [this, propName, combo](int) {
             applyEditorChange(propName, combo->currentData().toInt());
+        });
+    } else if (auto* sizeE = qobject_cast<SizeEditor*>(editor)) {
+        // ★ SizeEditor 自定义 valueChanged(QSizeF) → 转 QVariant 给 applyEditorChange
+        connect(sizeE, &SizeEditor::valueChanged, this,
+                [this, propName, sizeE](const QSizeF& s) {
+            applyEditorChange(propName, QVariant::fromValue(s));
+        });
+    } else if (auto* posE = qobject_cast<PositionEditor*>(editor)) {
+        connect(posE, &PositionEditor::valueChanged, this,
+                [this, propName, posE](const QPointF& p) {
+            applyEditorChange(propName, QVariant::fromValue(p));
         });
     }
 }
