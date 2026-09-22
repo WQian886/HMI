@@ -22,6 +22,7 @@ class QGraphicsScene;
 class QGraphicsView;
 class QDockWidget;
 class QUndoStack;
+class QToolBar;
 class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
@@ -51,6 +52,10 @@ public:
     void setTarget(qwhmi::widgets::ControlBase* target);
     qwhmi::widgets::ControlBase* target() const { return target_; }
 
+    // ★ E.4d 多选:返回当前选中的所有控件(0 个 = 空,1 个 = target_,>=2 = 多选)
+    QList<qwhmi::widgets::ControlBase*> targets() const { return targets_; }
+    bool hasMultipleSelection() const { return targets_.size() >= 2; }
+
     // ★ Undo stack 访问器
     QUndoStack* undoStack() const { return undoStack_; }
 
@@ -71,18 +76,28 @@ public:
     // ★ E.4a:从 PaletteWidget 拖入时调(测试也可直接调,绕过 QDropEvent 复杂度)
     void handlePaletteDrop(const QString& typeName, const QPointF& scenePos);
 
+public slots:
+    // ★ E.4d 对齐动作(6 个,public 让测试也能直接调)
+    void onAlignLeft();
+    void onAlignRight();
+    void onAlignTop();
+    void onAlignBottom();
+    void onAlignCenterH();
+    void onAlignCenterV();
+
 private slots:
     void onSceneSelectionChanged();
 
-protected:
-    // ★ E.4a:画布 drop event(从 PaletteWidget 拖入)
+    // ★ E.4d 多选移动:scene 鼠标事件钩子
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void setupCentralWidget();
     void setupDockWidgets();
     void setupMenuBar();
+    void setupAlignToolbar();      // ★ E.4d
     void clearControls();   // ★ E.3:删所有 controls_(load 时清理旧画布)
+    void updateAlignToolbarState();   // ★ E.4d:根据多选状态启禁用
 
     QGraphicsView*  view_          = nullptr;
     QGraphicsScene* scene_         = nullptr;
@@ -92,6 +107,7 @@ private:
     PaletteWidget*  palette_       = nullptr;     // ★ E.4a
     QUndoStack*     undoStack_     = nullptr;
     Project*        project_       = nullptr;     // ★ E.3
+    QToolBar*       alignToolbar_  = nullptr;     // ★ E.4d:对齐工具栏
     QString         currentPath_;                // ★ E.3:当前打开的 .hmi.json 路径
 
     // ★ E.4b:8 handle 管理(target → 8 ResizeHandleItem 实例)
@@ -100,8 +116,10 @@ private:
     void refreshHandlesFor(qwhmi::widgets::ControlBase* target);
 
     QList<qwhmi::widgets::ControlBase*> controls_;
-    qwhmi::widgets::ControlBase* target_ = nullptr;
-    bool editorMode_ = true;   // EditorMainWindow 默认编辑模式
+    qwhmi::widgets::ControlBase* target_ = nullptr;       // 单选 target(多选时为 nullptr)
+    QList<qwhmi::widgets::ControlBase*> targets_;         // ★ E.4d 多选列表(包含单选)
+    QPointF          multiMoveAnchor_ = QPointF();         // ★ E.4d:多选移动的上一帧 scene 坐标
+    bool             editorMode_ = true;   // EditorMainWindow 默认编辑模式
 };
 
 } // namespace qwhmi::editor
