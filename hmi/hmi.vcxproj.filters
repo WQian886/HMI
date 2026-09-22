@@ -566,5 +566,15 @@
     <ClCompile Include="src\editor\ResizeHandleItem.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.4d 续:选中态视觉统一(蓝色虚线边框) -->
+    <QtMoc Include="src\editor\SelectionFrameItem.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\editor\SelectionFrameItem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\SelectionFrameItem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

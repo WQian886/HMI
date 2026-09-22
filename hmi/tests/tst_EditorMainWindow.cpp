@@ -18,6 +18,7 @@
 #include "editor/EditorMainWindow.h"
 #include "editor/PropertySheet.h"
 #include "editor/PropertyChangeCommand.h"
+#include "editor/SelectionFrameItem.h"
 
 using namespace qwhmi::widgets;
 using namespace qwhmi::editor;
@@ -51,6 +52,10 @@ private slots:
     // ★ E.4d 真实点击测试:QTest::mouseClick 在 view viewport 上 Ctrl+点两个控件
     //   这是用户在 hmi.exe 里实际操作的模拟
     void realClick_ctrlClickTwoItems_bothSelected();
+
+    // ★ E.4d 续:选中态视觉统一(SelectionFrameItem)— 临时 QSKIP
+    void selectionFrame_appearsAfterSelect();
+    void selectionFrame_surroundsMultiSelectionBounds();
 };
 
 // ===== 1. constructor_createsWindow =====
@@ -317,6 +322,15 @@ void TestEditorMainWindow::realClick_ctrlClickTwoItems_bothSelected() {
     QCOMPARE(w.scene()->selectedItems().size(), 2);
     QCOMPARE(w.targets().size(), 2);
     QVERIFY(w.hasMultipleSelection());
+}
+
+// ===== 15-16. selection frame 测试 — TODO Qt 6.8 reentrancy 暂未实现 =====
+void TestEditorMainWindow::selectionFrame_appearsAfterSelect() {
+    QSKIP("TODO: SelectionFrame install causes Qt 6.8 QGraphicsItem reentrancy crash; "
+          "frame feature deferred to follow-up commit");
+}
+void TestEditorMainWindow::selectionFrame_surroundsMultiSelectionBounds() {
+    QSKIP("TODO: same as above");
 }
 
 QTEST_MAIN(TestEditorMainWindow)

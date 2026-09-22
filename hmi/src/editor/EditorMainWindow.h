@@ -17,6 +17,7 @@
 
 #include <QMainWindow>
 #include <QList>
+#include "editor/SelectionFrameItem.h"   // ★ E.4d 续:public 访问器要返回完整类型
 
 class QGraphicsScene;
 class QGraphicsView;
@@ -55,6 +56,9 @@ public:
     // ★ E.4d 多选:返回当前选中的所有控件(0 个 = 空,1 个 = target_,>=2 = 多选)
     QList<qwhmi::widgets::ControlBase*> targets() const { return targets_; }
     bool hasMultipleSelection() const { return targets_.size() >= 2; }
+
+    // ★ E.4d 续:选中边框测试访问器
+    SelectionFrameItem* selectionFrame() const { return selectionFrame_; }
 
     // ★ Undo stack 访问器
     QUndoStack* undoStack() const { return undoStack_; }
@@ -114,6 +118,13 @@ private:
     void installHandlesFor(qwhmi::widgets::ControlBase* target);
     void removeHandlesFor(qwhmi::widgets::ControlBase* target);
     void refreshHandlesFor(qwhmi::widgets::ControlBase* target);
+
+    // ★ E.4d 续:选中态视觉统一(蓝色虚线边框)
+    void installSelectionFrame();   // 按当前 targets_ 安装
+    void removeSelectionFrame();
+    void updateSelectionFrame();    // 选中变化或 target 缩放/移动后重摆
+
+    SelectionFrameItem* selectionFrame_ = nullptr;   // ★ 当前选中边框(单选/多选合一)
 
     QList<qwhmi::widgets::ControlBase*> controls_;
     qwhmi::widgets::ControlBase* target_ = nullptr;       // 单选 target(多选时为 nullptr)

@@ -328,6 +328,10 @@
     <QtMoc Include="src\editor\ResizeHandleItem.h" />
     <ClInclude Include="src\editor\ResizeHandleItem.h" />
     <ClCompile Include="src\editor\ResizeHandleItem.cpp" />
+    <!-- ★ E.4d 续:选中态视觉统一(蓝色虚线边框) -->
+    <QtMoc Include="src\editor\SelectionFrameItem.h" />
+    <ClInclude Include="src\editor\SelectionFrameItem.h" />
+    <ClCompile Include="src\editor\SelectionFrameItem.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

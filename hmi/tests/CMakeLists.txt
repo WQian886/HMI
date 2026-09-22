@@ -108,6 +108,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/editor/PaletteWidget.cpp
     # ★ E.4b:ResizeHandleItem
     ${HMI_SRC_DIR}/src/editor/ResizeHandleItem.cpp
+    # ★ E.4d 续:选中态视觉统一
+    ${HMI_SRC_DIR}/src/editor/SelectionFrameItem.cpp
 )
 
 function(add_hmi_test test_name)

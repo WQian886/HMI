@@ -6,6 +6,7 @@
 #include "editor/PaletteWidget.h"
 #include "editor/PropertySheet.h"
 #include "editor/ResizeHandleItem.h"
+#include "editor/SelectionFrameItem.h"
 #include "editor/SizeEditor.h"
 #include "editor/PositionEditor.h"
 #include "widgets/base/ControlBase.h"
@@ -32,6 +33,7 @@
 
 #include <QAction>
 #include <QDragEnterEvent>
+#include <QTimer>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -94,13 +96,17 @@ EditorMainWindow::EditorMainWindow(QWidget* parent)
 }
 
 EditorMainWindow::~EditorMainWindow() {
-    // ★ E.4d 修复:scene 销毁过程中 selectionChanged 可能被触发,
-    //   回调访问已析构的 EditorMainWindow 会导致 qFatal
-    //   ("Called object is not of the correct type(class destructor may have already run)")。
-    //   先清空 selection 再让 QObject 自动析构 scene。
+    // ★ E.4d/E.4d-续 安全析构顺序:
+    //   1) 删除 SelectionFrameItem(它可能引用 scene_/controls_)
+    //   2) 断开所有到 this 的信号连接(防止半析构回调)
+    //   3) 才让 scene 清空 selection(不会触发我们的回调)
+    if (selectionFrame_) {
+        delete selectionFrame_;
+        selectionFrame_ = nullptr;
+    }
     if (scene_) {
+        scene_->disconnect(this);
         scene_->clearSelection();
-        scene_->disconnect(this);   // 断开所有到 this 的信号连接
     }
     if (view_) view_->disconnect(this);
 }
@@ -218,9 +224,11 @@ void EditorMainWindow::setTarget(qwhmi::widgets::ControlBase* target) {
     // ★ E.4b:新 target 挂 handle
     if (target_) {
         installHandlesFor(target_);
-        // ★ 监听 target 移动/缩放 → 重排 handle
+        // ★ 监听 target 缩放 → 重排 handle
         connect(target_, &qwhmi::widgets::ControlBase::sizeChanged,
-                this, [this, target]() { refreshHandlesFor(target); });
+                this, [this, t = target_]() {
+                    refreshHandlesFor(t);
+                });
     }
 }
 
@@ -256,6 +264,23 @@ void EditorMainWindow::onSceneSelectionChanged() {
 
     // ★ 装新 target 的 handle(单选 8 个,多选暂不装 — 后续 commit 加组 handle)
     if (target_) installHandlesFor(target_);
+
+    // ★ E.4d 续 TODO:SelectionFrameItem(Qt 6.8 reentrancy 暂未解决)
+    //   Qt 6.8 在 selectionChanged handler 内做 frame install/remove 会触发
+    //   QGraphicsItem reentrancy 崩溃。这个 commit 暂时关闭 frame 视觉,
+    //   用户靠 PropertySheet 显示选中控件属性来确认选中状态。
+    // if (targets_.size() == 1) installSelectionFrame();
+    // else if (selectionFrame_) selectionFrame_->setVisible(false);
+
+    // ★ E.4d 续修复:只有单选(target_ 非空)才 connect 缩放/位置信号,
+    //   多选时不能 connect target_(nullptr 会触发 qFatal — Qt 6 严格模式)。
+    //   多选的位置/大小同步由 selectionChanged 触发 + 后续 align 操作时一次性刷新。
+    if (target_) {
+        connect(target_, &qwhmi::widgets::ControlBase::sizeChanged,
+                this, [this, t = target_]() {
+                    refreshHandlesFor(t);
+                });
+    }
 
     updateAlignToolbarState();   // ★ E.4d:多选状态变化时更新工具栏按钮
 }
@@ -339,6 +364,19 @@ void EditorMainWindow::onAlignCenterV() {
         if (t == targets_.first()) continue;
         t->setPosition(QPointF(t->position().x(), centerY - t->size().height() / 2.0));
     }
+}
+
+// ===== E.4d 续:选中态视觉统一(SelectionFrameItem) =====
+//   单选:挂在单个 target 的本地坐标 (0, 0) - (size.w, size.h) 处
+//   多选:挂到 scene,rect = 所有 targets 的 sceneBoundingRect 合并
+void EditorMainWindow::installSelectionFrame() {
+    // TODO Qt 6.8 reentrancy:暂未实现
+}
+void EditorMainWindow::removeSelectionFrame() {
+    // TODO Qt 6.8 reentrancy:暂未实现
+}
+void EditorMainWindow::updateSelectionFrame() {
+    // TODO Qt 6.8 reentrancy:暂未实现
 }
 
 // ===== E.4a:画布 drop event 处理 =====
