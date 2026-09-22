@@ -520,6 +520,25 @@
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器 -->
+    <QtMoc Include="src\editor\SizeEditor.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\editor\SizeEditor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\SizeEditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\editor\PositionEditor.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\editor\PositionEditor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\PositionEditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ E.2 周 11:EditorMainWindow -->
     <ClInclude Include="src\editor\EditorMainWindow.h">
       <Filter>Header Files</Filter>

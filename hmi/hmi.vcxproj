@@ -309,6 +309,13 @@
     <QtMoc Include="src\editor\PropertyChangeCommand.h" />
     <ClInclude Include="src\editor\PropertyChangeCommand.h" />
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp" />
+    <!-- ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器 -->
+    <QtMoc Include="src\editor\SizeEditor.h" />
+    <ClInclude Include="src\editor\SizeEditor.h" />
+    <ClCompile Include="src\editor\SizeEditor.cpp" />
+    <QtMoc Include="src\editor\PositionEditor.h" />
+    <ClInclude Include="src\editor\PositionEditor.h" />
+    <ClCompile Include="src\editor\PositionEditor.cpp" />
     <!-- ★ E.2 周 11:EditorMainWindow -->
     <QtMoc Include="src\editor\EditorMainWindow.h" />
     <ClInclude Include="src\editor\EditorMainWindow.h" />
