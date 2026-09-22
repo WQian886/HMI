@@ -30,7 +30,7 @@ class QDropEvent;
 class Project;            // ★ E.3:文件菜单保存/加载用
 
 namespace qwhmi::widgets { class ControlBase; }
-namespace qwhmi::editor  { class PropertySheet; class PaletteWidget; class ResizeHandleItem; }
+namespace qwhmi::editor  { class PropertySheet; class PaletteWidget; class ResizeHandleItem; class GroupHandleItem; }
 
 namespace qwhmi::editor {
 
@@ -59,6 +59,9 @@ public:
 
     // ★ E.4d 续:选中边框测试访问器
     SelectionFrameItem* selectionFrame() const { return selectionFrame_; }
+
+    // ★ E.4d 续-3:group handle 测试访问器
+    GroupHandleItem* groupHandle() const { return groupHandle_; }
 
     // ★ Undo stack 访问器
     QUndoStack* undoStack() const { return undoStack_; }
@@ -119,12 +122,17 @@ private:
     void removeHandlesFor(qwhmi::widgets::ControlBase* target);
     void refreshHandlesFor(qwhmi::widgets::ControlBase* target);
 
+    // ★ E.4d 续-3:多选时挂组 handle(8 个蓝色方块围组合并 boundingRect)
+    void installGroupHandles(const QList<qwhmi::widgets::ControlBase*>& targets);
+    void removeGroupHandles();
+
     // ★ E.4d 续:选中态视觉统一(蓝色虚线边框)
     void installSelectionFrame();   // 按当前 targets_ 安装
     void removeSelectionFrame();
     void updateSelectionFrame();    // 选中变化或 target 缩放/移动后重摆
 
     SelectionFrameItem* selectionFrame_ = nullptr;   // ★ 当前选中边框(单选/多选合一)
+    GroupHandleItem*   groupHandle_  = nullptr;   // ★ E.4d 续-3:多选组 handle 容器
 
     QList<qwhmi::widgets::ControlBase*> controls_;
     qwhmi::widgets::ControlBase* target_ = nullptr;       // 单选 target(多选时为 nullptr)

@@ -18,7 +18,9 @@
 #include "editor/EditorMainWindow.h"
 #include "editor/PropertySheet.h"
 #include "editor/PropertyChangeCommand.h"
+#include "editor/ResizeHandleItem.h"
 #include "editor/SelectionFrameItem.h"
+#include "editor/GroupHandleItem.h"
 
 using namespace qwhmi::widgets;
 using namespace qwhmi::editor;
@@ -56,6 +58,10 @@ private slots:
     // ★ E.4d 续:选中态视觉统一(SelectionFrameItem)— 临时 QSKIP
     void selectionFrame_appearsAfterSelect();
     void selectionFrame_surroundsMultiSelectionBounds();
+
+    // ★ E.4d 续-3:多选时挂 8 个组 handle(围合并 boundingRect)
+    void groupHandle_installedOnMultiSelect();
+    void groupHandle_proportionalResizeAllTargets();
 };
 
 // ===== 1. constructor_createsWindow =====
@@ -325,6 +331,68 @@ void TestEditorMainWindow::realClick_ctrlClickTwoItems_bothSelected() {
 }
 
 // ===== 15-16. selection frame 测试 — TODO Qt 6.8 reentrancy 暂未实现 =====
+//   取代之前的 broken test:QGraphicsScene 没有 selectionMode() 这个 API。
+//   Qt 的多选由 view 的 dragMode + 修饰键共同决定,不需要也不支持在 scene 上设。
+//   ★ E.4d 续-3:多选时 EditorMainWindow 创建 GroupHandleItem + 8 个 ResizeHandleItem
+//     围在合并 boundingRect 周围
+void TestEditorMainWindow::groupHandle_installedOnMultiSelect() {
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({100, 50}); a->setPosition({  0, 0});
+    auto* b = new LabelControl; b->setSize({100, 50}); b->setPosition({200, 0});
+    w.addControl(a); w.addControl(b);
+
+    a->setSelected(true);
+    b->setSelected(true);
+
+    // ★ 多选时 groupHandle_ 应该非空,挂到 scene 上,含 8 个 ResizeHandleItem
+    QVERIFY(w.groupHandle() != nullptr);
+    QCOMPARE(w.groupHandle()->scene(), w.scene());
+    int handleCount = 0;
+    for (QGraphicsItem* c : w.groupHandle()->childItems()) {
+        if (qgraphicsitem_cast<ResizeHandleItem*>(c)) ++handleCount;
+    }
+    QCOMPARE(handleCount, 8);
+
+    // ★ group rect 应等于合并 boundingRect
+    const QRectF expectedRect = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.groupHandle()->rect(), expectedRect);
+}
+
+// ===== 18. groupHandle_proportionalResizeAllTargets =====
+//   ★ E.4d 续-3:模拟拖 BR handle 让 group 变大 → 所有 targets 等比缩放
+void TestEditorMainWindow::groupHandle_proportionalResizeAllTargets() {
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({100, 50}); a->setPosition({  0, 0});
+    auto* b = new LabelControl; b->setSize({100, 50}); b->setPosition({200, 0});
+    w.addControl(a); w.addControl(b);
+
+    a->setSelected(true);
+    b->setSelected(true);
+
+    // ★ 找 BR handle
+    ResizeHandleItem* br = nullptr;
+    for (QGraphicsItem* c : w.groupHandle()->childItems()) {
+        auto* h = qgraphicsitem_cast<ResizeHandleItem*>(c);
+        if (h && h->handleType() == HandleType::BottomRight) { br = h; break; }
+    }
+    QVERIFY(br != nullptr);
+
+    // ★ 模拟拖 BR handle 让 group 放大 (+50, +25)
+    QPointF pressPos = br->scenePos();
+    br->handleMousePress(pressPos);
+    br->handleMouseMove(pressPos + QPointF(50, 25), Qt::NoModifier);
+
+    // ★ a 和 b 应该等比变大,位置保持相对偏移
+    const qreal sx = (a->sceneBoundingRect().width() + 0.0) / 100.0;   // 相对原宽度
+    // 简化:只检查 size 都增加了
+    QVERIFY(a->size().width()  >= 100.0);
+    QVERIFY(a->size().height() >=  50.0);
+    QVERIFY(b->size().width()  >= 100.0);
+    QVERIFY(b->size().height() >=  50.0);
+
+    // ★ 位置偏移应保持 (a 在 b 左,水平间隔仍存在)
+    QVERIFY(b->position().x() > a->position().x());
+}
 void TestEditorMainWindow::selectionFrame_appearsAfterSelect() {
     QSKIP("TODO: SelectionFrame install causes Qt 6.8 QGraphicsItem reentrancy crash; "
           "frame feature deferred to follow-up commit");

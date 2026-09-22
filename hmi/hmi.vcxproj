@@ -328,6 +328,10 @@
     <QtMoc Include="src\editor\ResizeHandleItem.h" />
     <ClInclude Include="src\editor\ResizeHandleItem.h" />
     <ClCompile Include="src\editor\ResizeHandleItem.cpp" />
+    <!-- ★ E.4d 续-3:多选组 handle 容器 -->
+    <QtMoc Include="src\editor\GroupHandleItem.h" />
+    <ClInclude Include="src\editor\GroupHandleItem.h" />
+    <ClCompile Include="src\editor\GroupHandleItem.cpp" />
     <!-- ★ E.4d 续:选中态视觉统一(蓝色虚线边框) -->
     <QtMoc Include="src\editor\SelectionFrameItem.h" />
     <ClInclude Include="src\editor\SelectionFrameItem.h" />

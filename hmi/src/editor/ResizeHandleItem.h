@@ -17,6 +17,8 @@
 
 namespace qwhmi::widgets { class ControlBase; }
 
+class QGraphicsItem;
+
 namespace qwhmi::editor {
 
 enum class HandleType {
@@ -31,11 +33,11 @@ public:
     static constexpr qreal MIN_SIZE     = 20.0;
 
     explicit ResizeHandleItem(HandleType type,
-                               qwhmi::widgets::ControlBase* target,
+                               QGraphicsItem* target,
                                QGraphicsItem* parent = nullptr);
 
     HandleType handleType() const { return type_; }
-    qwhmi::widgets::ControlBase* target() const { return target_; }
+    QGraphicsItem* target() const { return target_; }
 
     // ★ 给 EditorMainWindow 调 — 把 8 个 handle 摆到目标 boundingRect 的 8 个位置
     //   假设 8 个 handle 都是 target 的 child,按 HandleType 顺序对应 8 个角/边
@@ -68,7 +70,7 @@ private:
     void applyResize(const QPointF& delta, bool shift);
 
     HandleType type_;
-    qwhmi::widgets::ControlBase* target_ = nullptr;
+    QGraphicsItem* target_ = nullptr;
 
     // ★ mousePress 时的快照
     QPointF pressScenePos_;

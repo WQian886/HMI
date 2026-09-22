@@ -9,6 +9,7 @@
 #include "editor/SelectionFrameItem.h"
 #include "editor/SizeEditor.h"
 #include "editor/PositionEditor.h"
+#include "editor/GroupHandleItem.h"
 #include "widgets/base/ControlBase.h"
 // ★ E.3 修复:加载 JSON 时需要所有控件已注册,这里一次性实例化各控件
 //   (delete new 触发构造函数里的 registerControlType,填好注册表)
@@ -238,6 +239,8 @@ void EditorMainWindow::onSceneSelectionChanged() {
 
     // ★ 卸旧 target 的 handle(单选情况)
     if (target_) removeHandlesFor(target_);
+    // ★ 卸旧 group handle(多选情况)
+    removeGroupHandles();
 
     // ★ 收集所有 ControlBase 类型的选中项
     QList<qwhmi::widgets::ControlBase*> cbs;
@@ -262,8 +265,12 @@ void EditorMainWindow::onSceneSelectionChanged() {
     // ★ PropertySheet:单选/多选用 setTargets(空时显示"未选中控件")
     if (propertySheet_) propertySheet_->setTargets(targets_);
 
-    // ★ 装新 target 的 handle(单选 8 个,多选暂不装 — 后续 commit 加组 handle)
-    if (target_) installHandlesFor(target_);
+    // ★ 装新 target 的 handle(单选 8 个;多选时挂 8 个组 handle)
+    if (target_) {
+        installHandlesFor(target_);
+    } else if (targets_.size() >= 2) {
+        installGroupHandles(targets_);
+    }
 
     // ★ E.4d 续 TODO:SelectionFrameItem(Qt 6.8 reentrancy 暂未解决)
     //   Qt 6.8 在 selectionChanged handler 内做 frame install/remove 会触发
@@ -377,6 +384,41 @@ void EditorMainWindow::removeSelectionFrame() {
 }
 void EditorMainWindow::updateSelectionFrame() {
     // TODO Qt 6.8 reentrancy:暂未实现
+}
+
+// ===== E.4d 续-3:多选组 handle =====
+void EditorMainWindow::installGroupHandles(const QList<qwhmi::widgets::ControlBase*>& targets) {
+    if (targets.size() < 2) return;
+
+    if (!groupHandle_) {
+        // ★ 虚拟组容器:rect = 合并 bbox,8 个 handle 挂上去
+        //   QGraphicsRectItem 不能以 QGraphicsScene 为 parent,先 nullptr 再 addItem
+        groupHandle_ = new GroupHandleItem;
+        scene_->addItem(groupHandle_);
+    }
+    groupHandle_->setTargets(targets);
+    // ★ mousePress 时快照所有 target 的原 rect(group 内部存)
+    //   不在 handle 自己的 handleMousePress 里调,因为 group 不知道 mousePress 时机
+    //   解决:监听每个 handle 的 sizeChanged / positionChanged? 不,太啰嗦
+    //   更简单:直接在 group 里 listen scene 的 selectionChanged → 拍照
+    //   或者:在 EditorMainWindow 里 connect handles 的 handleMousePress
+    //   最简单:让 ResizeHandleItem 在 mousePress 时主动告诉 group 拍照
+    //
+    // 实际上 ResizeHandleItem::handleMousePress 在 EditMode 测试中显示
+    // 它的 size/pos 来自 target_->boundingRect().size()/pos().
+    // 我们需要在 userPress 时 group 拍照 — 通过 QTimer::singleShot(0)
+    // 或者直接调 group->captureOriginalRects()
+    GroupHandleItem::installHandlesFor(groupHandle_);
+    groupHandle_->captureOriginalRects();
+    GroupHandleItem::layoutHandlesFor(groupHandle_);
+}
+
+void EditorMainWindow::removeGroupHandles() {
+    if (groupHandle_) {
+        GroupHandleItem::removeHandlesFor(groupHandle_);
+        delete groupHandle_;
+        groupHandle_ = nullptr;
+    }
 }
 
 // ===== E.4a:画布 drop event 处理 =====

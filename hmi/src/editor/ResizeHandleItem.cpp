@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "editor/ResizeHandleItem.h"
+#include "editor/GroupHandleItem.h"
 #include "widgets/base/ControlBase.h"
 
 #include <QBrush>
@@ -15,7 +16,7 @@
 namespace qwhmi::editor {
 
 ResizeHandleItem::ResizeHandleItem(HandleType type,
-                                   qwhmi::widgets::ControlBase* target,
+                                   QGraphicsItem* target,
                                    QGraphicsItem* parent)
     : QGraphicsRectItem(parent), type_(type), target_(target) {
     // ★ hit area 保持 8x8(用户体验:容易点中);视觉画 4x4(方案 A,贴边)
@@ -131,8 +132,18 @@ void ResizeHandleItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* e) {
 void ResizeHandleItem::handleMousePress(QPointF scenePos) {
     if (!target_) return;
     pressScenePos_     = scenePos;
-    originalSize_      = target_->size();
+    // ★ target 可能是 ControlBase 或 QGraphicsRectItem(group):用 boundingRect 取 size
+    //   (QGraphicsItem 没 size() 方法,boundingRect 是两个基类都有的 virtual)
+    originalSize_      = target_->boundingRect().size();
     originalTargetPos_ = target_->pos();
+
+    // ★ E.4d 续-3:多选 group path — 拖 handle 开始时 group 快照所有真 targets
+    //   这样后续 applyResize 按原始快照算等比缩放
+    if (auto* gri = qgraphicsitem_cast<QGraphicsRectItem*>(target_)) {
+        if (auto* group = dynamic_cast<GroupHandleItem*>(gri)) {
+            group->captureOriginalRects();
+        }
+    }
 }
 
 void ResizeHandleItem::handleMouseMove(QPointF scenePos, Qt::KeyboardModifiers mods) {
@@ -207,9 +218,22 @@ void ResizeHandleItem::applyResize(const QPointF& delta, bool shift) {
     if (newSize.width()  < MIN_SIZE) newSize.setWidth(MIN_SIZE);
     if (newSize.height() < MIN_SIZE) newSize.setHeight(MIN_SIZE);
 
-    // ★ 应用到 target(会触发 sizeChanged 信号)
-    target_->setSize(newSize);
-    target_->setPos(newPos);
+    // ★ 应用:target 可能是 ControlBase(单选) 或 QGraphicsRectItem(GroupHandleItem 多选)
+    //   通过 dynamic_cast 分发 — QGraphicsItem* 到 ControlBase* 是合法的向下转型
+    if (auto* cb = dynamic_cast<qwhmi::widgets::ControlBase*>(target_)) {
+        // ★ 单选 path
+        cb->setPos(newPos);
+        cb->setSize(newSize);   // 触发 ControlBase::sizeChanged 信号
+    } else if (auto* gri = qgraphicsitem_cast<QGraphicsRectItem*>(target_)) {
+        // ★ 多选 group path:setRect 改 rect(itemGeometryChange 触发
+        //   GroupHandleItem::itemChange → 按比例缩放所有真 targets)
+        gri->setPos(newPos);
+        const QRectF r = gri->rect();
+        gri->setRect(QRectF(r.x(), r.y(), newSize.width(), newSize.height()));
+    } else {
+        // ★ 兜底:当作普通 QGraphicsItem,只 setPos
+        target_->setPos(newPos);
+    }
 }
 
 } // namespace qwhmi::editor

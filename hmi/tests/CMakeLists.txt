@@ -110,6 +110,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/editor/ResizeHandleItem.cpp
     # ★ E.4d 续:选中态视觉统一
     ${HMI_SRC_DIR}/src/editor/SelectionFrameItem.cpp
+    # ★ E.4d 续-3:多选组 handle 容器
+    ${HMI_SRC_DIR}/src/editor/GroupHandleItem.cpp
 )
 
 function(add_hmi_test test_name)
