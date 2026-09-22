@@ -6,6 +6,8 @@
 #include "editor/PaletteWidget.h"
 #include "editor/PropertySheet.h"
 #include "editor/ResizeHandleItem.h"
+#include "editor/SizeEditor.h"
+#include "editor/PositionEditor.h"
 #include "widgets/base/ControlBase.h"
 // ★ E.3 修复:加载 JSON 时需要所有控件已注册,这里一次性实例化各控件
 //   (delete new 触发构造函数里的 registerControlType,填好注册表)
@@ -110,7 +112,10 @@ void EditorMainWindow::setupCentralWidget() {
     view_->setRenderHint(QPainter::Antialiasing);
     view_->setBackgroundBrush(QColor(245, 245, 245));
     // ★ E.4d:启用 RubberBandDrag 模式,空白处拖出蓝框框选多个控件
-    //   Qt 原生 Ctrl+点选(加/减选中)+ 框选(空白处拖)就都生效了
+    //   Qt 在 RubberBandDrag 下:拖框 = 多选;Ctrl+点选 = 切换;Shift+点选 = 范围;
+    //   普通点选 = 覆盖(单选)。
+    //   注意:QGraphicsScene 没有 setSelectionMode,选择模式由 view 的 drag mode
+    //   + 修饰键共同决定。
     view_->setDragMode(QGraphicsView::RubberBandDrag);
     // ★ E.4a:画布接收拖拽(从 PaletteWidget 拖入新控件)
     //   QGraphicsView 没有 setDragDropMode — 直接设 viewport 接受 drop

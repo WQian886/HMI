@@ -6,6 +6,7 @@
 #include <QtTest>
 #include <QApplication>
 #include <QGraphicsScene>
+#include <QGraphicsView>
 #include <QLineEdit>
 #include <QSignalSpy>
 #include <QUndoStack>
@@ -46,6 +47,10 @@ private slots:
     void multiSelect_alignCenterH_AllCentersXMatch();
     void multiSelect_alignRight_AllRightsMatchFirst();
     void multiSelect_moveBy_translatesAllBySameDelta();
+
+    // ★ E.4d 真实点击测试:QTest::mouseClick 在 view viewport 上 Ctrl+点两个控件
+    //   这是用户在 hmi.exe 里实际操作的模拟
+    void realClick_ctrlClickTwoItems_bothSelected();
 };
 
 // ===== 1. constructor_createsWindow =====
@@ -266,6 +271,51 @@ void TestEditorMainWindow::multiSelect_moveBy_translatesAllBySameDelta() {
 
     QCOMPARE(a->position(), QPointF(15, 30));
     QCOMPARE(b->position(), QPointF(105, 210));
+    QVERIFY(w.hasMultipleSelection());
+}
+
+// ===== 14. realClick_ctrlClickTwoItems_bothSelected =====
+//   ★ E.4d 真实点击测试(2026-09-22):
+//     用户报告 hmi.exe 里"同一时间只能选中一个"。
+//     模拟用户真实操作 — 用 QTest::mouseClick 在 view viewport 上点两个控件,
+//     第二次点带 Ctrl modifier。验证 multi-selection 真的生效。
+//
+//     这就是 bug 是否真实存在的决定性测试 — 如果 FAIL 说明确实有问题。
+void TestEditorMainWindow::realClick_ctrlClickTwoItems_bothSelected() {
+    EditorMainWindow w;
+    // ★ 拖入 2 个 Button(spaced 远一点以便点击不同位置)
+    w.handlePaletteDrop("Button", QPointF(100, 100));
+    w.handlePaletteDrop("Button", QPointF(400, 100));
+    QCOMPARE(w.controls().size(), 2);
+
+    auto* a = w.controls()[0];
+    auto* b = w.controls()[1];
+
+    // ★ 显示 view 才能用 viewport 做真实鼠标事件
+    w.show();
+    QTest::qWait(50);
+
+    QGraphicsView* view = w.view();
+    QVERIFY(view != nullptr);
+    QWidget* vp = view->viewport();
+
+    // ★ 点 Button A 的中心(viewport 坐标)
+    QPoint aViewPos = view->mapFromScene(a->scenePos() + QPointF(a->size().width()/2, a->size().height()/2));
+    QTest::mouseClick(vp, Qt::LeftButton, Qt::NoModifier, aViewPos);
+
+    qDebug() << "[real click] after click A, scene selectedItems =" << w.scene()->selectedItems().size();
+
+    // ★ Ctrl+点 Button B 的中心
+    QPoint bViewPos = view->mapFromScene(b->scenePos() + QPointF(b->size().width()/2, b->size().height()/2));
+    QTest::mouseClick(vp, Qt::LeftButton, Qt::ControlModifier, bViewPos);
+
+    qDebug() << "[real click] after Ctrl+click B, scene selectedItems =" << w.scene()->selectedItems().size();
+    qDebug() << "[real click] targets_.size =" << w.targets().size();
+    qDebug() << "[real click] hasMultipleSelection =" << w.hasMultipleSelection();
+
+    // ★ 关键断言:Ctrl+点两个 → 两个都被选中
+    QCOMPARE(w.scene()->selectedItems().size(), 2);
+    QCOMPARE(w.targets().size(), 2);
     QVERIFY(w.hasMultipleSelection());
 }
 
