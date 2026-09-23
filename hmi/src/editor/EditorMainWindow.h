@@ -91,6 +91,11 @@ public slots:
     void onAlignBottom();
     void onAlignCenterH();
     void onAlignCenterV();
+    // ★ E.4d 续-7:统一尺寸动作(3 个)— 让多选控件 width/height/整体一致
+    //   参考基准 = targets_.first()(与现有对齐动作保持一致)
+    void onSameWidth();
+    void onSameHeight();
+    void onSameSize();
 
 private slots:
     void onSceneSelectionChanged();

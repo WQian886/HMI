@@ -51,6 +51,10 @@ private slots:
     void multiSelect_alignCenterH_AllCentersXMatch();
     void multiSelect_alignRight_AllRightsMatchFirst();
     void multiSelect_moveBy_translatesAllBySameDelta();
+    // ★ E.4d 续-7:统一尺寸(3 个)
+    void multiSelect_sameWidth_AllWidthsMatchFirst();
+    void multiSelect_sameHeight_AllHeightsMatchFirst();
+    void multiSelect_sameSize_AllSizesMatchFirst();
 
     // ★ E.4d 真实点击测试:QTest::mouseClick 在 view viewport 上 Ctrl+点两个控件
     //   这是用户在 hmi.exe 里实际操作的模拟
@@ -291,6 +295,75 @@ void TestEditorMainWindow::multiSelect_moveBy_translatesAllBySameDelta() {
     QCOMPARE(a->position(), QPointF(15, 30));
     QCOMPARE(b->position(), QPointF(105, 210));
     QVERIFY(w.hasMultipleSelection());
+}
+
+// ===== 13a. multiSelect_sameWidth_AllWidthsMatchFirst =====
+//   ★ E.4d 续-7:多选时调 onSameWidth,所有选中 width 互相相等(以
+//   targets_.first() 为参考);与已有 alignLeft 测试同样的
+//   "Qt selectedItems 顺序 unspecified,断言 all-equal" 模式。
+void TestEditorMainWindow::multiSelect_sameWidth_AllWidthsMatchFirst() {
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize(QSizeF(200, 60));
+    auto* b = new LabelControl; b->setSize(QSizeF( 50, 80));
+    auto* c = new LabelControl; c->setSize(QSizeF(120, 90));
+    w.addControl(a); w.addControl(b); w.addControl(c);
+
+    a->setSelected(true);
+    b->setSelected(true);
+    c->setSelected(true);
+
+    w.onSameWidth();
+
+    // ★ 所有 width 互相相等(任一为参考都行)
+    const qreal aw = a->size().width();
+    QCOMPARE(b->size().width(), aw);
+    QCOMPARE(c->size().width(), aw);
+    // ★ 高度不变
+    QCOMPARE(b->size().height(),  80.0);
+    QCOMPARE(c->size().height(),  90.0);
+}
+
+// ===== 13b. multiSelect_sameHeight_AllHeightsMatchFirst =====
+void TestEditorMainWindow::multiSelect_sameHeight_AllHeightsMatchFirst() {
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize(QSizeF(200, 60));
+    auto* b = new LabelControl; b->setSize(QSizeF( 50, 80));
+    auto* c = new LabelControl; c->setSize(QSizeF(120, 90));
+    w.addControl(a); w.addControl(b); w.addControl(c);
+
+    a->setSelected(true);
+    b->setSelected(true);
+    c->setSelected(true);
+
+    w.onSameHeight();
+
+    // ★ 所有 height 互相相等
+    const qreal ah = a->size().height();
+    QCOMPARE(b->size().height(), ah);
+    QCOMPARE(c->size().height(), ah);
+    // ★ 宽度不变
+    QCOMPARE(b->size().width(),   50.0);
+    QCOMPARE(c->size().width(),  120.0);
+}
+
+// ===== 13c. multiSelect_sameSize_AllSizesMatchFirst =====
+void TestEditorMainWindow::multiSelect_sameSize_AllSizesMatchFirst() {
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize(QSizeF(200, 60));
+    auto* b = new LabelControl; b->setSize(QSizeF( 50, 80));
+    auto* c = new LabelControl; c->setSize(QSizeF(120, 90));
+    w.addControl(a); w.addControl(b); w.addControl(c);
+
+    a->setSelected(true);
+    b->setSelected(true);
+    c->setSelected(true);
+
+    w.onSameSize();
+
+    // ★ 所有 size 互相相等
+    const QSizeF as = a->size();
+    QCOMPARE(b->size(), as);
+    QCOMPARE(c->size(), as);
 }
 
 // ===== 14. realClick_ctrlClickTwoItems_bothSelected =====

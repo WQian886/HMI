@@ -309,6 +309,11 @@ void EditorMainWindow::setupAlignToolbar() {
     make(tr("底对齐"),   &EditorMainWindow::onAlignBottom);
     make(tr("水平居中"), &EditorMainWindow::onAlignCenterH);
     make(tr("垂直居中"), &EditorMainWindow::onAlignCenterV);
+    // ★ E.4d 续-7:统一尺寸 — 把 6 对齐和 3 尺寸用分隔条分开
+    alignToolbar_->addSeparator();
+    make(tr("等宽"), &EditorMainWindow::onSameWidth);
+    make(tr("等高"), &EditorMainWindow::onSameHeight);
+    make(tr("等大"), &EditorMainWindow::onSameSize);
 }
 
 void EditorMainWindow::updateAlignToolbarState() {
@@ -369,6 +374,41 @@ void EditorMainWindow::onAlignCenterV() {
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         t->setPosition(QPointF(t->position().x(), centerY - t->size().height() / 2.0));
+    }
+}
+
+// ===== E.4d 续-7:统一尺寸(3 个)=====
+//   参考基准 = targets_.first()(第 0 个选中控件),与现有 6 个对齐动作保持一致
+//   直调 setSize:内部 prepareGeometryChange + 更新 size_ + emit sizeChanged,
+//   后续 SelectionFrame / GroupHandle 监听 sizeChanged 自动跟随。
+//   注:与对齐一样目前无 QUndoCommand 包裹(E.4d 收尾阶段统一加)。
+void EditorMainWindow::onSameWidth() {
+    if (targets_.size() < 2) return;
+    const qreal refW = targets_.first()->size().width();
+    for (auto* t : targets_) {
+        if (t == targets_.first()) continue;
+        const QSizeF s = t->size();
+        if (qFuzzyCompare(s.width(), refW)) continue;   // 已经是 ref 宽度,跳过
+        t->setSize(QSizeF(refW, s.height()));
+    }
+}
+void EditorMainWindow::onSameHeight() {
+    if (targets_.size() < 2) return;
+    const qreal refH = targets_.first()->size().height();
+    for (auto* t : targets_) {
+        if (t == targets_.first()) continue;
+        const QSizeF s = t->size();
+        if (qFuzzyCompare(s.height(), refH)) continue;
+        t->setSize(QSizeF(s.width(), refH));
+    }
+}
+void EditorMainWindow::onSameSize() {
+    if (targets_.size() < 2) return;
+    const QSizeF refS = targets_.first()->size();
+    for (auto* t : targets_) {
+        if (t == targets_.first()) continue;
+        if (t->size() == refS) continue;   // QSizeF == 支持浮点容差(Qt 6 内置)
+        t->setSize(refS);
     }
 }
 
