@@ -56,9 +56,11 @@ private slots:
     //   这是用户在 hmi.exe 里实际操作的模拟
     void realClick_ctrlClickTwoItems_bothSelected();
 
-    // ★ E.4d 续:选中态视觉统一(SelectionFrameItem)— 临时 QSKIP
+    // ★ E.4d 续-5:选中态视觉统一(SelectionFrameItem 实装后)
     void selectionFrame_appearsAfterSelect();
     void selectionFrame_surroundsMultiSelectionBounds();
+    void multiMove_selectionFrameFollows();
+    void multiResize_selectionFrameFollows();
 
     // ★ E.4d 续-3:多选时挂 8 个组 handle(围合并 boundingRect)
     void groupHandle_installedOnMultiSelect();
@@ -399,11 +401,77 @@ void TestEditorMainWindow::groupHandle_proportionalResizeAllTargets() {
     QVERIFY(b->position().x() > a->position().x());
 }
 void TestEditorMainWindow::selectionFrame_appearsAfterSelect() {
-    QSKIP("TODO: SelectionFrame install causes Qt 6.8 QGraphicsItem reentrancy crash; "
-          "frame feature deferred to follow-up commit");
+    // ★ E.4d 续-5:frame 实装后,单选时 frame.rect 应等于 target.sceneBoundingRect
+    EditorMainWindow w;
+    auto* lbl = new LabelControl;
+    lbl->setSize({100, 50});
+    lbl->setPosition({150, 80});
+    w.addControl(lbl);
+    lbl->setSelected(true);
+
+    QVERIFY(w.selectionFrame() != nullptr);
+    QCOMPARE(w.selectionFrame()->rect(), QRectF(0, 0, 100, 50));
+    QCOMPARE(w.selectionFrame()->pos(), QPointF(150, 80));
+    QVERIFY(w.selectionFrame()->isVisible());
 }
+
 void TestEditorMainWindow::selectionFrame_surroundsMultiSelectionBounds() {
-    QSKIP("TODO: same as above");
+    // ★ E.4d 续-5:多选时 frame.rect 应等于 union
+    //   注:用 pos + rect().size() 比较,而非 sceneBoundingRect ——
+    //   SelectionFrameItem 用 cosmetic pen (width 2),sceneBoundingRect 会比
+    //   rect 多 2 像素(每边 1px)
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({100, 50}); a->setPosition({150, 80});
+    auto* b = new LabelControl; b->setSize({100, 50}); b->setPosition({350, 200});
+    w.addControl(a); w.addControl(b);
+    a->setSelected(true);
+    b->setSelected(true);
+
+    QVERIFY(w.selectionFrame() != nullptr);
+    const QRectF expectedUnion = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.selectionFrame()->rect().size(), expectedUnion.size());   // 大小一致(忽略 cosmetic)
+    QCOMPARE(w.selectionFrame()->pos(), expectedUnion.topLeft());        // 位置 = union.topLeft
+}
+
+void TestEditorMainWindow::multiMove_selectionFrameFollows() {
+    // ★ E.4d 续-5 bug 回归(用户报告图 10/11):
+    //   多选整体移动后,frame 应跟随 — pos + rect 都更新。
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({50, 50}); a->setPosition({100, 100});
+    auto* b = new LabelControl; b->setSize({50, 50}); b->setPosition({200, 100});
+    w.addControl(a); w.addControl(b);
+    a->setSelected(true);
+    b->setSelected(true);
+
+    QVERIFY(w.selectionFrame() != nullptr);
+    const QRectF expectedBefore = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.selectionFrame()->rect().size(), expectedBefore.size());
+    QCOMPARE(w.selectionFrame()->pos(), expectedBefore.topLeft());
+
+    // ★ 直接调 setPosition 触发 positionChanged → 我们的 updateSelectionFrame 槽
+    a->setPosition({150, 130});
+    b->setPosition({250, 130});   // 整体 +50,+30;delta 保留
+
+    const QRectF expectedAfter = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.selectionFrame()->rect().size(), expectedAfter.size());
+    QCOMPARE(w.selectionFrame()->pos(), expectedAfter.topLeft());   // ★ 跟随移动后 frame.pos 更新
+}
+
+void TestEditorMainWindow::multiResize_selectionFrameFollows() {
+    // ★ E.4d 续-5:多选时改其中一个的 size,frame 应跟随 union
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({50, 50}); a->setPosition({100, 100});
+    auto* b = new LabelControl; b->setSize({50, 50}); b->setPosition({200, 100});
+    w.addControl(a); w.addControl(b);
+    a->setSelected(true);
+    b->setSelected(true);
+
+    // ★ 把 a 改大,union 跟着变
+    a->setSize({80, 80});
+
+    const QRectF expected = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.selectionFrame()->rect().size(), expected.size());
+    QCOMPARE(w.selectionFrame()->pos(), expected.topLeft());
 }
 
 // ===== 19. multiMove_relativePositionPreserved =====

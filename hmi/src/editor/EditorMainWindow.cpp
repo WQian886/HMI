@@ -98,13 +98,11 @@ EditorMainWindow::EditorMainWindow(QWidget* parent)
 
 EditorMainWindow::~EditorMainWindow() {
     // ★ E.4d/E.4d-续 安全析构顺序:
-    //   1) 删除 SelectionFrameItem(它可能引用 scene_/controls_)
+    //   1) 删除 SelectionFrameItem(它可能引用 scene_/controls_)— removeSelectionFrame
+    //      同时断所有 frame 监听 ControlBase::positionChanged/sizeChanged 的连接
     //   2) 断开所有到 this 的信号连接(防止半析构回调)
     //   3) 才让 scene 清空 selection(不会触发我们的回调)
-    if (selectionFrame_) {
-        delete selectionFrame_;
-        selectionFrame_ = nullptr;
-    }
+    removeSelectionFrame();
     if (scene_) {
         scene_->disconnect(this);
         scene_->clearSelection();
@@ -272,12 +270,13 @@ void EditorMainWindow::onSceneSelectionChanged() {
         installGroupHandles(targets_);
     }
 
-    // ★ E.4d 续 TODO:SelectionFrameItem(Qt 6.8 reentrancy 暂未解决)
-    //   Qt 6.8 在 selectionChanged handler 内做 frame install/remove 会触发
-    //   QGraphicsItem reentrancy 崩溃。这个 commit 暂时关闭 frame 视觉,
-    //   用户靠 PropertySheet 显示选中控件属性来确认选中状态。
-    // if (targets_.size() == 1) installSelectionFrame();
-    // else if (selectionFrame_) selectionFrame_->setVisible(false);
+    // ★ E.4d 续-5:实装 SelectionFrame — 单选/多选都装,rect = union
+    //   installSelectionFrame 内部幂等(先 removeSelectionFrame 再装),直接调即可
+    if (targets_.isEmpty()) {
+        removeSelectionFrame();
+    } else {
+        installSelectionFrame();
+    }
 
     // ★ E.4d 续修复:只有单选(target_ 非空)才 connect 缩放/位置信号,
     //   多选时不能 connect target_(nullptr 会触发 qFatal — Qt 6 严格模式)。
@@ -374,16 +373,74 @@ void EditorMainWindow::onAlignCenterV() {
 }
 
 // ===== E.4d 续:选中态视觉统一(SelectionFrameItem) =====
-//   单选:挂在单个 target 的本地坐标 (0, 0) - (size.w, size.h) 处
-//   多选:挂到 scene,rect = 所有 targets 的 sceneBoundingRect 合并
+//   单选:frame.rect = target.sceneBoundingRect
+//   多选:frame.rect = 所有 targets.sceneBoundingRect 的 union
+//   ★ 关键:接每个 target 的 positionChanged + sizeChanged → updateSelectionFrame,
+//     这是为什么"多选整体移动后 frame 跟随"的实现点(E.4d 续-5 bug 修复)。
+//   采用 GroupHandleItem 同款 trick:pos = unionRect.topLeft,rect = 本地 (0,0,w,h),
+//     这样 frame 跟着 union 平移时,Qt scene 自动重绘;不需要我们手动平移 frame。
 void EditorMainWindow::installSelectionFrame() {
-    // TODO Qt 6.8 reentrancy:暂未实现
+    // ★ 先清旧 frame(同时断旧信号),防止 selection 切换后 frame 没刷新
+    removeSelectionFrame();
+    if (targets_.isEmpty()) return;
+
+    selectionFrame_ = new SelectionFrameItem;
+    scene_->addItem(selectionFrame_);
+
+    // ★ 接每个 target 的 positionChanged + sizeChanged,无论单选/多选都接
+    for (auto* t : targets_) {
+        if (!t) continue;
+        connect(t, &qwhmi::widgets::ControlBase::positionChanged,
+                this, &EditorMainWindow::updateSelectionFrame);
+        connect(t, &qwhmi::widgets::ControlBase::sizeChanged,
+                this, &EditorMainWindow::updateSelectionFrame);
+    }
+
+    updateSelectionFrame();   // 设初始 rect
 }
+
 void EditorMainWindow::removeSelectionFrame() {
-    // TODO Qt 6.8 reentrancy:暂未实现
+    if (!selectionFrame_) return;
+
+    // ★ 断所有旧信号(防止析构后 dangling lambda 回调)
+    for (auto* t : targets_) {
+        if (!t) continue;
+        disconnect(t, &qwhmi::widgets::ControlBase::positionChanged,
+                   this, &EditorMainWindow::updateSelectionFrame);
+        disconnect(t, &qwhmi::widgets::ControlBase::sizeChanged,
+                   this, &EditorMainWindow::updateSelectionFrame);
+    }
+
+    scene_->removeItem(selectionFrame_);
+    delete selectionFrame_;
+    selectionFrame_ = nullptr;
 }
+
 void EditorMainWindow::updateSelectionFrame() {
-    // TODO Qt 6.8 reentrancy:暂未实现
+    if (!selectionFrame_ || targets_.isEmpty()) {
+        if (selectionFrame_) selectionFrame_->setVisible(false);
+        return;
+    }
+
+    // ★ 算 union sceneBoundingRect
+    QRectF unionRect;
+    bool first = true;
+    for (auto* t : targets_) {
+        if (!t) continue;
+        const QRectF sb = t->sceneBoundingRect();
+        if (sb.isEmpty()) continue;
+        if (first) { unionRect = sb; first = false; }
+        else        unionRect = unionRect.united(sb);
+    }
+    if (unionRect.isEmpty()) {
+        selectionFrame_->setVisible(false);
+        return;
+    }
+
+    // ★ frame 是 scene-level item,pos+rect 同 GroupHandleItem 模式
+    selectionFrame_->setPos(unionRect.topLeft());
+    selectionFrame_->setRect(QRectF(0, 0, unionRect.width(), unionRect.height()));
+    selectionFrame_->setVisible(true);
 }
 
 // ===== E.4d 续-3:多选组 handle =====
