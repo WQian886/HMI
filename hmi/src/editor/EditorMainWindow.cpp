@@ -450,33 +450,12 @@ void EditorMainWindow::refreshHandlesFor(qwhmi::widgets::ControlBase* target) {
 }
 
 bool EditorMainWindow::eventFilter(QObject* watched, QEvent* event) {
-    // ★ E.4d:scene 事件 — 多选移动(mousePress 记录 anchor,mouseMove 把 delta 平移到所有其他 targets_)
+    // ★ E.4d 续-4:删掉自定义 multi-move anchor 平移 — Qt ItemIsMovable 已自动处理
+    //   所有 selected items 一起按增量移动,不需要我们手动 translate。每个 item 自带
+    //   positionChanged 信号,group handle 会自动跟随。
     if (watched == scene_) {
-        if (targets_.size() >= 2) {
-            auto* me = static_cast<QGraphicsSceneMouseEvent*>(event);
-            QGraphicsItem* grabber = scene_->mouseGrabberItem();
-            auto* grabberCb = dynamic_cast<qwhmi::widgets::ControlBase*>(grabber);
-            const bool grabberIsInMultiSel = grabberCb && targets_.contains(grabberCb);
-
-            if (event->type() == QEvent::GraphicsSceneMousePress) {
-                if (grabberIsInMultiSel) {
-                    multiMoveAnchor_ = me->scenePos();
-                }
-            } else if (event->type() == QEvent::GraphicsSceneMouseMove) {
-                if (grabberIsInMultiSel) {
-                    const QPointF delta = me->scenePos() - multiMoveAnchor_;
-                    multiMoveAnchor_ = me->scenePos();
-                    for (auto* t : targets_) {
-                        if (t != grabberCb) {
-                            t->moveBy(delta.x(), delta.y());
-                        }
-                    }
-                }
-            } else if (event->type() == QEvent::GraphicsSceneMouseRelease) {
-                multiMoveAnchor_ = QPointF();
-            }
-        }
-        return false;   // 不消费,让 scene 继续分发
+        Q_UNUSED(event);
+        return false;   // 不消费,Qt 自己处理 multi-move
     }
 
     if (watched != view_->viewport()) return QMainWindow::eventFilter(watched, event);

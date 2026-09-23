@@ -6,6 +6,7 @@
 #include <QtTest>
 #include <QApplication>
 #include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 #include <QGraphicsView>
 #include <QLineEdit>
 #include <QSignalSpy>
@@ -63,6 +64,9 @@ private slots:
     void groupHandle_installedOnMultiSelect();
     void groupHandle_proportionalResizeAllTargets();
     void groupHandle_handlesAtCorrectScenePosition();   // ★ bug 回归:之前位置错位
+
+    // ★ E.4d 续-3 bug:多选整体移动相对位置改变
+    void multiMove_relativePositionPreserved();
 };
 
 // ===== 1. constructor_createsWindow =====
@@ -400,6 +404,49 @@ void TestEditorMainWindow::selectionFrame_appearsAfterSelect() {
 }
 void TestEditorMainWindow::selectionFrame_surroundsMultiSelectionBounds() {
     QSKIP("TODO: same as above");
+}
+
+// ===== 19. multiMove_relativePositionPreserved =====
+//   ★ E.4d 续-3 bug 回归:多选整体移动后,所有选中的相对位置应保持不变
+//   注:QTest::mouseMove 在 offscreen 平台下不发 mouseMove 事件,所以直接构造
+//   QGraphicsSceneMouseEvent 用 sendEvent 触发 scene->eventFilter。
+void TestEditorMainWindow::multiMove_relativePositionPreserved() {
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({50, 50}); a->setPosition({100, 100});
+    auto* b = new LabelControl; b->setSize({50, 50}); b->setPosition({200, 100});  // 水平间隔 100
+    w.addControl(a); w.addControl(b);
+
+    // ★ 多选 2 个
+    a->setSelected(true);
+    b->setSelected(true);
+
+    const QPointF initialABDelta = b->position() - a->position();   // (100, 0)
+    const QPointF pressPos = a->scenePos() + QPointF(25, 25);   // scene (125, 125)
+    const QPointF movePos  = pressPos + QPointF(50, 30);         // scene (175, 155)
+
+    // ★ 直接给 scene 发 GraphicsSceneMouseEvent,绕过 QTest 在 offscreen 下的
+    //   mouseMove 事件丢失问题(QTest::mouseMove 在某些 platform 下不生成 move 事件)
+    QGraphicsSceneMouseEvent press(QEvent::GraphicsSceneMousePress);
+    press.setScenePos(pressPos);
+    press.setButton(Qt::LeftButton);
+    press.setButtons(Qt::LeftButton);
+    QApplication::sendEvent(w.scene(), &press);
+
+    QGraphicsSceneMouseEvent move(QEvent::GraphicsSceneMouseMove);
+    move.setScenePos(movePos);
+    move.setButtons(Qt::LeftButton);
+    QApplication::sendEvent(w.scene(), &move);
+
+    QGraphicsSceneMouseEvent release(QEvent::GraphicsSceneMouseRelease);
+    release.setScenePos(movePos);
+    release.setButton(Qt::LeftButton);
+    release.setButtons(Qt::NoButton);
+    QApplication::sendEvent(w.scene(), &release);
+
+    // ★ 验证:两个都移动了 + 相对位置保持
+    QCOMPARE(a->position(), QPointF(150, 130));    // 100+50, 100+30
+    QCOMPARE(b->position(), QPointF(250, 130));    // 200+50, 100+30
+    QCOMPARE(b->position() - a->position(), initialABDelta);   // ★ 相对位置保持 (100, 0)
 }
 
 // ===== 19. groupHandle_handlesAtCorrectScenePosition =====
