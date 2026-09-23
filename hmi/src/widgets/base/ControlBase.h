@@ -78,6 +78,13 @@ public:
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override = 0;
 
+    // ★ E.4d 续-6:override itemChange → 在 Qt 内部 setPos 触发的
+    //   ItemPositionHasChanged 上 emit positionChanged,这样 ItemIsMovable 拖动
+    //   也会触发我们的 positionChanged 信号(走 setPos 路径不经过 setPosition
+    //   wrapper,所以光在 setPosition 里 emit 不够)。
+    QVariant itemChange(QGraphicsItem::GraphicsItemChange change,
+                        const QVariant& value) override;
+
     // ===== E.3 JSON 存读(基类实现通用部分,派生类可重写)=====
     virtual QJsonObject toJson() const;
     virtual void        fromJson(const QJsonObject& obj);

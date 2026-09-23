@@ -110,6 +110,25 @@ void ControlBase::setValue(const QVariant& v) {
     emit valueChanged();
 }
 
+// ★ E.4d 续-6:itemChange → emit positionChanged on ItemPositionHasChanged
+//   关键:Qt 的 ItemIsMovable 拖动内部直接调 setPos,绕开我们的 setPosition() wrapper。
+//   setPos 不 emit 我们的 positionChanged,所以光在 setPosition 里 emit 不够。
+//   这里 hook ItemPositionHasChanged — Qt 在每次 setPos 完成后都会经过这个事件,
+//   包括 ItemIsMovable 拖动、animation、parent-driven 子节点移动。
+//   派生类如果重写 itemChange 必须调 ControlBase::itemChange 以保证这条信号链不断。
+QVariant ControlBase::itemChange(QGraphicsItem::GraphicsItemChange change,
+                                 const QVariant& value) {
+    if (change == QGraphicsItem::ItemPositionHasChanged) {
+        emit positionChanged();
+    } else if (change == QGraphicsItem::ItemTransformHasChanged ||
+               change == QGraphicsItem::ItemScaleChange) {
+        // ★ transform 变化也会影响 sceneBoundingRect,需要刷新依赖它的人
+        //   (SelectionFrameItem / EditorGroupHandle 的 layout)
+        //   注意:ItemTransformHasChanged 是通知事件,value 是新 transform
+    }
+    return QGraphicsObject::itemChange(change, value);
+}
+
 QString ControlBase::displayText() const {
     return value_.toString();
 }

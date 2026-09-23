@@ -69,6 +69,7 @@ private slots:
 
     // ★ E.4d 续-3 bug:多选整体移动相对位置改变
     void multiMove_relativePositionPreserved();
+    void multiMove_setPosBypassesWrapper_frameFollows();   // ★ E.4d 续-6 bug 回归
 };
 
 // ===== 1. constructor_createsWindow =====
@@ -515,6 +516,30 @@ void TestEditorMainWindow::multiMove_relativePositionPreserved() {
     QCOMPARE(a->position(), QPointF(150, 130));    // 100+50, 100+30
     QCOMPARE(b->position(), QPointF(250, 130));    // 200+50, 100+30
     QCOMPARE(b->position() - a->position(), initialABDelta);   // ★ 相对位置保持 (100, 0)
+}
+
+void TestEditorMainWindow::multiMove_setPosBypassesWrapper_frameFollows() {
+    // ★ E.4d 续-6 bug 回归(用户报告图 12 / 12(2)):
+    //   Qt 的 ItemIsMovable 拖动内部直接调 setPos(),绕开我们的 setPosition wrapper,
+    //   setPos 不 emit positionChanged → frame 不更新。
+    //   复现:多选 2 个,直接 setPos()(模拟 Qt 内部路径),frame 应该跟随。
+    //   修复:ControlBase::itemChange override → ItemPositionHasChanged 上 emit positionChanged。
+    EditorMainWindow w;
+    auto* a = new LabelControl; a->setSize({50, 50}); a->setPosition({100, 100});
+    auto* b = new LabelControl; b->setSize({50, 50}); b->setPosition({200, 100});
+    w.addControl(a); w.addControl(b);
+    a->setSelected(true);
+    b->setSelected(true);
+
+    QVERIFY(w.selectionFrame() != nullptr);
+
+    // ★ 关键:用 setPos() 路径(模拟 Qt ItemIsMovable 内部拖动,不经过 setPosition wrapper)
+    a->setPos({150, 130});
+    b->setPos({250, 130});
+
+    const QRectF expected = a->sceneBoundingRect().united(b->sceneBoundingRect());
+    QCOMPARE(w.selectionFrame()->rect().size(), expected.size());
+    QCOMPARE(w.selectionFrame()->pos(), expected.topLeft());   // ★ frame 跟随了
 }
 
 // ===== 19. groupHandle_handlesAtCorrectScenePosition =====
