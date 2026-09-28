@@ -3,6 +3,7 @@
 > 适用:**C.3 EtherNet/IP 协议适配器**骨架就绪,准备开干 C.3.4 真连接 Logix Designer。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-18
 > 配套:`docs/阶段C_详细规划.md` C.3 节 / `docs/阶段C.3_预研.md` / `docs/阶段C.2_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:🟡 **C.3 骨架已就位,但 `EipDriver` 仍是 stub**(同 C.2,Snap7/libplctag LGPL 未真接)。完整阶段状态见 `docs/路线图.md`。
 
 ---
 

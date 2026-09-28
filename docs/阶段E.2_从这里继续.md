@@ -4,6 +4,7 @@
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-21
 > 配套:`docs/阶段E.0_从这里继续.md` §2(9 决策)/ §3.3(WYSIWYG 8 大功能)/ §6(22 周计划)/ §9(已知坑)/
 >      `docs/路线图.md` 第 25-50 行 / `docs/UI规划调研与方案.md` v1.3
+> ⚠ **状态(2026-09-28 基于代码核对)**:✅ **E.2 已落地**(`src/editor/PropertySheet.{h,cpp}` QMetaObject 反射 + `PropertyChangeCommand` QUndoCommand 200ms 合并 + E.4c SizeEditor/PositionEditor 复合编辑器)。后续 E.4a-E.4d 多选/对齐/缩放已完成,E.4d 收尾中(SelectionFrame 视觉延后)。完整阶段状态见 `docs/路线图.md` 和 `hmi/CHANGELOG.md` v0.2.0-rc1。
 
 ---
 

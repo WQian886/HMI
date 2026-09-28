@@ -3,6 +3,7 @@
 > 适用:**C.3 EtherNet/IP 协议适配器**预研完成,准备开干 C.3.1 EipDriver 骨架。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-18
 > 配套:`docs/阶段C_详细规划.md` C.3 节 / `docs/阶段C.2_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:✅ **C.3 预研完成**(libplctag LGPL-2.1,DLL/lib 选型记录在本文件)。⚠ **但 `EipDriver` 仍是 stub**(`loadLibplctagLibrary()` TODO),Logix Designer 真连接未做。需 Wqian 拍板(见 C.2 状态条)。
 
 ---
 

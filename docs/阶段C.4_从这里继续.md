@@ -3,6 +3,7 @@
 > 适用:**C.4 统一协议选择 UI**完成,准备开干 C.5 多 PLC 架构。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-18
 > 配套:`docs/阶段C_详细规划.md` C.4 节 / `docs/阶段C.3_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:✅ **C.4 已落地**(`hmi.hmi::onProtocolComboChanged` + `hmi/src/drivers/ProtocolGuard.{h,cpp}` + `tst_ProtocolSwitch`,14/14 测试全过)。完整阶段状态见 `docs/路线图.md`。
 
 ---
 

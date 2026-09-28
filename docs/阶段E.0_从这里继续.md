@@ -3,6 +3,7 @@
 > 适用:**E 阶段计划 + 9 个决策锁定 + 业余节奏 22-27 周拆分**,开 E.1 之前先看完
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-20
 > 配套:`docs/路线图.md` 第 25-50 行(9 阶段总览+E 战略) / `docs/UI规划调研与方案.md` v1.3 / `docs/进度存档_2026-09-20.md` / `docs/阶段D.2_从这里继续.md` 第 6 节(D.4 节) / `docs/阶段D.1_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:🟡 **E 阶段收尾中** — E.0(本文件)决策锁定 ✅ + E.1 控件库 18 个已落地(`src/widgets/*`) + E.2 PropertySheet 反射 + E.4a 调色板/拖拽 + E.4b 8 handle 缩放 + E.4c QSizeF/QPointF 复合编辑器 + E.4d 多选/对齐/6 等尺寸 + E.4d-follow-1~7 收尾链。**🔴 SelectionFrameItem paint() 视觉延后未做**(对应 `bug图/图1.png`)。完整阶段状态见 `docs/路线图.md` 和 `hmi/CHANGELOG.md` v0.2.0-rc1。
 
 ---
 

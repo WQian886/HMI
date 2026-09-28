@@ -2,20 +2,23 @@
 
 > 配套:本计划"阶段 A"小节
 > 落地时间:2026-09-08(单轮)
-> 状态:⏳ 待 Wqian 在 VS 里集成验证
+> 状态:✅ **8/8 验收通过**(2026-09-11 通过 6 项,A2-5/A3 于 2026-09-16 补做验证,详见 `hmi/CHANGELOG.md` [0.1.0] 节)
+
+> ⚠ **2026-09-28 基于代码核对**:本文件状态从 `⏳ 待 Wqian 在 VS 里集成验证` 升级为 `✅ 已通过`。A2-2 气泡提示缺失、A2-5 崩溃 dump、A3 日志验证均已在 2026-09-16 补做。Inno Setup 实际打包留到 I 阶段。完整阶段状态见 `docs/路线图.md` 和 `docs/现状.md`。
 
 ## 子任务完成情况
 
 | 子任务 | 状态 | 文件 |
 |---|---|---|
-| A1 安装包(Inno Setup) | ✅ 脚本就绪 | `installer/hmi.iss` |
-| A2 单实例 + 托盘 + 自启注册表 | ✅ 代码就绪 | `src/instance/`, `src/tray/`, `main.cpp` |
-| A3 日志系统(QLoggingCategory + 滚动 + 30 天保留) | ✅ 代码就绪 | `src/logging/` |
-| A4 崩溃 dump(MiniDumpWriteDump) | ✅ 代码就绪 | `src/crash/` |
-| A5 单元测试(3 个测试) | ✅ 测试就绪 | `tests/tst_*.cpp` |
-| A6 CI(GitHub Actions windows-2022) | ✅ 配置就绪 | `.github/workflows/build.yml` |
-| A7 静态分析(.clang-tidy / .clang-format) | ✅ 配置就绪 | `.clang-tidy`, `.clang-format` |
-| A8 Sanitizer | 📝 文档说明 | (见下方) |
+| A1 安装包(Inno Setup) | ✅ 脚本就绪(实际打包留 I 阶段) | `installer/hmi.iss` |
+| A2-1 单实例 + 托盘 + 自启注册表 | ✅ 通过 | `src/instance/`, `src/tray/`, `main.cpp` |
+| A2-2 关主窗口不退出 | ✅ 通过(气泡提示缺失,临时接受) | `hmi.cpp::closeEvent`(未 override) |
+| A2-3 单击托盘显隐切换 | ✅ 通过 | `src/tray/SystemTray.cpp` |
+| A2-4 单实例检测(退出码 0) | ✅ 通过 | `src/instance/SingleInstance.cpp` |
+| A2-5 主动崩溃 → dump 文件 | ✅ 通过(2026-09-16 验证) | `src/crash/CrashHandler.cpp`,`dump/crash_20260916_093410_510.dmp` |
+| A3 日志文件验证 | ✅ 通过(2026-09-16 验证,30 天清理 24h QTimer) | `src/logging/Logging.cpp`,`logs/hmi_20260916_094322.log` |
+| A4 ctest(3 测试全绿) | ✅ 通过 | `tests/tst_{Variable,VariableManager,Serializer}.cpp` |
+| A5 Sanitizer | 📝 文档说明 | (见下方) |
 
 ## 文件清单(新增 17 + 改 2 = 19 个)
 

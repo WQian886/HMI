@@ -3,6 +3,7 @@
 > 适用:**D.1 SQLite 历史库**完成,准备开干 D.2 Trend 控件(或并行 E.1 画布工具)。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-18
 > 配套:`docs/UI规划调研与方案.md` 第 2 节 / `docs/阶段C_详细规划.md` / `docs/阶段C.5_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:✅ **D 阶段全部落地**(D.1 SQLite 历史库 + D.2 TrendControl + D.3 AlarmRecorder + D.4 CsvExporter + D.6 ExpressionParser + D.7 TagImporter,见 `src/history/` `src/export/` `src/tag/` `src/widgets/TrendWidget`)。完整阶段状态见 `docs/路线图.md`。
 
 ---
 

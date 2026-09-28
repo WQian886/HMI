@@ -3,6 +3,7 @@
 > 适用:**C.2 S7 协议适配器**骨架就绪,准备开干 C.2.2 真 Snap7 集成。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-18
 > 配套:`docs/阶段C_详细规划.md` C.2 节 / `docs/阶段C.1_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:🟡 **C.2 骨架已就位,但 `S7Driver` 仍是 stub**(`src/drivers/S7Driver.cpp:34-126` 所有 `connectTo/sendRead/sendWrite` 都是 `qWarning + emit errorOccurred`,`loadSnap7Library()` 直接 return false)。Snap7 LGPL DLL 未真动态加载,**用户切协议到 S7 会 emit errorOccurred + UI 卡死**。需 Wqian 拍板 A 本周装库接真驱动 vs B v0.2.0 只发 Modbus、S7/EIP 推 v0.3.0。完整阶段状态见 `docs/路线图.md`。
 
 ---
 

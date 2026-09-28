@@ -3,6 +3,7 @@
 > 适用:**C.1 协议抽象层**完成,准备开干 C.2 S7 适配器。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-17
 > 配套:`docs/阶段C_详细规划.md` / `docs/阶段C.0_从这里继续.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:✅ **C.1 已落地**(`src/drivers/IPollDriver.{h,cpp}` 抽象接口 + `ModbusDriver.{h,cpp}` 包装 ModbusMaster);PollScheduler 完全协议无关化已生效。完整阶段状态见 `docs/路线图.md`。
 
 ---
 

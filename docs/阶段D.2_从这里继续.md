@@ -3,6 +3,7 @@
 > 适用:**D.1 SQLite 历史库 + D.2 心跳策略 + hmi.ui QTabWidget 容器**完成,准备开干 Trend 控件(QCustomPlot)主体。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-20
 > 配套:`docs/阶段D.1_从这里继续.md` / `docs/UI规划调研与方案.md` 第 2 节 / `docs/进度存档_2026-09-20.md`(今日存档)
+> ⚠ **状态(2026-09-28 基于代码核对)**:✅ **D 阶段全部落地**(同 D.1 状态条);D.2 TrendControl 已在 `src/widgets/TrendWidget.{h,cpp}` + `TrendControl` 就位,E.4b 已修 proxy widget 缩放/选不中 bug。完整阶段状态见 `docs/路线图.md`。
 
 ---
 

@@ -3,6 +3,7 @@
 > 适用:**阶段 B(用户/角色/权限 + 操作审计)已收官**,准备开干 C(多协议 + 多 PLC)。
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-17(B5 收尾 + B 阶段通过后) ｜ v1.1:2026-09-17 优化
 > 配套:`docs/现状.md` / `docs/路线图.md` / `docs/优化与改善计划.html`(v0.2.0)/ `docs/阶段B_从这里继续.md` / `docs/UI规划调研与方案.md`
+> ⚠ **状态(2026-09-28 基于代码核对)**:🟡 **C 阶段部分完成** — `ModbusDriver` ✅ 已落地(`src/drivers/ModbusDriver.*`),`S7Driver` ⚠️ 当前是 stub(Snap7 LGPL 未真接,`loadSnap7Library()` 直接 return false),`EipDriver` ⚠️ 同上 stub(libplctag LGPL 未真接)。C.1/C.4/C.5 子阶段代码已落地,C.2/C.3 待 Wqian 拍板真接 vs 推 v0.3.0。完整阶段状态见 `docs/路线图.md`。
 
 ---
 
