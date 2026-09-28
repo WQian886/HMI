@@ -30,7 +30,7 @@
 #include "widgets/TextDisplay.h"
 #include "widgets/ToggleControl.h"
 #include "widgets/TrendControl.h"
-#include "../../Project.h"
+#include "Project.h"  // 修正:从相对路径 "../../Project.h" 改为工程根 include(vcxproj + CMake 都已配 target_include_directories(hmi PRIVATE .))
 
 #include <QAction>
 #include <QDragEnterEvent>

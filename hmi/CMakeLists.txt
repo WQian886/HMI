@@ -67,6 +67,10 @@ set(SOURCES
     src/editor/PaletteWidget.cpp
     # ★ E.4b:8 handle 缩放 ResizeHandleItem
     src/editor/ResizeHandleItem.cpp
+    # ★ E.4d 续-3:多选组 handle 容器 GroupHandleItem
+    src/editor/GroupHandleItem.cpp
+    # ★ E.4d 续:选中态视觉统一 SelectionFrameItem(蓝色虚线边框,paint() 视觉延后)
+    src/editor/SelectionFrameItem.cpp
 )
 
 set(HEADERS
@@ -121,6 +125,10 @@ set(HEADERS
     src/editor/PaletteWidget.h
     # ★ E.4b:ResizeHandleItem
     src/editor/ResizeHandleItem.h
+    # ★ E.4d 续-3:多选组 handle 容器 GroupHandleItem
+    src/editor/GroupHandleItem.h
+    # ★ E.4d 续:选中态视觉统一 SelectionFrameItem
+    src/editor/SelectionFrameItem.h
 )
 
 set(FORMS

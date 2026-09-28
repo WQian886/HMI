@@ -4,6 +4,12 @@ build-*/
 out/
 cmake-build-*/
 
+# 显式排除 hmi/ 子目录下的 build 产物(根规则 out/ x64/ build/ 已兜底匹配,
+# 但加显式路径更精确,防未来加新构建目录时漏配)
+hmi/x64/
+hmi/out/
+hmi/tests/build/
+
 # VS build config dirs (all platforms)
 x64/
 x86/
