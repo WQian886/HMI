@@ -100,6 +100,7 @@ set(HMI_CORE_SOURCES
     #   逐个加:写完一个接线一个,避免文件还不存在就编不过
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
     ${HMI_SRC_DIR}/src/widgets/ValveControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/PipeControl.cpp
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand
     ${HMI_SRC_DIR}/src/editor/PropertySheet.cpp
     ${HMI_SRC_DIR}/src/editor/PropertyChangeCommand.cpp
@@ -198,6 +199,7 @@ add_hmi_test(tst_ControlBaseColorJson)
 # ★ E.1c(2026-09-28):5 个工业控件(补齐 E 阶段 22 控件的最后 5 个)
 add_hmi_test(tst_TankControl)
 add_hmi_test(tst_ValveControl)
+add_hmi_test(tst_PipeControl)
 # 阶段 E · E.2 属性面板 PropertySheet
 add_hmi_test(tst_PropertySheet)
 # 阶段 E · E.2 周 11 EditorMainWindow

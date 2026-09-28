@@ -527,6 +527,16 @@
     <ClCompile Include="src\widgets\ValveControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.1c(2026-09-28):工业控件 PipeControl -->
+    <QtMoc Include="src\widgets\PipeControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\PipeControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\PipeControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ E.2(2026-09-21):PropertySheet + PropertyChangeCommand -->
     <ClInclude Include="src\editor\PropertySheet.h">
       <Filter>Header Files</Filter>

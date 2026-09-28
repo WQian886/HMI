@@ -308,6 +308,10 @@
     <QtMoc Include="src\widgets\ValveControl.h" />
     <ClInclude Include="src\widgets\ValveControl.h" />
     <ClCompile Include="src\widgets\ValveControl.cpp" />
+    <!-- ★ E.1c(2026-09-28):工业控件 PipeControl -->
+    <QtMoc Include="src\widgets\PipeControl.h" />
+    <ClInclude Include="src\widgets\PipeControl.h" />
+    <ClCompile Include="src\widgets\PipeControl.cpp" />
     <!-- ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand -->
     <!-- ★ QtMoc 三件套(教训 5.1):每个 Q_OBJECT 头都要 <QtMoc> + <ClInclude> + <ClCompile>,
          否则 LNK2001 找不到 metaObject()/qt_metacast()/qt_metacall()/staticMetaObject -->
