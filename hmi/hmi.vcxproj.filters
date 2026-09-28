@@ -507,6 +507,16 @@
     <ClCompile Include="src\widgets\AlarmListControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.1c(2026-09-28):工业控件 TankControl -->
+    <QtMoc Include="src\widgets\TankControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\TankControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\TankControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ E.2(2026-09-21):PropertySheet + PropertyChangeCommand -->
     <ClInclude Include="src\editor\PropertySheet.h">
       <Filter>Header Files</Filter>

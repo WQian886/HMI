@@ -300,6 +300,10 @@
     <QtMoc Include="src\widgets\AlarmListControl.h" />
     <ClInclude Include="src\widgets\AlarmListControl.h" />
     <ClCompile Include="src\widgets\AlarmListControl.cpp" />
+    <!-- ★ E.1c(2026-09-28):工业控件 TankControl(QtMoc 三件套,缺 ClCompile 会 LNK2019) -->
+    <QtMoc Include="src\widgets\TankControl.h" />
+    <ClInclude Include="src\widgets\TankControl.h" />
+    <ClCompile Include="src\widgets\TankControl.cpp" />
     <!-- ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand -->
     <!-- ★ QtMoc 三件套(教训 5.1):每个 Q_OBJECT 头都要 <QtMoc> + <ClInclude> + <ClCompile>,
          否则 LNK2001 找不到 metaObject()/qt_metacast()/qt_metacall()/staticMetaObject -->

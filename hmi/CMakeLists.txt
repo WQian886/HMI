@@ -58,6 +58,8 @@ set(SOURCES
     src/widgets/TrendControl.cpp
     src/widgets/TableControl.cpp
     src/widgets/AlarmListControl.cpp
+    # ★ E.1c(2026-09-28):5 个工业控件(补齐 E 阶段 22 控件的最后 5 个)
+    src/widgets/TankControl.cpp
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand(QUndoCommand)
     src/editor/PropertySheet.cpp
     src/editor/PropertyChangeCommand.cpp
@@ -116,6 +118,8 @@ set(HEADERS
     src/widgets/TrendControl.h
     src/widgets/TableControl.h
     src/widgets/AlarmListControl.h
+    # ★ E.1c(2026-09-28):工业控件
+    src/widgets/TankControl.h
     # ★ E.2:PropertySheet + PropertyChangeCommand
     src/editor/PropertySheet.h
     src/editor/PropertyChangeCommand.h

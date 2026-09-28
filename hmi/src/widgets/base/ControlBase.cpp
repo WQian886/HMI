@@ -27,6 +27,51 @@ QHash<QString, ControlBase::FactoryFn>& registry() {
     return r;
 }
 
+// ★ E.1c(2026-09-28):QColor 存读
+//
+// 【先纠正两个误判,都是同一个毛病:不实测就照着文档概述写】//
+//   误判①:我以为 QJsonValue::fromVariant 不认 QColor,颜色属性存盘全丢。
+//     实测:【错的】。Qt 6 的 fromVariant 认 QColor,不透明色往返完全正常
+//     (#aabbcc 进 #aabbcc 出),tst_ProjectSchema.cpp:337 的老注释早写明了。
+//     错因:只看了 QJsonValue 文档"只支持 map/list/string/double/bool/int"
+//     的概述就下结论。
+//
+//   误判②:改成显式分支后,我在注释里写「c.name() 对 alpha != 255 会输出
+//     8 位」。实测:【也是错的】。QColor::name() 的默认格式是 HexRgb,
+//     【无论 alpha 是不是 255 一律输出 6 位】,alpha 照丢 —— 测试当场变红
+//     才暴露出来。必须显式按 alpha 分支选 name() 还是 name(HexArgb)。
+//
+// 【真正的问题只有一条:alpha 被丢】QJsonValue::fromVariant 走 QColor::toString(),
+//   而 QColor::name() 的默认格式是 HexRgb —— 【无论 alpha 是不是 255,一律输出
+//   6 位 #RRGGBB】,alpha 直接消失。实测:
+//     QColor(1,2,3,78) → 存 "#010203" → 读回 QColor(1,2,3,255)
+//   控件里半透明很常见(液体高光、禁用态遮罩、玻璃罐体),存一次盘再打开
+//   就变成不透明 —— 画面上表现为"某些控件莫名其妙变实了",不报错不崩溃。
+//
+// 【顺带修的第二个问题:非法值会画没】走通用反射路径时,JSON 里
+//   fillColor:"not-a-color" → QVariant 是 QString,prop.write 进去后
+//   QColor 解析失败变成 QColor() = 全透明黑,控件直接从画面上消失。
+//   工程文件是手写的,这个字段打错字完全可能。colorFromJson 用【当前值】
+//   当 fallback,保留原色。
+QJsonValue colorToJson(const QColor& c) {
+    // ★ 按 alpha 分支,不是无脑 name() 或无脑 name(HexArgb):
+    //   · 不透明 → name() 6 位 #RRGGBB,【与改动前逐字节相同】,
+    //     存量工程文件和 tst_ProjectSchema.cpp:338 的断言都不受影响
+    //   · 半透明 → name(HexArgb) 8 位 #AARRGGBB,alpha 才活得下来
+    //   无条件 HexArgb 会把【所有】颜色变 8 位,属于无谓地改存量格式。
+    return QJsonValue(c.alpha() == 255
+                      ? c.name()
+                      : c.name(QColor::HexArgb));
+}
+
+QColor colorFromJson(const QJsonValue& v, const QColor& fallback) {
+    const QString s = v.toString();
+    if (s.isEmpty()) return fallback;
+    const QColor c(s);
+    if (!c.isValid()) return fallback;   // 打错字 → 保留原色,不画没
+    return c;
+}
+
 // ★ E.1c:把控件传来的通用 QVariant 适配成 Variable 声明的精确类型
 //
 // 【为什么必须有】Variable::setValue 里的 matchesDataType(Variable.cpp:35-45)
@@ -230,6 +275,8 @@ QJsonObject ControlBase::propertiesToJson() const {
         } else if (type == QMetaType::QSizeF) {
             QSizeF s = prop.read(this).toSizeF();
             value = QJsonObject{{"width", s.width()}, {"height", s.height()}};
+        } else if (type == QMetaType::QColor) {
+            value = colorToJson(prop.read(this).value<QColor>());
         } else {
             value = QJsonValue::fromVariant(prop.read(this));
         }
@@ -258,6 +305,11 @@ void ControlBase::propertiesFromJson(const QJsonObject& obj) {
             QVariantMap m = value.toMap();
             value = QVariant::fromValue(QSizeF(m.value("width").toDouble(),
                                               m.value("height").toDouble()));
+        } else if (type == QMetaType::QColor) {
+            // ★ 读当前值当 fallback:字段缺失/格式不对时保留现有颜色,
+            //   不用 QColor() 默认(全透明黑)把画面画没
+            value = QVariant::fromValue(
+                colorFromJson(obj.value(name), prop.read(this).value<QColor>()));
         }
         prop.write(this, value);
     }

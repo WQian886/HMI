@@ -1,5 +1,5 @@
-# 阶段 A · A5 单元测试
-# 用 Qt Test,跟主程序共用 core 源码
+﻿# 闃舵 A 路 A5 鍗曞厓娴嬭瘯
+# 鐢?Qt Test,璺熶富绋嬪簭鍏辩敤 core 婧愮爜
 
 cmake_minimum_required(VERSION 3.21)
 project(hmi_tests LANGUAGES CXX)
@@ -10,38 +10,38 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql PrintSupport)
 enable_testing()
 
-# 主程序源码目录(用来 include 头文件)
+# 涓荤▼搴忔簮鐮佺洰褰?鐢ㄦ潵 include 澶存枃浠?
 set(HMI_SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 include_directories(${HMI_SRC_DIR})
-# 阶段 B · B1:src/auth/ 头文件(#include "auth/Role.h" 风格)
+# 闃舵 B 路 B1:src/auth/ 澶存枃浠?#include "auth/Role.h" 椋庢牸)
 include_directories(${HMI_SRC_DIR}/src)
-# ★ D.2(2026-09-20):QCustomPlot 头文件路径(TrendWidget.h include "qcustomplot.h")
+# 鈽?D.2(2026-09-20):QCustomPlot 澶存枃浠惰矾寰?TrendWidget.h include "qcustomplot.h")
 include_directories(${HMI_SRC_DIR}/3rdparty/qcustomplot)
 
-# 测试要链接的核心源文件
+# 娴嬭瘯瑕侀摼鎺ョ殑鏍稿績婧愭枃浠?
 set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/Variable.cpp
     ${HMI_SRC_DIR}/VariableManager.cpp
     ${HMI_SRC_DIR}/JsonSerializer.cpp
-    # 阶段 A · A3 日志(UserManager 用 qCInfo/qCWarning)
+    # 闃舵 A 路 A3 鏃ュ織(UserManager 鐢?qCInfo/qCWarning)
     ${HMI_SRC_DIR}/src/logging/Logging.cpp
-    # 阶段 B · B1 用户/角色/密码哈希
+    # 闃舵 B 路 B1 鐢ㄦ埛/瑙掕壊/瀵嗙爜鍝堝笇
     ${HMI_SRC_DIR}/src/auth/Role.cpp
     ${HMI_SRC_DIR}/src/auth/User.cpp
     ${HMI_SRC_DIR}/src/auth/PasswordHasher.cpp
-    # 阶段 B · B1.2 UserManager
+    # 闃舵 B 路 B1.2 UserManager
     ${HMI_SRC_DIR}/src/auth/UserManager.cpp
-    # 阶段 B · B1.3 UserStore
+    # 闃舵 B 路 B1.3 UserStore
     ${HMI_SRC_DIR}/src/auth/UserStore.cpp
-    # 阶段 B · B2.2 CurrentUser
+    # 闃舵 B 路 B2.2 CurrentUser
     ${HMI_SRC_DIR}/src/auth/CurrentUser.cpp
-    # 阶段 B · B3 Permission
+    # 闃舵 B 路 B3 Permission
     ${HMI_SRC_DIR}/src/auth/Permission.cpp
-    # 阶段 B · B4 UI 权限绑定
+    # 闃舵 B 路 B4 UI 鏉冮檺缁戝畾
     ${HMI_SRC_DIR}/src/auth/UIPermission.cpp
-    # 阶段 B · B5 操作审计
+    # 闃舵 B 路 B5 鎿嶄綔瀹¤
     ${HMI_SRC_DIR}/src/auth/AuditLog.cpp
-    # 阶段 C · C.0 schema 演进
+    # 闃舵 C 路 C.0 schema 婕旇繘
     ${HMI_SRC_DIR}/Project.cpp
     ${HMI_SRC_DIR}/ActionManager.cpp
     ${HMI_SRC_DIR}/ThresholdAlarmChecker.cpp
@@ -51,66 +51,69 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/PollScheduler.cpp
     ${HMI_SRC_DIR}/ModbusMaster.cpp
     ${HMI_SRC_DIR}/WriteScheduler.cpp
-    # 阶段 C · C.1 协议抽象层
+    # 闃舵 C 路 C.1 鍗忚鎶借薄灞?
     ${HMI_SRC_DIR}/src/drivers/IPollDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/ModbusDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/DriverFactory.cpp
-    # 阶段 C · C.2 S7 协议适配器(2026-09-18)DriverFactory 创建 S7Driver 需要链接 S7Driver.cpp
+    # 闃舵 C 路 C.2 S7 鍗忚閫傞厤鍣?2026-09-18)DriverFactory 鍒涘缓 S7Driver 闇€瑕侀摼鎺?S7Driver.cpp
     ${HMI_SRC_DIR}/src/drivers/S7Driver.cpp
-    # 阶段 C · C.3 EIP 协议适配器(2026-09-18)DriverFactory 创建 EipDriver 需要链接 EipDriver.cpp
+    # 闃舵 C 路 C.3 EIP 鍗忚閫傞厤鍣?2026-09-18)DriverFactory 鍒涘缓 EipDriver 闇€瑕侀摼鎺?EipDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
-    # 阶段 D · D.1 SQLite 历史库(2026-09-18)
+    # 闃舵 D 路 D.1 SQLite 鍘嗗彶搴?2026-09-18)
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
-    # ★ D.3(2026-09-20):报警持久化(对称 HistoryRecorder + alarm_history 表)
+    # 鈽?D.3(2026-09-20):鎶ヨ鎸佷箙鍖?瀵圭О HistoryRecorder + alarm_history 琛?
     ${HMI_SRC_DIR}/src/history/AlarmRecorder.cpp
-    # ★ D.4(2026-09-20):CSV 导出
+    # 鈽?D.4(2026-09-20):CSV 瀵煎嚭
     ${HMI_SRC_DIR}/src/export/CsvExporter.cpp
-    # ★ D.6(2026-09-20):派生表达式解析器(Pratt 手写)
+    # 鈽?D.6(2026-09-20):娲剧敓琛ㄨ揪寮忚В鏋愬櫒(Pratt 鎵嬪啓)
     ${HMI_SRC_DIR}/src/tag/ExpressionParser.cpp
-    # ★ D.7(2026-09-20):标签导入器(CSV-based)
+    # 鈽?D.7(2026-09-20):鏍囩瀵煎叆鍣?CSV-based)
     ${HMI_SRC_DIR}/src/tag/TagImporter.cpp
-    # ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot
+    # 鈽?D.2(2026-09-20):鍘嗗彶鏇茬嚎鎺т欢 + QCustomPlot
     ${HMI_SRC_DIR}/src/widgets/TrendWidget.cpp
     ${HMI_SRC_DIR}/3rdparty/qcustomplot/qcustomplot.cpp
-    # ★ E.1(2026-09-20):控件基类 + LabelControl
+    # 鈽?E.1(2026-09-20):鎺т欢鍩虹被 + LabelControl
     ${HMI_SRC_DIR}/src/widgets/base/ControlBase.cpp
     ${HMI_SRC_DIR}/src/widgets/LabelControl.cpp
-    # ★ E.1a-2(2026-09-20):NumberDisplay + TextDisplay
+    # 鈽?E.1a-2(2026-09-20):NumberDisplay + TextDisplay
     ${HMI_SRC_DIR}/src/widgets/NumberDisplay.cpp
     ${HMI_SRC_DIR}/src/widgets/TextDisplay.cpp
-    # ★ E.1a-3(2026-09-20):Bar + Gauge + LED
+    # 鈽?E.1a-3(2026-09-20):Bar + Gauge + LED
     ${HMI_SRC_DIR}/src/widgets/BarControl.cpp
     ${HMI_SRC_DIR}/src/widgets/GaugeControl.cpp
     ${HMI_SRC_DIR}/src/widgets/LedControl.cpp
-    # ★ E.1a-4(2026-09-20):Image + Rectangle + Line + Group
+    # 鈽?E.1a-4(2026-09-20):Image + Rectangle + Line + Group
     ${HMI_SRC_DIR}/src/widgets/ImageControl.cpp
     ${HMI_SRC_DIR}/src/widgets/RectangleControl.cpp
     ${HMI_SRC_DIR}/src/widgets/LineControl.cpp
     ${HMI_SRC_DIR}/src/widgets/GroupControl.cpp
-    # ★ E.1b(2026-09-20):Button + Toggle + Slider + InputEdit
+    # 鈽?E.1b(2026-09-20):Button + Toggle + Slider + InputEdit
     ${HMI_SRC_DIR}/src/widgets/ButtonControl.cpp
     ${HMI_SRC_DIR}/src/widgets/ToggleControl.cpp
     ${HMI_SRC_DIR}/src/widgets/SliderControl.cpp
     ${HMI_SRC_DIR}/src/widgets/InputEditControl.cpp
-    # ★ E.1b-2(2026-09-20):Trend + Table + AlarmList
+    # 鈽?E.1b-2(2026-09-20):Trend + Table + AlarmList
     ${HMI_SRC_DIR}/src/widgets/TrendControl.cpp
     ${HMI_SRC_DIR}/src/widgets/TableControl.cpp
     ${HMI_SRC_DIR}/src/widgets/AlarmListControl.cpp
-    # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand
+    # 鈽?E.1c(2026-09-28):5 涓伐涓氭帶浠?鍌ㄧ綈/绠￠亾/闃€闂?娉?鐢垫満)
+    #   閫愪釜鍔?鍐欏畬涓€涓帴绾夸竴涓?閬垮厤鏂囦欢杩樹笉瀛樺湪灏辩紪涓嶈繃
+    ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
+    # 鈽?E.2(2026-09-21):灞炴€ч潰鏉?PropertySheet + PropertyChangeCommand
     ${HMI_SRC_DIR}/src/editor/PropertySheet.cpp
     ${HMI_SRC_DIR}/src/editor/PropertyChangeCommand.cpp
-    # ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器
+    # 鈽?E.4c(2026-09-22):QSizeF/QPointF 澶嶅悎缂栬緫鍣?
     ${HMI_SRC_DIR}/src/editor/SizeEditor.cpp
     ${HMI_SRC_DIR}/src/editor/PositionEditor.cpp
-    # ★ E.2 周 11:EditorMainWindow
+    # 鈽?E.2 鍛?11:EditorMainWindow
     ${HMI_SRC_DIR}/src/editor/EditorMainWindow.cpp
-    # ★ E.4a:PaletteWidget
+    # 鈽?E.4a:PaletteWidget
     ${HMI_SRC_DIR}/src/editor/PaletteWidget.cpp
-    # ★ E.4b:ResizeHandleItem
+    # 鈽?E.4b:ResizeHandleItem
     ${HMI_SRC_DIR}/src/editor/ResizeHandleItem.cpp
-    # ★ E.4d 续:选中态视觉统一
+    # 鈽?E.4d 缁?閫変腑鎬佽瑙夌粺涓€
     ${HMI_SRC_DIR}/src/editor/SelectionFrameItem.cpp
-    # ★ E.4d 续-3:多选组 handle 容器
+    # 鈽?E.4d 缁?3:澶氶€夌粍 handle 瀹瑰櫒
     ${HMI_SRC_DIR}/src/editor/GroupHandleItem.cpp
 )
 
@@ -123,11 +126,11 @@ function(add_hmi_test test_name)
         Qt6::Core
         Qt6::Gui
         Qt6::Test
-        Qt6::Widgets   # ★ B4:UIPermission.cpp 需要 QAbstractButton / QAction
-        Qt6::Network   # ★ C.0:Project.cpp 间接 include QTcpSocket(TcpClient.h)
-        Qt6::SerialBus  # ★ C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 依赖)
-        Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库 + HistoryRecorder
-        Qt6::PrintSupport  # ★ D.2(2026-09-20):QCustomPlot 需要 QPrinter
+        Qt6::Widgets   # 鈽?B4:UIPermission.cpp 闇€瑕?QAbstractButton / QAction
+        Qt6::Network   # 鈽?C.0:Project.cpp 闂存帴 include QTcpSocket(TcpClient.h)
+        Qt6::SerialBus  # 鈽?C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 渚濊禆)
+        Qt6::Sql        # 鈽?D.1(2026-09-18):SQLite 鍘嗗彶搴?+ HistoryRecorder
+        Qt6::PrintSupport  # 鈽?D.2(2026-09-20):QCustomPlot 闇€瑕?QPrinter
     )
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
@@ -136,38 +139,38 @@ endfunction()
 add_hmi_test(tst_Variable)
 add_hmi_test(tst_VariableManager)
 add_hmi_test(tst_Serializer)
-# 阶段 B · B1
+# 闃舵 B 路 B1
 add_hmi_test(tst_PasswordHasher)
-# 阶段 B · B1.2
+# 闃舵 B 路 B1.2
 add_hmi_test(tst_UserManager)
-# 阶段 B · B1.3
+# 闃舵 B 路 B1.3
 add_hmi_test(tst_UserStore)
-# 阶段 B · B2.2
+# 闃舵 B 路 B2.2
 add_hmi_test(tst_CurrentUser)
-# 阶段 B · B3
+# 闃舵 B 路 B3
 add_hmi_test(tst_Permission)
-# 阶段 B · B4
+# 闃舵 B 路 B4
 add_hmi_test(tst_UIPermission)
-# 阶段 B · B5
+# 闃舵 B 路 B5
 add_hmi_test(tst_AuditLog)
 add_hmi_test(tst_AuditE2E)
-# 阶段 C · C.0
+# 闃舵 C 路 C.0
 add_hmi_test(tst_ProjectSchema)
-# 阶段 C · C.1 协议抽象层
+# 闃舵 C 路 C.1 鍗忚鎶借薄灞?
 add_hmi_test(tst_IPollDriver)
-# 阶段 C · C.4 协议选择 UX 锁(教训 1.5)
+# 闃舵 C 路 C.4 鍗忚閫夋嫨 UX 閿?鏁欒 1.5)
 add_hmi_test(tst_ProtocolSwitch)
-# 阶段 D · D.1 SQLite 历史库
+# 闃舵 D 路 D.1 SQLite 鍘嗗彶搴?
 add_hmi_test(tst_HistoryRecorder)
-# 阶段 D · D.3 报警持久化
+# 闃舵 D 路 D.3 鎶ヨ鎸佷箙鍖?
 add_hmi_test(tst_AlarmRecorder)
-# 阶段 D · D.4 CSV 导出
+# 闃舵 D 路 D.4 CSV 瀵煎嚭
 add_hmi_test(tst_CsvExporter)
-# 阶段 D · D.6 派生表达式解析
+# 闃舵 D 路 D.6 娲剧敓琛ㄨ揪寮忚В鏋?
 add_hmi_test(tst_ExpressionParser)
-# 阶段 D · D.7 标签导入(CSV-based,零三方依赖)
+# 闃舵 D 路 D.7 鏍囩瀵煎叆(CSV-based,闆朵笁鏂逛緷璧?
 add_hmi_test(tst_TagImporter)
-# 阶段 E · E.1a 第 1 个控件 LabelControl(测试需要 QApplication + offscreen)
+# 闃舵 E 路 E.1a 绗?1 涓帶浠?LabelControl(娴嬭瘯闇€瑕?QApplication + offscreen)
 add_hmi_test(tst_LabelControl)
 add_hmi_test(tst_NumberDisplay)
 add_hmi_test(tst_TextDisplay)
@@ -185,25 +188,31 @@ add_hmi_test(tst_InputEditControl)
 add_hmi_test(tst_TrendControl)
 add_hmi_test(tst_TableControl)
 add_hmi_test(tst_AlarmListControl)
-# ★ E.1c(2026-09-28):UI → PLC 反向写通道(ControlBase::writeToPlc)
-#   修复前 ToggleControl 点一下只翻本地值,全仓库无人接 toggled 信号,
-#   17 个控件全是只读显示器。详见 tst_ControlBaseWrite.cpp 头注释。
+# 鈽?E.1c(2026-09-28):UI 鈫?PLC 鍙嶅悜鍐欓€氶亾(ControlBase::writeToPlc)
+#   淇鍓?ToggleControl 鐐逛竴涓嬪彧缈绘湰鍦板€?鍏ㄤ粨搴撴棤浜烘帴 toggled 淇″彿,
+#   17 涓帶浠跺叏鏄彧璇绘樉绀哄櫒銆傝瑙?tst_ControlBaseWrite.cpp 澶存敞閲娿€?
 add_hmi_test(tst_ControlBaseWrite)
-# 阶段 E · E.2 属性面板 PropertySheet
+# 鈽?E.1c(2026-09-28):QColor 灞炴€у瓨璇诲洖褰?QJsonValue::fromVariant 涓嶈 QColor,
+#   瀵艰嚧 17 涓帶浠剁殑 8 涓鑹插睘鎬у瓨鐩樺悗鍏ㄤ涪)
+add_hmi_test(tst_ControlBaseColorJson)
+# 鈽?E.1c(2026-09-28):5 涓伐涓氭帶浠?琛ラ綈 E 闃舵 22 鎺т欢鐨勬渶鍚?5 涓?
+add_hmi_test(tst_TankControl)
+# 闃舵 E 路 E.2 灞炴€ч潰鏉?PropertySheet
 add_hmi_test(tst_PropertySheet)
-# 阶段 E · E.2 周 11 EditorMainWindow
+# 闃舵 E 路 E.2 鍛?11 EditorMainWindow
 add_hmi_test(tst_EditorMainWindow)
-# 阶段 E · E.4a 控件调色板 PaletteWidget
+# 闃舵 E 路 E.4a 鎺т欢璋冭壊鏉?PaletteWidget
 add_hmi_test(tst_PaletteWidget)
-# 阶段 E · E.4b 8 handle 缩放 ResizeHandleItem
+# 闃舵 E 路 E.4b 8 handle 缂╂斁 ResizeHandleItem
 add_hmi_test(tst_ResizeHandle)
-# handle 视觉对齐调试
+# handle 瑙嗚瀵归綈璋冭瘯
 add_hmi_test(tst_HandleVisualAlignment)
-# 阶段 D · D.2 历史曲线控件(QCustomPlot)
+# 闃舵 D 路 D.2 鍘嗗彶鏇茬嚎鎺т欢(QCustomPlot)
 add_hmi_test(tst_Trend)
-# 调试 QGraphicsObject Q_PROPERTY 行为
+# 璋冭瘯 QGraphicsObject Q_PROPERTY 琛屼负
 add_hmi_test(tst_GraphicsObjectProperty)
-# 端到端 AlarmList 缩小失效调试
+# 绔埌绔?AlarmList 缂╁皬澶辨晥璋冭瘯
 add_hmi_test(tst_AlarmListShrinkE2E)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
+
