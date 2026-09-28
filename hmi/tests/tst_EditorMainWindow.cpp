@@ -17,6 +17,7 @@
 #include "widgets/LedControl.h"
 
 #include "editor/EditorMainWindow.h"
+#include "editor/PaletteWidget.h"     // ★ E.1c:调色板项数断言要用完整类型
 #include "editor/PropertySheet.h"
 #include "editor/PropertyChangeCommand.h"
 #include "editor/ResizeHandleItem.h"
@@ -74,7 +75,51 @@ private slots:
     // ★ E.4d 续-3 bug:多选整体移动相对位置改变
     void multiMove_relativePositionPreserved();
     void multiMove_setPosBypassesWrapper_frameFollows();   // ★ E.4d 续-6 bug 回归
+
+    // ★ E.1c(2026-09-28)bug 回归:调色板必须列出全部 22 个控件
+    void palette_listsAllRegisteredControls();
+    void palette_containsTheFiveIndustrialControls();
 };
+
+// ★★ 2026-09-28 加过的真 bug —— 值得记一笔:
+//   registerControlType 是写在【各个控件构造函数里】的,不是静态注册表。
+//   所以"没人 new 过 PumpControl" → 注册表里没有 "Pump" →
+//     ① 调色板(遍历注册表填项)上根本不出现泵
+//     ② 工程文件里存着泵,loadFromFile 时 create("Pump") 返回 null,静默跳过
+//   两个症状都是"看起来像坏了但说不清哪坏",而且【零编译错误】。
+//   EditorMainWindow 构造时有一份"delete new XxxControl"预热列表来补这个,
+//   加新控件时必须手动往那份列表里也加一行 —— 忘了就是本用例红。
+void TestEditorMainWindow::palette_listsAllRegisteredControls() {
+    EditorMainWindow w;
+    auto* palette = w.paletteWidget();
+    QVERIFY(palette);
+
+    // 调色板项数 == 注册表大小(这条是 PaletteWidget 构造时的契约)
+    QCOMPARE(palette->count(), ControlBase::registeredTypeNames().size());
+
+    // ★ 硬编码 22。加第 23 个控件忘了加预热,这里立刻红;
+    //   加了控件也确实加了预热,记得把 22 改成 23
+    QCOMPARE(palette->count(), 22);
+}
+
+void TestEditorMainWindow::palette_containsTheFiveIndustrialControls() {
+    EditorMainWindow w;
+    auto* palette = w.paletteWidget();
+    QVERIFY(palette);
+    // ★ E.1c 补齐的 5 个工业控件。逐个点名而不是只查数量 ——
+    //   数量对但名字错(比如拼错)也过不了这关
+    for (const QString& type : {QStringLiteral("Tank"), QStringLiteral("Pipe"),
+                                QStringLiteral("Valve"), QStringLiteral("Pump"),
+                                QStringLiteral("Motor")}) {
+        bool found = false;
+        for (int i = 0; i < palette->count() && !found; ++i) {
+            found = (palette->item(i)->text() == type);
+        }
+        QVERIFY2(found, qPrintable(QStringLiteral("调色板上没有 %1 —— "
+                                                  "多半是漏了 EditorMainWindow 里的预热列表")
+                                       .arg(type)));
+    }
+}
 
 // ===== 1. constructor_createsWindow =====
 void TestEditorMainWindow::constructor_createsWindow() {

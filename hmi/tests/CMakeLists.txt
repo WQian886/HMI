@@ -101,6 +101,10 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
     ${HMI_SRC_DIR}/src/widgets/ValveControl.cpp
     ${HMI_SRC_DIR}/src/widgets/PipeControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/PumpControl.cpp
+    ${HMI_SRC_DIR}/src/widgets/MotorControl.cpp
+    # ★ E.1c:转子旋转动画(泵/电机共用,见 SpinAnimator.h 头注释)
+    ${HMI_SRC_DIR}/src/widgets/base/SpinAnimator.cpp
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand
     ${HMI_SRC_DIR}/src/editor/PropertySheet.cpp
     ${HMI_SRC_DIR}/src/editor/PropertyChangeCommand.cpp
@@ -200,6 +204,9 @@ add_hmi_test(tst_ControlBaseColorJson)
 add_hmi_test(tst_TankControl)
 add_hmi_test(tst_ValveControl)
 add_hmi_test(tst_PipeControl)
+add_hmi_test(tst_PumpControl)
+add_hmi_test(tst_MotorControl)
+add_hmi_test(tst_SpinAnimator)
 # 阶段 E · E.2 属性面板 PropertySheet
 add_hmi_test(tst_PropertySheet)
 # 阶段 E · E.2 周 11 EditorMainWindow

@@ -62,6 +62,10 @@ set(SOURCES
     src/widgets/TankControl.cpp
     src/widgets/ValveControl.cpp
     src/widgets/PipeControl.cpp
+    src/widgets/PumpControl.cpp
+    src/widgets/MotorControl.cpp
+    # ★ E.1c:转子旋转动画(泵/电机共用)
+    src/widgets/base/SpinAnimator.cpp
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand(QUndoCommand)
     src/editor/PropertySheet.cpp
     src/editor/PropertyChangeCommand.cpp
@@ -124,6 +128,10 @@ set(HEADERS
     src/widgets/TankControl.h
     src/widgets/ValveControl.h
     src/widgets/PipeControl.h
+    src/widgets/PumpControl.h
+    src/widgets/MotorControl.h
+    # ★ E.1c:转子旋转动画
+    src/widgets/base/SpinAnimator.h
     # ★ E.2:PropertySheet + PropertyChangeCommand
     src/editor/PropertySheet.h
     src/editor/PropertyChangeCommand.h

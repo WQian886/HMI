@@ -312,6 +312,17 @@
     <QtMoc Include="src\widgets\PipeControl.h" />
     <ClInclude Include="src\widgets\PipeControl.h" />
     <ClCompile Include="src\widgets\PipeControl.cpp" />
+    <!-- ★ E.1c(2026-09-28):泵 + 电机(带旋转动画) -->
+    <QtMoc Include="src\widgets\PumpControl.h" />
+    <ClInclude Include="src\widgets\PumpControl.h" />
+    <ClCompile Include="src\widgets\PumpControl.cpp" />
+    <QtMoc Include="src\widgets\MotorControl.h" />
+    <ClInclude Include="src\widgets\MotorControl.h" />
+    <ClCompile Include="src\widgets\MotorControl.cpp" />
+    <!-- ★ E.1c:转子旋转动画(泵/电机共用) -->
+    <QtMoc Include="src\widgets\base\SpinAnimator.h" />
+    <ClInclude Include="src\widgets\base\SpinAnimator.h" />
+    <ClCompile Include="src\widgets\base\SpinAnimator.cpp" />
     <!-- ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand -->
     <!-- ★ QtMoc 三件套(教训 5.1):每个 Q_OBJECT 头都要 <QtMoc> + <ClInclude> + <ClCompile>,
          否则 LNK2001 找不到 metaObject()/qt_metacast()/qt_metacall()/staticMetaObject -->

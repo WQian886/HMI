@@ -30,6 +30,13 @@
 #include "widgets/TextDisplay.h"
 #include "widgets/ToggleControl.h"
 #include "widgets/TrendControl.h"
+// ★ E.1c(2026-09-28):5 个工业控件的 include 也必须跟着预热列表一起加
+//   (漏 include 是编译期 error,漏列表项才是运行期静默丢失 —— 两者要一起改)
+#include "widgets/TankControl.h"
+#include "widgets/PipeControl.h"
+#include "widgets/ValveControl.h"
+#include "widgets/PumpControl.h"
+#include "widgets/MotorControl.h"
 #include "Project.h"  // 修正:从相对路径 "../../Project.h" 改为工程根 include(vcxproj + CMake 都已配 target_include_directories(hmi PRIVATE .))
 
 #include <QAction>
@@ -61,6 +68,11 @@ EditorMainWindow::EditorMainWindow(QWidget* parent)
 
     // ★ E.3 修复:实例化每个控件一次触发 registerControlType,确保 loadFromFile 前注册表填好
     //   (否则:JSON 里有 "Bar" 但没人 new 过 BarControl → create("Bar") 返回 null)
+    //
+    // ★★ 2026-09-28 加控件时【必须同时往这里加一行】,漏了不会有任何编译错误 ——
+    //   只是那个控件:① 调色板上不出现 ② 工程文件里存着它,loadFromFile
+    //   静默跳过。两个症状都是"看起来像坏了但说不清哪坏",极难定位。
+    //   少一个控件的判断方法:调色板项数 < 22。tst_EditorMainWindow 有对应断言。
     using namespace qwhmi::widgets;
     delete new LabelControl;       delete new NumberDisplay;    delete new TextDisplay;
     delete new BarControl;         delete new GaugeControl;     delete new LedControl;
@@ -68,6 +80,9 @@ EditorMainWindow::EditorMainWindow(QWidget* parent)
     delete new GroupControl;       delete new ButtonControl;    delete new ToggleControl;
     delete new SliderControl;      delete new InputEditControl;
     delete new TrendControl;       delete new TableControl;     delete new AlarmListControl;
+    // ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
+    delete new TankControl;        delete new PipeControl;      delete new ValveControl;
+    delete new PumpControl;        delete new MotorControl;
 
     setupCentralWidget();
     setupDockWidgets();

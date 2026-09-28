@@ -537,6 +537,34 @@
     <ClCompile Include="src\widgets\PipeControl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.1c(2026-09-28):泵 + 电机(带旋转动画) -->
+    <QtMoc Include="src\widgets\PumpControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\PumpControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\PumpControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\MotorControl.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\MotorControl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\MotorControl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <QtMoc Include="src\widgets\base\SpinAnimator.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\widgets\base\SpinAnimator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\widgets\base\SpinAnimator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ E.2(2026-09-21):PropertySheet + PropertyChangeCommand -->
     <ClInclude Include="src\editor\PropertySheet.h">
       <Filter>Header Files</Filter>
