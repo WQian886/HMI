@@ -3,8 +3,18 @@
 > 个人学习项目:用 Qt 6 / C++17 从零实现工业 HMI(Human-Machine Interface)。
 > 不调现成控件库,**手写通信层、协议层、变量层、绑定层、业务层**,目标是理解工业 HMI 的底层原理。
 
+> **2026-09-28 状态(基于代码核对)**:
+> - A 工程化基线 ✅ 通过验证(2026-09-11,后补 A2-5/A3 验证)
+> - B 用户/权限/审计 ✅ 代码落地
+> - C 多协议 ✅ ModbusDriver 落地,S7/EIP 仍 stub(Snap7/libplctag 未真接)
+> - D 历史库/曲线/报表/Tag ✅ 代码落地
+> - E 画面框架 **🟡 收尾中(E.4d-follow-7)** — WYSIWYG 编辑器多选/对齐/缩放,SelectionFrame 视觉延后(`bug图/图1.png`)
+> - F/G/H/I ⬜ 未启动
+> - 详见 `docs/现状.md` / `docs/路线图.md` / `hmi/CHANGELOG.md`
+
 已实现:Modbus TCP 通信 · PLC 寄存器轮询 · 变量订阅发布 · 控件双向绑定 ·
-阈值报警(4 档 + 确认/恢复)· 报警联动动作 · 工程配置 JSON 存读
+阈值报警(4 档 + 确认/恢复)· 报警联动动作 · 工程配置 JSON 存读 ·
+**用户权限 + 操作审计)** · **历史曲线 + CSV 导出)** · **WYSIWYG 编辑器(多选/对齐/缩放)**
 
 ---
 
@@ -14,15 +24,17 @@
 
 | 我想…… | 看这个 |
 |---|---|
-| 知道**项目现在做到哪了** | **[`docs/现状.md`](docs/现状.md)** ← 唯一权威 |
-| 知道**接下来要做什么** | **[`docs/路线图.md`](docs/路线图.md)** ← 唯一权威 |
-| 知道**有哪些代码待修** | [`docs/改善清单.md`](docs/改善清单.md)(30 条 / 255xp) |
+| 知道**项目现在做到哪了** | **[`docs/现状.md`](docs/现状.md)** ← 唯一权威(2026-09-28 已对齐到 E.4d) |
+| 知道**接下来要做什么** | **[`docs/路线图.md`](docs/路线图.md)** ← 唯一权威(v0.2.0 A-I,E 收尾 → F 启动) |
+| 知道**有哪些代码待修** | [`docs/改善清单.md`](docs/改善清单.md)(30 条 / 255xp,**8 ✅ / 1 🟡 / 21 ⬜**) |
+| 知道**最近 19 个 commit 干了啥** | [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md)(含 v0.2.0-rc1) |
 | **编译不过 / 环境配置** | [`docs/现状.md` 第六节](docs/现状.md)(含 VS2026 的 ucrt 坑) |
 | 搞懂**某个模块怎么运作的** | [`docs/专题/`](docs/专题/) |
 | 查**某个 Qt 类怎么用** | [`docs/HMI工程档案.md`](docs/HMI工程档案.md) 的知识卡片索引 |
 | 查**换项目也能用的通用知识** | [`docs/通用知识/`](docs/通用知识/) |
 | 回顾**当时是怎么想的 / 踩了什么坑** | [`docs/日记/`](docs/日记/) |
 | 找**已经过期的旧文档** | [`docs/归档/`](docs/归档/)(只读) |
+| 看**最近的 bug 现场** | `bug图/`(未跟踪,10 张 PNG,对应 E.4d commit 链) |
 
 **三份权威文档的分工**:`现状.md` = 现在什么样 ｜ `路线图.md` = 接下来做什么 ｜ `改善清单.md` = 哪里要修
 
@@ -62,7 +74,10 @@
 | 7 | 整合 demo(真 PLC + 24h 长跑 + 截图视频) | ↪️ 见 v0.2.0 阶段 A |
 | 8+ | 可选扩展(S7 / 曲线 / 串口 / 多 PLC / 权限) | ↪️ 见 v0.2.0 阶段 B–I |
 
-**下一步该做什么**:打开 [`docs/路线图.md`](docs/路线图.md) 看 v0.2.0 阶段 A 验证清单。
+**下一步该做什么**(2026-09-28 现状):
+- **E.4d 收尾**(2-4 小时):补 `SelectionFrameItem.cpp` 的 `paint()` 视觉(对应 `bug图/图1.png`),CMakeLists.txt 显式加 `SelectionFrameItem` + `GroupHandleItem`,vcxproj.filters 给 E.4d 新增 .cpp 补 `<Filter>Source Files</Filter>`,删 5 个 `.bak` 残留,改 `.gitignore` 加 `hmi/x64/`/`hmi/out/`/`hmi/tests/build/` 三行。
+- **Wqian 一句话"阶段 F 启动"**:展开 F 阶段工单(商业级报警,2-3 周 P1)。
+- 详见 [`docs/路线图.md`](docs/路线图.md) 和 [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md) v0.2.0-rc1。
 
 ---
 
@@ -104,33 +119,49 @@ Qt signal/slot 是层间唯一的调度机制。详见 [`docs/专题/2026-08-09_
 HMI/                              ← 仓库根(2026-09-08 从更上层下移至此)
 ├── README.md                       本文件(唯一入口)
 ├── LICENSE                         MIT
-├── scripts/                        自维护脚本(目前含 sync_vcxproj.py)
+├── scripts/                        自维护脚本(sync_vcxproj.py + build.cmd)
 ├── docs/                         ← 所有文档
-│   ├── 现状.md                     进度 + 架构 + 约定 + 环境(唯一权威)
+│   ├── 现状.md                     进度 + 架构 + 约定 + 环境(唯一权威,2026-09-28 对齐)
 │   ├── 路线图.md                   接下来做什么(唯一权威,v0.2.0 A–I)
-│   ├── 改善清单.md                 代码待修 30 条
+│   ├── 改善清单.md                 代码待修 30 条(8 ✅ / 1 🟡 / 21 ⬜)
+│   ├── 阶段X_从这里继续.md         每个阶段的开干说明
 │   ├── 优化与改善计划.html         v0.2.0 完整方案
 │   ├── HMI工程档案.md              Qt 知识卡片库
 │   ├── 专题/                       模块深挖(调度机制/报警联动/Modbus/schema)
 │   ├── 通用知识/                   跨项目可复用
 │   ├── 日记/                       按天流水
 │   └── 归档/                       过期文档(只读)
+├── bug图/                          未跟踪,10 张 E.4d 修复前后对照截图
 └── hmi/                         ← Qt VS 工程根(单层)
-    ├── hmi.slnx / hmi.vcxproj / hmi.vcxproj.filters
+    ├── hmi.slnx / hmi.vcxproj / hmi.vcxproj.filters / hmi.vcxproj.user
     ├── main.cpp / hmi.cpp / hmi.h / hmi.ui
-    ├── TcpClient · ModbusMaster                传输 + 协议
-    ├── Variable · VariableManager              数据
+    ├── TcpClient · ModbusMaster                传输 + 协议(7 层架构:传输 / 协议)
+    ├── Variable · VariableManager              数据(7 层架构:数据)
     ├── PollScheduler · WriteScheduler · Binding 调度 + 绑定
     ├── Alarm · AlarmManager · ThresholdAlarmChecker · WriteFailChecker
     ├── ActionManager                           报警联动
-    ├── Project · JsonSerializer                工程文件
-    ├── src/                                    A 阶段:logging/crash/instance/tray
-    ├── installer/hmi.iss                       A 阶段:Inno Setup 安装包
-    ├── tests/                                  A 阶段:单元测试(自带 CMakeLists.txt)
+    ├── Project · JsonSerializer                工程文件(7 层架构:配置)
+    ├── src/                                  ← 阶段 A–E 代码落地
+    │   ├── logging/  crash/  instance/  tray/   A 阶段工程化基线
+    │   ├── auth/                                 B 阶段:用户/权限/审计(8 模块 + 8 测试)
+    │   ├── drivers/                              C 阶段:ModbusDriver + S7/EIP stub
+    │   ├── history/  export/  tag/               D 阶段:历史库 + CSV + 表达式 + Tag
+    │   ├── widgets/                              E 阶段控件库(18 控件)
+    │   │   ├── base/ControlBase                  E.4d 基类
+    │   │   └── 17 控件(Label/Number/Bar/Gauge/Led/Button/...)
+    │   └── editor/                               E 阶段编辑器(E.4d 收尾中)
+    │       ├── PropertySheet · PropertyChangeCommand  E.2 反射驱动 + undo
+    │       ├── SizeEditor · PositionEditor             E.4c 复合编辑器
+    │       ├── PaletteWidget                          E.4a 调色板
+    │       ├── ResizeHandleItem · GroupHandleItem     E.4b 多选 handle
+    │       ├── SelectionFrameItem                    E.4d 选中框(视觉 deferred)
+    │       └── EditorMainWindow                      E.2/E.4d 主窗口
+    ├── installer/hmi.iss                       A/I 阶段:Inno Setup 安装包
+    ├── tests/                                  A–E 阶段:单元测试(~25 个 tst_* + 自带 CMakeLists)
     ├── docs/阶段A_工程化基线.md                A 阶段:验证步骤
     ├── .clang-tidy / .clang-format             A 阶段:静态分析
     ├── .github/workflows/build.yml             A 阶段:CI
-    └── CHANGELOG.md                            A 阶段:变更日志(待写)
+    └── CHANGELOG.md                            v0.1.0 + v0.2.0-rc1 变更日志
 ```
 
 **VS 主打开路径**:仓库根 → `hmi/hmi.slnx`(单层,不是嵌套)
