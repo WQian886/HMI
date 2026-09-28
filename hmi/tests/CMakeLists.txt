@@ -185,6 +185,10 @@ add_hmi_test(tst_InputEditControl)
 add_hmi_test(tst_TrendControl)
 add_hmi_test(tst_TableControl)
 add_hmi_test(tst_AlarmListControl)
+# ★ E.1c(2026-09-28):UI → PLC 反向写通道(ControlBase::writeToPlc)
+#   修复前 ToggleControl 点一下只翻本地值,全仓库无人接 toggled 信号,
+#   17 个控件全是只读显示器。详见 tst_ControlBaseWrite.cpp 头注释。
+add_hmi_test(tst_ControlBaseWrite)
 # 阶段 E · E.2 属性面板 PropertySheet
 add_hmi_test(tst_PropertySheet)
 # 阶段 E · E.2 周 11 EditorMainWindow

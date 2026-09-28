@@ -60,11 +60,31 @@ void ToggleControl::paint(QPainter* p,
     p->drawText(br, Qt::AlignCenter, on ? onText_ : offText_);
 }
 
+// ★ E.1c(2026-09-28)修复:原来这里调 setValue(只翻本地),emit toggled 后
+//   【全仓库没有任何人接这个信号】—— 也就是说开关点了永远不会写回 PLC,
+//   整个控件只是个装饰。同批修法见 ControlBase::writeToPlc。
 void ToggleControl::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
     if (event->button() == Qt::LeftButton && contains(event->pos())) {
         const bool nowOn = value().toDouble() < 0.5;  // 翻转
-        setValue(nowOn ? 1.0 : 0.0);
-        emit toggled(nowOn);
+        const qreal newVal = nowOn ? 1.0 : 0.0;
+
+        if (writeToPlc(newVal)) {
+            // 写成功(含 Accepted 和 NoChange):值已由 writeToPlc 内部 setValue 刷过
+            emit toggled(nowOn);
+            return;
+        }
+
+        // 写被拒。两种情况要分开处理,不能一刀切:
+        //  · 未绑定变量 —— 编辑器里的空摆件,没有 PLC 对象可写。
+        //    这时本地翻一下当预览,免得操作员/作者在编辑器里点了没反应以为控件坏了。
+        //  · 已绑定但被拒(只读变量 / 无权限 / 值非法) —— 这是【真设备的拒绝】,
+        //    必须让用户看见没生效,绝不能本地翻,否则画面显示"ON"而 PLC 纹丝不动,
+        //    操作员会据此判断设备状态 —— 这跟 ActionManager.cpp:75-86 修的
+        //    "联动撒谎上报"是同一类事故。
+        if (!boundVariable()) {
+            setValue(newVal);
+            emit toggled(nowOn);
+        }
     }
     QGraphicsObject::mouseReleaseEvent(event);
 }

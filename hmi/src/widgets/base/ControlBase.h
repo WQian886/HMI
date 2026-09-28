@@ -19,11 +19,16 @@
 #include <QGraphicsObject>
 #include <QJsonObject>
 #include <QPointF>
+#include <QPointer>
 #include <QSizeF>
 #include <QString>
 #include <QVariant>
 
-class Variable;
+// ★ E.1c:bound_ 从裸 Variable* 改成 QPointer<Variable>,QPointer 的 static_cast
+//   需要【完整类型】(要调 QObject::destroyed 钩子),所以这里必须 include 而非前向声明。
+//   Variable.h 很轻(只依赖 QObject/QString/QVariant/QDateTime),无循环包含。
+#include "../../Variable.h"
+
 class VariableManager;
 class QPainter;
 class QStyleOptionGraphicsItem;
@@ -99,6 +104,24 @@ public:
     void bind(Variable* v);          // 连接 valueChanged → updateDisplay
     void unbind();                    // 解绑
 
+    // ★ E.1c(2026-09-28):UI → PLC 反向写通道
+    //   背景:基类原本是单向的。onVariableValueChanged 只做「PLC 推过来 → 更新显示」,
+    //         反方向推不出去。ToggleControl 点一下只翻本地 value_ + emit toggled,
+    //         而全仓库没有任何人接那个信号 → 17 个控件全是只读显示器,一个都写不回 PLC。
+    //         对 E.1c 的阀门/泵/电机是致命的:不能点开的阀门就只是张图片。
+    //   改法:统一走 Variable::setValue + markDirty(WriteScheduler 扫 dirty 发出去),
+    //         完整对齐 Binding.cpp:146-176 / ActionManager.cpp:81-88 两条既有写路径。
+    //   语义:本地 setValue 立即生效(不等 PLC 回读),PLC 回读后 onVariableValueChanged
+    //         会再刷一次 —— 这是乐观 UI,工业现场操作员要的就是"点了立刻有反应"。
+    //   返回 false = 拒绝写入(未绑定 / 只读变量 / 无权限 / 值被 Variable 拒收),
+    //         此时本地 value_ 保持不变(不撒谎),调用方应据此提示用户。
+    bool writeToPlc(const QVariant& v);
+
+    // ★ 派生类用的绑定句柄(阀门/泵/电机点击时可能需要看 access)
+    Variable* boundVariable() const { return bound_; }
+    // ★ 写权限判定(不含绑定检查)—— 供派生类在 mousePress 里做灰化/提示
+    bool canWrite() const;
+
 signals:
     void positionChanged();
     void sizeChanged();
@@ -113,7 +136,14 @@ private:
     QSizeF       size_ = QSizeF(120, 40);   // 默认 120x40
     QString      variableName_;             // "plc1.Speed"
     QVariant     value_;                    // 当前值
-    Variable*    bound_ = nullptr;          // 当前绑定的 Variable
+    // ★ E.1c:裸 Variable* → QPointer。
+    //   之前是裸指针,VariableManager 删掉变量后 bound_ 悬空。基类原来只读
+    //   (悬空最多崩在 onVariableValueChanged),现在 writeToPlc 要【解引用它去写 PLC】
+    //   —— 悬空就从"崩"升级成"往已释放内存写值",性质更恶劣。
+    //   QPointer 在 QObject 析构时自动置 null,所有 if (!bound_) / bound_->x() 路径
+    //   不用改就变安全。现状.md 第五节约定 5 说的正是这件事(要求 connect
+    //   variableReplaced),QPointer 是更省心的等价手段。
+    QPointer<Variable> bound_;            // 当前绑定的 Variable(自动防悬空)
     VariableManager* varMgr_ = nullptr;     // 全局 vm(查变量用)
 
 public:

@@ -6,10 +6,17 @@
 #include "widgets/base/ControlBase.h"
 #include "../../Variable.h"
 #include "../../VariableManager.h"
+// ★ E.1c:写回 PLC 需要跟既有写路径(Binding.cpp / ActionManager.cpp)对齐的三件套:
+//   权限检查 + 审计留痕。include 根是 src/(见 CMakeLists target_include_directories)
+#include "auth/AuditLog.h"
+#include "auth/CurrentUser.h"
+#include "auth/Permission.h"
 
 #include <QHash>
 #include <QJsonObject>
+#include <QMetaType>
 #include <algorithm>
+#include <limits>
 
 namespace qwhmi::widgets {
 
@@ -18,6 +25,65 @@ namespace {
 QHash<QString, ControlBase::FactoryFn>& registry() {
     static QHash<QString, ControlBase::FactoryFn> r;
     return r;
+}
+
+// ★ E.1c:把控件传来的通用 QVariant 适配成 Variable 声明的精确类型
+//
+// 【为什么必须有】Variable::setValue 里的 matchesDataType(Variable.cpp:35-45)
+//   是【严格 typeId 相等】:Bool 只认 QMetaType::Bool,Float 只认 QMetaType::Float,
+//   double 一个都不认。但控件内部一律用 double 算 —— ToggleControl.cpp:68 的
+//   `value().toDouble() < 0.5`、SliderControl 的百分比、Gauge 的比例,全是 double。
+//   不适配的结果:每个开关、每个滑块点下去都被 Variable 静默拒绝 ——
+//   画面不动、PLC 不动,日志里只有一行 type mismatch。写回通道等于没接通。
+//
+// 【跟既有写路径一致】Binding.cpp:120-137 的 inline edit 同样做这个适配
+//   (按 dataType 分支 fromValue<qint16>/<quint16>/<qint32>/<float>),只是它
+//   在调用方做。这里放在 writeToPlc 是因为控件有 22 个派生类,散着做必漏。
+//
+// 【转不了就返回空 QVariant】调用方按"值非法"处理,跟 Rejected 走同一条路。
+QVariant coerceToDataType(const QVariant& v, Variable::DataType t) {
+    // 已经是对的类型就别动 —— 避免 float→float 之类无意义的往返丢精度
+    if (v.typeId() == static_cast<int>(t)) return v;
+
+    switch (t) {
+    case Variable::DataType::Bool: {
+        // 非 0 即真。QVariant::toBool 对字符串会按 "true"/非空 判断,
+        // 但变量值不会来自字符串(PLC 那边是寄存器),这里只处理数值/布尔
+        if (v.typeId() == QMetaType::QString) return {};
+        return QVariant::fromValue<bool>(v.toDouble() != 0.0);
+    }
+    case Variable::DataType::Int16: {
+        bool ok = false;
+        const qint64 n = v.toLongLong(&ok);
+        if (!ok || n < std::numeric_limits<qint16>::min()
+                 || n > std::numeric_limits<qint16>::max()) return {};
+        return QVariant::fromValue<qint16>(static_cast<qint16>(n));
+    }
+    case Variable::DataType::UInt16: {
+        bool ok = false;
+        const qint64 n = v.toLongLong(&ok);
+        // ★ 无符号:负数直接判非法,不静默回绕成 65535 —— 那会把 -1 写成 65535,
+        //   现场表现是"写个 -1 结果寄存器变最大正数",极难排查
+        if (!ok || n < 0 || n > std::numeric_limits<quint16>::max()) return {};
+        return QVariant::fromValue<quint16>(static_cast<quint16>(n));
+    }
+    case Variable::DataType::Int32: {
+        bool ok = false;
+        const qint64 n = v.toLongLong(&ok);
+        if (!ok || n < std::numeric_limits<qint32>::min()
+                 || n > std::numeric_limits<qint32>::max()) return {};
+        return QVariant::fromValue<qint32>(static_cast<qint32>(n));
+    }
+    case Variable::DataType::Float:
+        // toFloat 失败返回 0 且 ok=false,必须查 ok —— 否则用户输 "abc" 会静默写 0
+        if (v.typeId() == QMetaType::QString) {
+            bool ok = false;
+            const float f = v.toString().toFloat(&ok);
+            return ok ? QVariant::fromValue<float>(f) : QVariant();
+        }
+        return QVariant::fromValue<float>(v.toFloat());
+    }
+    return {};
 }
 } // namespace
 
@@ -218,6 +284,80 @@ void ControlBase::unbind() {
 void ControlBase::onVariableValueChanged() {
     if (!bound_) return;
     setValue(bound_->value());
+}
+
+// ===== E.1c UI → PLC 反向写通道 =====
+
+// ★ 权限判定单独抽出来:writeToPlc 要用,派生类(阀门/泵/电机)点击前也要用
+//   —— 没权限 / 只读变量时应该画成灰的让操作员一眼看出点不动,而不是点了没反应。
+//   角色 → 权限映射见 auth/Permission.cpp:60 checkPermission。
+bool ControlBase::canWrite() const {
+    if (!bound_) return false;
+    if (bound_->access() != Variable::Access::ReadWrite) return false;
+    return qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                                        qwhmi::auth::Permission::WriteVariable);
+}
+
+// ★ IMPROVE #28 同款教训(见 ActionManager.cpp:75-86):setValue 返 Rejected 时
+//   【绝不能】照样 markDirty —— 那样审计会记「已执行」但 PLC 实际啥也没收到,
+//   事故复盘时唯一证据是假的。所以四道闸任一不过,都 return false 且不标 dirty。
+bool ControlBase::writeToPlc(const QVariant& v) {
+    // 闸 1:没绑定变量 —— 纯编辑器里的摆件,没连 PLC 就没有可写的对象
+    if (!bound_) return false;
+
+    // 闸 2:只读变量(传感器数据)。跟 Binding.cpp 的权限闸并列,不合并 ——
+    //   一个是「这台 PLC 不许写」,一个是「这个人没资格写」,拒绝理由不同,排查时要能分开。
+    if (bound_->access() != Variable::Access::ReadWrite) return false;
+
+    // 闸 3:权限。Operator / Engineer / Admin 都有 WriteVariable(见 Permission.cpp:29-46),
+    //   Viewer 没有。跟 Binding.cpp:147-155 同源。
+    if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                                      qwhmi::auth::Permission::WriteVariable)) {
+        qCWarning(qwhmi::auth::hmiPerm) << "[Control] 本用户" << qwhmi::auth::CurrentUser::instance().name()
+                           << "无 WriteVariable 权限,控件写入被拒:" << bound_->name();
+        return false;
+    }
+
+    // 闸 4:先按变量的 DataType 把控件的 double 适配成精确类型,再交 Variable 校验。
+    //   Variable::setValue 的 matchesDataType 是严格 typeId 相等(Variable.cpp:35-45),
+    //   不适配就等于闸 4 永远在拦 —— 写回通道看着通着,实际什么都写不进去。
+    //   适配本身转不了(字符串、溢出 UInt16 等)也算这一闸拒。
+    const QVariant typed = coerceToDataType(v, bound_->dataType());
+    if (!typed.isValid()) {
+        qCWarning(qwhmi::auth::hmiPerm) << "[Control] 值" << v.toString()
+                           << "无法适配成变量" << bound_->name() << "的数据类型";
+        qwhmi::auth::AuditLog::instance().appendCurrent(
+            QStringLiteral("control.write"), bound_->name(),
+            QStringLiteral("value=%1").arg(v.toString()), QStringLiteral("rejected"));
+        return false;
+    }
+
+    // Variable 自己的范围校验。Rejected 时不碰本地 value_,
+    //   保持跟 Variable 里的真值一致 —— 免得画面显示的值和 PLC 里的值对不上。
+    const Variable::SetValueResult r = bound_->setValue(typed);
+    if (r == Variable::SetValueResult::Rejected) {
+        qCWarning(qwhmi::auth::hmiPerm) << "[Control] 变量" << bound_->name()
+                           << "拒绝值" << typed.toString() << "(超范围)";
+        // 审计记 fail:PLC 侧没收到,复盘时这里就是证据
+        qwhmi::auth::AuditLog::instance().appendCurrent(
+            QStringLiteral("control.write"), bound_->name(),
+            QStringLiteral("value=%1").arg(typed.toString()), QStringLiteral("rejected"));
+        return false;
+    }
+
+    // 四闸全过:本地立刻更新(乐观 UI —— 操作员点了要马上看到反应,不等 PLC 回读)
+    setValue(v);
+    // ★ 关键一行:markDirty 才是真正让 WriteScheduler 动起来的开关
+    //   (WriteScheduler.cpp:51-52 每帧扫 isDirty)。光 setValue 不写 PLC。
+    //   Accepted 和 NoChange 都标 —— 跟 Binding.cpp:168-170 同一决策:
+    //   值没变也可能 PLC 端被外部改过,写回去对齐。
+    bound_->markDirty();
+
+    // 留痕,跟 Binding.cpp:173-176 的 "variable.write" 同格式
+    qwhmi::auth::AuditLog::instance().appendCurrent(
+        QStringLiteral("control.write"), bound_->name(),
+        QStringLiteral("value=%1").arg(v.toString()), QStringLiteral("ok"));
+    return true;
 }
 
 } // namespace qwhmi::widgets
