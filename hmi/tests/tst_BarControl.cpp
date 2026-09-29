@@ -68,9 +68,11 @@ void TestBarControl::orientation_switchesAxis() {
 void TestBarControl::fromJson_restoresAllFields() {
     BarControl b;
     QJsonObject obj;
-    obj["x"] = 10.0; obj["y"] = 20.0;
-    obj["w"] = 200.0; obj["h"] = 30.0;
-    obj["variable"] = "plc1.Level";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 10.0}, {"y", 20.0}};
+    obj["size"]     = QJsonObject{{"width", 200.0}, {"height", 30.0}};
+    obj["variableName"] = "plc1.Level";
     b.fromJson(obj);
     QCOMPARE(b.position(), QPointF(10.0, 20.0));
     QCOMPARE(b.size(), QSizeF(200.0, 30.0));

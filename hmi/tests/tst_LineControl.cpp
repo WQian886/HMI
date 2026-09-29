@@ -53,8 +53,10 @@ void TestLineControl::strokeColor_changeTriggersUpdate() {
 void TestLineControl::fromJson_restoresAllFields() {
     LineControl l;
     QJsonObject obj;
-    obj["x"] = 10.0; obj["y"] = 100.0;
-    obj["w"] = 200.0; obj["h"] = 5.0;
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 10.0}, {"y", 100.0}};
+    obj["size"]     = QJsonObject{{"width", 200.0}, {"height", 5.0}};
     l.fromJson(obj);
     QCOMPARE(l.size(), QSizeF(200.0, 5.0));
 }

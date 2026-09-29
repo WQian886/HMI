@@ -77,11 +77,11 @@ void TestNumberDisplay::format_changeTriggersUpdate() {
 void TestNumberDisplay::fromJson_restoresAllFields() {
     NumberDisplay n;
     QJsonObject obj;
-    obj["x"] = 100.0;
-    obj["y"] = 50.0;
-    obj["w"] = 200.0;
-    obj["h"] = 60.0;
-    obj["variable"] = "plc1.Speed";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 100.0}, {"y", 50.0}};
+    obj["size"]     = QJsonObject{{"width", 200.0}, {"height", 60.0}};
+    obj["variableName"] = "plc1.Speed";
     n.fromJson(obj);
 
     QCOMPARE(n.position(), QPointF(100.0, 50.0));

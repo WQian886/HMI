@@ -55,9 +55,11 @@ void TestRectangleControl::fillColor_changeTriggersUpdate() {
 void TestRectangleControl::fromJson_restoresAllFields() {
     RectangleControl r;
     QJsonObject obj;
-    obj["x"] = 50.0; obj["y"] = 30.0;
-    obj["w"] = 200.0; obj["h"] = 60.0;
-    obj["variable"] = "plc1.box";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 50.0}, {"y", 30.0}};
+    obj["size"]     = QJsonObject{{"width", 200.0}, {"height", 60.0}};
+    obj["variableName"] = "plc1.box";
     r.fromJson(obj);
     QCOMPARE(r.position(), QPointF(50.0, 30.0));
     QCOMPARE(r.size(), QSizeF(200.0, 60.0));

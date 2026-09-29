@@ -36,6 +36,7 @@ private slots:
     void bind_setsValueAndEmits();
     void fromJson_loadsRestoresValues();
     void toJson_serializesAllFields();
+    void toJson_fromJson_roundTrips();   // ★ 2026-09-29:锁住"写出去的读得回来"
 };
 
 void TestLabelControl::initTestCase() {
@@ -117,12 +118,18 @@ void TestLabelControl::bind_setsValueAndEmits() {
 void TestLabelControl::fromJson_loadsRestoresValues() {
     LabelControl lbl;
 
+    // ★★ 键名必须是 ControlBase 的 Q_PROPERTY 名,不是曾经瞎写的 x/y/w/h/variable。
+    //   ControlBase.h:43-44 声明的是 position / size / variableName,
+    //   而 propertiesFromJson 按 Q_PROPERTY 名反查(obj.contains(name) 不中就跳过),
+    //   所以写成 x/w 的话【整个对象被静默忽略】,控件保持默认值 —— 而 QCOMPARE
+    //   只报"值不等",完全看不出是"字段名没匹配上"。这批用例红了很久没人查,
+    //   就是因为失败信息指向的是值,不像键名问题。
+    //   正确形状:position/size 是【嵌套对象】,不是平铺的 x/y/w/h
+    //   (见 ControlBase.cpp propertiesToJson 的 QMetaType::QPointF 分支)
     QJsonObject obj;
-    obj["x"] = 100.0;
-    obj["y"] = 200.0;
-    obj["w"] = 250.0;
-    obj["h"] = 60.0;
-    obj["variable"] = "plc2.Pressure";
+    obj["position"] = QJsonObject{{"x", 100.0}, {"y", 200.0}};
+    obj["size"]     = QJsonObject{{"width", 250.0}, {"height", 60.0}};
+    obj["variableName"] = "plc2.Pressure";
 
     lbl.fromJson(obj);
 
@@ -139,12 +146,33 @@ void TestLabelControl::toJson_serializesAllFields() {
     lbl.setVariableName("plc1.Temp");
 
     QJsonObject obj = lbl.toJson();
-    QCOMPARE(obj["x"].toDouble(), 50.0);
-    QCOMPARE(obj["y"].toDouble(), 75.0);
-    QCOMPARE(obj["w"].toDouble(), 180.0);
-    QCOMPARE(obj["h"].toDouble(), 50.0);
-    QCOMPARE(obj["variable"].toString(), QString("plc1.Temp"));
+    // ★ 同上:键名跟 Q_PROPERTY 对齐,position/size 是嵌套对象
+    const QJsonObject pos = obj["position"].toObject();
+    const QJsonObject siz = obj["size"].toObject();
+    QCOMPARE(pos["x"].toDouble(), 50.0);
+    QCOMPARE(pos["y"].toDouble(), 75.0);
+    QCOMPARE(siz["width"].toDouble(), 180.0);
+    QCOMPARE(siz["height"].toDouble(), 50.0);
+    QCOMPARE(obj["variableName"].toString(), QString("plc1.Temp"));
     QVERIFY(obj.contains("type"));   // 含类名(E.3 JSON 加载用)
+}
+
+// ★★ 补一条:toJson → fromJson 必须真能往返。
+//   上一条 toJson 用例只验"输出里有什么",不验"fromJson 读得回来" ——
+//   键名两边不一致的话(正是这批用例之前的状况),它照样绿。
+//   这条才是真正锁住"写出去的读得回来"的断言。
+void TestLabelControl::toJson_fromJson_roundTrips() {
+    LabelControl src;
+    src.setPosition(QPointF(11.0, 22.0));
+    src.setSize(QSizeF(33.0, 44.0));
+    src.setVariableName("plc9.RoundTrip");
+
+    LabelControl dst;
+    dst.fromJson(src.toJson());
+
+    QCOMPARE(dst.position(), src.position());
+    QCOMPARE(dst.size(), src.size());
+    QCOMPARE(dst.variableName(), src.variableName());
 }
 
 // ★ QTEST_MAIN(创建 QApplication — paint 测试需要 GUI 主循环)

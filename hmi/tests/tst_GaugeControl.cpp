@@ -67,9 +67,11 @@ void TestGaugeControl::needleColor_changes() {
 void TestGaugeControl::fromJson_restoresAllFields() {
     GaugeControl g;
     QJsonObject obj;
-    obj["x"] = 100.0; obj["y"] = 100.0;
-    obj["w"] = 150.0; obj["h"] = 150.0;
-    obj["variable"] = "plc1.Speed";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 100.0}, {"y", 100.0}};
+    obj["size"]     = QJsonObject{{"width", 150.0}, {"height", 150.0}};
+    obj["variableName"] = "plc1.Speed";
     g.fromJson(obj);
     QCOMPARE(g.position(), QPointF(100.0, 100.0));
     QCOMPARE(g.size(), QSizeF(150.0, 150.0));

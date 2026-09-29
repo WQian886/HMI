@@ -79,9 +79,11 @@ void TestLedControl::colorChanges_litAndUnlit() {
 void TestLedControl::fromJson_restoresAllFields() {
     LedControl l;
     QJsonObject obj;
-    obj["x"] = 50.0; obj["y"] = 50.0;
-    obj["w"] = 32.0; obj["h"] = 32.0;
-    obj["variable"] = "plc1.Run";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 50.0}, {"y", 50.0}};
+    obj["size"]     = QJsonObject{{"width", 32.0}, {"height", 32.0}};
+    obj["variableName"] = "plc1.Run";
     l.fromJson(obj);
     QCOMPARE(l.position(), QPointF(50.0, 50.0));
     QCOMPARE(l.size(), QSizeF(32.0, 32.0));

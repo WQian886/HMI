@@ -70,9 +70,11 @@ void TestGroupControl::title_changeTriggersUpdate() {
 void TestGroupControl::fromJson_restoresAllFields() {
     GroupControl g;
     QJsonObject obj;
-    obj["x"] = 50.0; obj["y"] = 50.0;
-    obj["w"] = 300.0; obj["h"] = 200.0;
-    obj["variable"] = "plc1.Pump";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 50.0}, {"y", 50.0}};
+    obj["size"]     = QJsonObject{{"width", 300.0}, {"height", 200.0}};
+    obj["variableName"] = "plc1.Pump";
     g.fromJson(obj);
     QCOMPARE(g.size(), QSizeF(300.0, 200.0));
 }

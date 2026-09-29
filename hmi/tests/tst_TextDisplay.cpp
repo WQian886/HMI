@@ -89,11 +89,11 @@ void TestTextDisplay::prefixSuffix_changesUpdateDisplay() {
 void TestTextDisplay::fromJson_restoresAllFields() {
     TextDisplay t;
     QJsonObject obj;
-    obj["x"] = 50.0;
-    obj["y"] = 60.0;
-    obj["w"] = 220.0;
-    obj["h"] = 40.0;
-    obj["variable"] = "plc1.Status";
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 50.0}, {"y", 60.0}};
+    obj["size"]     = QJsonObject{{"width", 220.0}, {"height", 40.0}};
+    obj["variableName"] = "plc1.Status";
     t.fromJson(obj);
 
     QCOMPARE(t.position(), QPointF(50.0, 60.0));

@@ -71,8 +71,10 @@ void TestImageControl::scaleToFit_togglesDraw() {
 void TestImageControl::fromJson_restoresAllFields() {
     ImageControl img;
     QJsonObject obj;
-    obj["x"] = 30.0; obj["y"] = 30.0;
-    obj["w"] = 100.0; obj["h"] = 100.0;
+    // ★ 键名按 ControlBase 的 Q_PROPERTY 名写(见 tst_LabelControl.cpp 的说明):
+    //   position/size 是嵌套对象,不是平铺的 x/y/w/h
+    obj["position"] = QJsonObject{{"x", 30.0}, {"y", 30.0}};
+    obj["size"]     = QJsonObject{{"width", 100.0}, {"height", 100.0}};
     img.fromJson(obj);
     QCOMPARE(img.position(), QPointF(30.0, 30.0));
     QCOMPARE(img.size(), QSizeF(100.0, 100.0));
