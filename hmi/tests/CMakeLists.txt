@@ -215,6 +215,9 @@ add_hmi_test(tst_PropertySheet)
 add_hmi_test(tst_EditorMainWindow)
 # ★ E.4d-follow-8(2026-09-29):对齐/等尺寸的 Undo(9 个动作,原为零覆盖)
 add_hmi_test(tst_GeometryUndo)
+# ★ E.4d-follow-9(2026-09-29):选中框【真的画出来了吗】—— 渲染到 QImage 数像素,
+#   补上 tst_EditorMainWindow 那 4 个只断言几何、不看画面的用例的盲区
+add_hmi_test(tst_SelectionFrameRender)
 # 阶段 E · E.4a 控件调色板 PaletteWidget
 add_hmi_test(tst_PaletteWidget)
 # 阶段 E · E.4b 8 handle 缩放 ResizeHandleItem
