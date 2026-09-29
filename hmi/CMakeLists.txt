@@ -69,6 +69,8 @@ set(SOURCES
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand(QUndoCommand)
     src/editor/PropertySheet.cpp
     src/editor/PropertyChangeCommand.cpp
+    # ★ E.4d-follow-8(2026-09-29):多控件几何 Undo(9 个对齐/等尺寸动作)
+    src/editor/GeometryChangeCommand.cpp
     # ★ E.2 周 11:EditorMainWindow 骨架
     src/editor/EditorMainWindow.cpp
     # ★ E.4a:控件调色板 PaletteWidget
@@ -135,6 +137,8 @@ set(HEADERS
     # ★ E.2:PropertySheet + PropertyChangeCommand
     src/editor/PropertySheet.h
     src/editor/PropertyChangeCommand.h
+    # ★ E.4d-follow-8:多控件几何 Undo
+    src/editor/GeometryChangeCommand.h
     # ★ E.2 周 11:EditorMainWindow
     src/editor/EditorMainWindow.h
     # ★ E.4a:PaletteWidget

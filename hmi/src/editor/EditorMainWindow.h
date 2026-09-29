@@ -16,7 +16,9 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QHash>
 #include <QList>
+#include <QRectF>
 #include "editor/SelectionFrameItem.h"   // ★ E.4d 续:public 访问器要返回完整类型
 
 class QGraphicsScene;
@@ -110,6 +112,15 @@ private:
     void setupAlignToolbar();      // ★ E.4d
     void clearControls();   // ★ E.3:删所有 controls_(load 时清理旧画布)
     void updateAlignToolbarState();   // ★ E.4d:根据多选状态启禁用
+
+    // ★ E.4d-follow-8(2026-09-29):几何 Undo 辅助
+    //   9 个对齐/等尺寸动作共用一套快照-修改-入栈套路,抽这两个出来是为了
+    //   保证 9 处写法的【完全一致】—— merge 规则依赖 actionTag 和控件集合,
+    //   只要有一处漏了快照或 push,那一个动作就会变成"撤不回来"的那个。
+    using ControlBase = qwhmi::widgets::ControlBase;
+    QHash<ControlBase*, QRectF> snapshotGeometry() const;
+    void pushGeometryCommand(const QHash<ControlBase*, QRectF>& before,
+                             const QString& actionText);
 
     QGraphicsView*  view_          = nullptr;
     QGraphicsScene* scene_         = nullptr;

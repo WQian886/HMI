@@ -578,6 +578,13 @@
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.4d-follow-8(2026-09-29):多控件几何 Undo(无 Q_OBJECT,故无 QtMoc 条目) -->
+    <ClInclude Include="src\editor\GeometryChangeCommand.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\GeometryChangeCommand.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器 -->
     <QtMoc Include="src\editor\SizeEditor.h">
       <Filter>Header Files</Filter>

@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "editor/EditorMainWindow.h"
+#include "editor/GeometryChangeCommand.h"   // ★ E.4d-follow-8:9 个对齐/等尺寸动作的 Undo
 #include "editor/PaletteWidget.h"
 #include "editor/PropertySheet.h"
 #include "editor/ResizeHandleItem.h"
@@ -341,64 +342,85 @@ void EditorMainWindow::updateAlignToolbarState() {
 }
 
 // ★ 对齐槽实现:以 targets_ 的第一个为参考,所有目标按指定边界对齐
+//
+// ★★ E.4d-follow-8(2026-09-29):全部包 Undo。
+//   原来 9 个动作(6 对齐 + 3 等尺寸)直接调 setPosition/setSize,零 Undo ——
+//   用户按了左对齐,Ctrl+Z 撤不回来。这不是小毛病:排版是反复试错的操作,
+//   没有撤销等于每按一次对齐就永久改一次画面。
+//
+//   统一套路:先 snapshotGeometry() 拍执行前的矩形,改完 push 一条命令。
+//   9 个动作写同一个套路是为了 merge 规则能统一 —— 连续两次"左对齐"
+//   合并成一条(第二次多半是误触),但"左对齐"后紧接"等大"不合并。
 void EditorMainWindow::onAlignLeft() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal x = targets_.first()->position().x();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         t->setPosition(QPointF(x, t->position().y()));
     }
+    pushGeometryCommand(before, tr("左对齐"));
 }
 void EditorMainWindow::onAlignRight() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal right = targets_.first()->position().x() + targets_.first()->size().width();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         const qreal newX = right - t->size().width();
         t->setPosition(QPointF(newX, t->position().y()));
     }
+    pushGeometryCommand(before, tr("右对齐"));
 }
 void EditorMainWindow::onAlignTop() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal y = targets_.first()->position().y();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         t->setPosition(QPointF(t->position().x(), y));
     }
+    pushGeometryCommand(before, tr("顶对齐"));
 }
 void EditorMainWindow::onAlignBottom() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal bottom = targets_.first()->position().y() + targets_.first()->size().height();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         const qreal newY = bottom - t->size().height();
         t->setPosition(QPointF(t->position().x(), newY));
     }
+    pushGeometryCommand(before, tr("底对齐"));
 }
 void EditorMainWindow::onAlignCenterH() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal centerX = targets_.first()->position().x() + targets_.first()->size().width() / 2.0;
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         t->setPosition(QPointF(centerX - t->size().width() / 2.0, t->position().y()));
     }
+    pushGeometryCommand(before, tr("水平居中"));
 }
 void EditorMainWindow::onAlignCenterV() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal centerY = targets_.first()->position().y() + targets_.first()->size().height() / 2.0;
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         t->setPosition(QPointF(t->position().x(), centerY - t->size().height() / 2.0));
     }
+    pushGeometryCommand(before, tr("垂直居中"));
 }
 
 // ===== E.4d 续-7:统一尺寸(3 个)=====
 //   参考基准 = targets_.first()(第 0 个选中控件),与现有 6 个对齐动作保持一致
 //   直调 setSize:内部 prepareGeometryChange + 更新 size_ + emit sizeChanged,
 //   后续 SelectionFrame / GroupHandle 监听 sizeChanged 自动跟随。
-//   注:与对齐一样目前无 QUndoCommand 包裹(E.4d 收尾阶段统一加)。
 void EditorMainWindow::onSameWidth() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal refW = targets_.first()->size().width();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
@@ -406,9 +428,16 @@ void EditorMainWindow::onSameWidth() {
         if (qFuzzyCompare(s.width(), refW)) continue;   // 已经是 ref 宽度,跳过
         t->setSize(QSizeF(refW, s.height()));
     }
+    pushGeometryCommand(before, tr("等宽"));
 }
+
+// ===== E.4d 续-7:统一尺寸(3 个)=====
+//   参考基准 = targets_.first()(第 0 个选中控件),与现有 6 个对齐动作保持一致
+//   直调 setSize:内部 prepareGeometryChange + 更新 size_ + emit sizeChanged,
+//   后续 SelectionFrame / GroupHandle 监听 sizeChanged 自动跟随。
 void EditorMainWindow::onSameHeight() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const qreal refH = targets_.first()->size().height();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
@@ -416,15 +445,49 @@ void EditorMainWindow::onSameHeight() {
         if (qFuzzyCompare(s.height(), refH)) continue;
         t->setSize(QSizeF(s.width(), refH));
     }
+    pushGeometryCommand(before, tr("等高"));
 }
 void EditorMainWindow::onSameSize() {
     if (targets_.size() < 2) return;
+    const QHash<ControlBase*, QRectF> before = snapshotGeometry();
     const QSizeF refS = targets_.first()->size();
     for (auto* t : targets_) {
         if (t == targets_.first()) continue;
         if (t->size() == refS) continue;   // QSizeF == 支持浮点容差(Qt 6 内置)
         t->setSize(refS);
     }
+    pushGeometryCommand(before, tr("等大"));
+}
+
+// ===== E.4d-follow-8:几何 Undo 辅助 =====
+
+// ★ 拍下 targets_ 当前每个控件的矩形。9 个对齐/等尺寸动作共用。
+//   注意【包含参考控件自己】(targets_.first()):
+//   对齐动作不改它,但把它拍进去有两个好处 ——
+//     1. undo 之后如果用户又动了参考控件,几何状态是完整的
+//     2. 免得每个动作里写 "if (t == first) continue" 之后
+//        快照和实际改动的集合对不上,mergeWith 的 keys 比较会误判
+QHash<EditorMainWindow::ControlBase*, QRectF> EditorMainWindow::snapshotGeometry() const {
+    QHash<ControlBase*, QRectF> rects;
+    rects.reserve(targets_.size());
+    for (auto* t : targets_) {
+        if (!t) continue;
+        rects.insert(t, QRectF(t->position(), t->size()));
+    }
+    return rects;
+}
+
+// ★ 动作改完几何后调:拍"之后"的矩形,包成命令 push。
+//
+//   【几何没变就不 push】—— 选了 3 个控件但它们本来就在同一 x,
+//   按左对齐什么都不会发生。这时压一条空命令进栈,会让 Ctrl+Z
+//   "按了没反应":用户按 Ctrl+Z,选中框动都没动,再按一次也没反应,
+//   而栈里其实还有内容。这种"假步骤"是 Undo 最招人烦的失败模式。
+void EditorMainWindow::pushGeometryCommand(const QHash<ControlBase*, QRectF>& before,
+                                           const QString& actionText) {
+    const QHash<ControlBase*, QRectF> after = snapshotGeometry();
+    if (after == before) return;   // ★ 没有实际变化 → 不产生 Undo 步骤
+    undoStack_->push(new GeometryChangeCommand(before, after, actionText));
 }
 
 // ===== E.4d 续:选中态视觉统一(SelectionFrameItem) =====

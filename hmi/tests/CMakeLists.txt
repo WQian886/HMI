@@ -108,6 +108,8 @@ set(HMI_CORE_SOURCES
     # ★ E.2(2026-09-21):属性面板 PropertySheet + PropertyChangeCommand
     ${HMI_SRC_DIR}/src/editor/PropertySheet.cpp
     ${HMI_SRC_DIR}/src/editor/PropertyChangeCommand.cpp
+    # ★ E.4d-follow-8(2026-09-29):多控件几何 Undo
+    ${HMI_SRC_DIR}/src/editor/GeometryChangeCommand.cpp
     # ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器
     ${HMI_SRC_DIR}/src/editor/SizeEditor.cpp
     ${HMI_SRC_DIR}/src/editor/PositionEditor.cpp
@@ -211,6 +213,8 @@ add_hmi_test(tst_SpinAnimator)
 add_hmi_test(tst_PropertySheet)
 # 阶段 E · E.2 周 11 EditorMainWindow
 add_hmi_test(tst_EditorMainWindow)
+# ★ E.4d-follow-8(2026-09-29):对齐/等尺寸的 Undo(9 个动作,原为零覆盖)
+add_hmi_test(tst_GeometryUndo)
 # 阶段 E · E.4a 控件调色板 PaletteWidget
 add_hmi_test(tst_PaletteWidget)
 # 阶段 E · E.4b 8 handle 缩放 ResizeHandleItem

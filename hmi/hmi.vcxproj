@@ -332,6 +332,12 @@
     <QtMoc Include="src\editor\PropertyChangeCommand.h" />
     <ClInclude Include="src\editor\PropertyChangeCommand.h" />
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp" />
+    <!-- ★ E.4d-follow-8(2026-09-29):多控件几何 Undo。
+         【不需要 QtMoc 条目】GeometryChangeCommand 没有 Q_OBJECT ——
+          它只继承 QUndoCommand,不定义自己的信号/槽/Q_PROPERTY。
+          加了 QtMoc 反而会生成一个空的 moc 文件。 -->
+    <ClInclude Include="src\editor\GeometryChangeCommand.h" />
+    <ClCompile Include="src\editor\GeometryChangeCommand.cpp" />
     <!-- ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器 -->
     <QtMoc Include="src\editor\SizeEditor.h" />
     <ClInclude Include="src\editor\SizeEditor.h" />
