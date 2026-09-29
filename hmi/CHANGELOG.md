@@ -1,6 +1,6 @@
 # CHANGELOG
 
-> 最后核对：**2026-09-29**（基于代码核对：`9d8ff10` = E.4d-follow-8 Undo 是当前稳定基线，`ctest` **53/53 全绿**）
+> 最后核对：**2026-09-29 晚**（基于代码核对：`3f63ddf` = E.4d-follow-10 旋转收尾是当前稳定基线，`ctest` **55/55 全绿**，`hmi.exe` 构建通过）
 
 ## [Unreleased] - 2026-09-28 ~ 09-29
 
@@ -75,9 +75,54 @@ EditorMainWindow 的 6 个对齐 + 3 个等尺寸原来直接调 `setPosition`/`
 - merge 保留**最早**的 `oldRects`（写反的话退一次之后还有控件没对齐）。
 - `tst_GeometryUndo` 21 用例全绿。**这 9 个动作的 Undo 覆盖此前是 0。**
 
+#### 6. E.4d-follow-9：选中框渲染测试（`efb0f56`）—— 生产代码一行没改
+
+计划书说 `SelectionFrameItem::paint()` 缺蓝色虚线描边、要补外圈描边。**读 `.cpp` 发现笔刷在构造时就配好了。**
+与其照着"没读过的实现"去改一个正在工作的东西，不如先证明它到底画不画得出来 ——
+新增 `tst_SelectionFrameRender`（7 用例），把 frame 渲进 `QImage` 数像素。
+
+**7/7 通过，生产代码零改动。** E 阶段挂着的"看得见的问题"(`bug图/图1.png`) 本来就是好的。
+
+> 写这个测试时踩了两个**假象**,差点照着去改生产代码:
+> ① 2px cosmetic pen 是**画在路径中心线上**的,一半落在 rect 外 → 图像正好等于 frame 尺寸时数不到像素
+>    → 以为没画,其实是被裁了;
+> ② 一边减了 scene 偏移一边还在局部坐标里 paint → 偏移减了两遍,框"飞"到画布外
+>    → 以为位置算错了。
+> **这就是"先跑再看"比"读文档就动手"值钱的地方。**
+
+#### 7. E.4d-follow-10：旋转收尾（`3f63ddf`）—— 计划书说改 3 处，实测 2 处不用改
+
+计划书把这条尾巴标成"风险最高、单独排"，理由是**要动的 3 处正是 E.4d 刚逐个修好的代码**
+（`3163532` group handle position、`8a05de4` frame follow multi-move、`3372f67` handle 视觉对齐）。
+
+先写 `tst_Rotation`（10 用例）当诊断量了一遍，**结论是 3 处里有 2 处本来就不用改**：
+
+| 计划书说 | 实测 |
+|---|---|
+| 给 `ControlBase` 加 `Q_PROPERTY(qreal rotation)` | **不用加** —— `QGraphicsItem` 自己就有(`qgraphicsitem.h:497`)，不是 FINAL，反射已经列得出来，JSON 已经存读。照做会变成"子类覆盖父类同名属性" |
+| `layoutHandlesFor` 要让 8 个 handle 位置跟着转 | **不用改** —— handle 是 target 的**子 item**，父一转它们跟着转（Qt 的父子 transform）。`handles_doNotFollowRotation_currently` 一开始是红的，细看是**断言写错了**：旋转重新定义了"哪个角在左上" |
+| `SelectionFrameItem` 可能不用改但要实测确认 | **实测确认要改** —— `sceneBoundingRect()` 会变，但 frame 没接 `rotationChanged` |
+| `applyProportionalResize` 含旋转控件时语义不对 | 输出仍是有效值（非负、非 0、不跑飞）。严格讲语义确实不对，那是更大的问题，留 v0.3.0 |
+
+真修的 2 处：
+1. **`ResizeHandleItem::applyCursorForRotation()`** —— 原来在左边的点转 90° 后视觉上到了上边，光标还是 `SizeHor`。
+   按 target 当前 rotation 查 3 张 8 项表换光标。**非 90 整数倍不动** —— 任意角度下
+   "这个点算左边还是上边"没有唯一答案，猜错比不改更糟（会出现"箭头朝左但只能上下拖"）。
+2. **`EditorMainWindow::onRotationChanged()`** —— 接 `rotationChanged` 后同刷选中框和 handle 光标。
+   **光标刷新必须走信号**，塞在 `installSelectionFrame()` 里没用 —— 后者只在选中变化时跑。
+
+> ⚠ 踩到的坑：`connect(t, &QGraphicsItem::rotationChanged, ...)` 编译不过（`error C2039`）。
+> 那个信号实际声明在 **`QGraphicsObject`** 里(`qgraphicsitem.h:530`)—— 信号要有 moc 才存在，
+> 得继承 QObject。**属性写在基类、信号住在派生类**，这个错位很容易踩。
+
+**E 阶段最担心的风险没有发生**：`tst_HandleVisualAlignment` / `tst_ResizeHandle` / `tst_EditorMainWindow` 全绿，
+旋转没有重新打开 E.4d 修好的任何 bug。`ctest` **55/55 全绿**。
+
 ### 已知遗留
-- 🔴 `SelectionFrameItem::paint()` 视觉（`bug图/图1.png`）
-- 🔴 `ControlBase::rotation` + handle 跟随（**已明确单独排**，要动的 3 处正是 E.4d 刚修好的代码）
+- ✅ ~~`SelectionFrameItem::paint()` 视觉（`bug图/图1.png`）~~ —— 见上 #6，本来就是好的
+- ✅ ~~`ControlBase::rotation` + handle 跟随~~ —— 见上 #7，E 阶段闭合
+- ⬜ 等比缩放一个**已旋转**的控件时同步旋转（保持形状）—— 本阶段只保证"不出离谱值"
+- ⬜ 旋转只按 90° 整数倍换光标；45° 一档要补表（算法不用改，加表即可）
 - ⬜ E.5 主题 / E.6 Lua —— 已拍板推 v0.3.0
 
 ---

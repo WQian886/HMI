@@ -3,10 +3,10 @@
 > 适用:**E 阶段计划 + 9 个决策锁定 + 业余节奏 22-27 周拆分**,开 E.1 之前先看完
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-20
 > 配套:`docs/路线图.md` 第 25-50 行(9 阶段总览+E 战略) / `docs/UI规划调研与方案.md` v1.3 / `docs/进度存档_2026-09-20.md` / `docs/阶段D.2_从这里继续.md` 第 6 节(D.4 节) / `docs/阶段D.1_从这里继续.md`
-> ⚠ **状态(2026-09-29 基于代码核对)**:🟡 **E 阶段收尾中** — E.0(本文件)决策锁定 ✅ + E.1 控件库 **22 个全落地**(`src/widgets/*`,E.1c 的储罐/管道/阀门/泵/电机 2026-09-28 补齐)+ E.1c 写回 PLC 通道 `ControlBase::writeToPlc` ✅ + E.2 PropertySheet 反射 + E.4a 调色板/拖拽 + E.4b 8 handle 缩放 + E.4c QSizeF/QPointF 复合编辑器 + E.4d 多选/对齐/等尺寸 + E.4d-follow-1~8 收尾链(含对齐/等尺寸的 Undo)。
-> **测试基线:`ctest` 53/53 全绿**(2026-09-29 首次全绿,此前长期挂在"52/53 里有 10 个红")。
-> **🔴 仍未做**:`SelectionFrameItem::paint()` 视觉(`bug图/图1.png`)+ `ControlBase::rotation` 属性及 handle 跟随(见节 10)。
-> 完整阶段状态见 `docs/现状.md`(唯一权威)/ `hmi/CHANGELOG.md`。
+> ✅ **状态(2026-09-29 基于代码核对)**:🟢 **E 阶段全部完工** — E.0(本文件)决策锁定 ✅ + E.1 控件库 **22 个全落地**(`src/widgets/*`,E.1c 的储罐/管道/阀门/泵/电机 2026-09-28 补齐)+ E.1c 写回 PLC 通道 `ControlBase::writeToPlc` ✅ + E.2 PropertySheet 反射 + E.4a 调色板/拖拽 + E.4b 8 handle 缩放 + E.4c QSizeF/QPointF 复合编辑器 + E.4d 多选/对齐/等尺寸 + E.4d-follow-1~8 收尾链 + E.4d-follow-9 选中框渲染测试 + E.4d-follow-10 旋转(见节 10、11)。
+> **测试基线:`ctest` 55/55 全绿**。
+> **推 v0.3.0 的两项**:E.5 主题(亮/暗)、E.6 Lua(sol2)—— Wqian 已拍板,不在 0.2.0 范围。
+> **下一阶段:F(商业级报警)**。完整阶段状态见 `docs/现状.md`(唯一权威)/ `hmi/CHANGELOG.md`。
 
 ---
 
@@ -257,35 +257,26 @@ EditorMainWindow::save() → Project::saveToFile
 
 ---
 
-## 7. 下一步:E 阶段剩下的 2 条尾巴
+## 7. ~~下一步:E 阶段剩下的 2 条尾巴~~ → 已全部完工
 
 > 原节 7 是"E.1 第 1 个控件 LabelControl 的 5 步路线图" —— 2026-09-20 就做完了,
-> 留在这里只会误导下次接手的 AI(它会照着再做一个 LabelControl)。替换为当前实际待办。
+> 留在这里只会误导下次接手的 AI(它会照着再做一个 LabelControl)。**现改为完工记录**,
+> 重点不是"做了什么",而是"计划书说的和实测出来的差多少" —— 见节 11。
 
-### 尾巴 A:`SelectionFrameItem::paint()` 视觉(对应 `bug图/图1.png`)
+### 尾巴 A:`SelectionFrameItem::paint()` 视觉(对应 `bug图/图1.png`)—— ✅ `efb0f56`
 
-选中框要在控件**外圈**、蓝色虚线(`QPen::DashLine`)、粗细 2px、Z 值 200(压在 8 个 handle 之上)。
-骨架和定位逻辑 E.4d 已就位,只差 `paint()`。半天的活,一直没做是因为它不影响功能,
-拖到其他 bug 之后 —— 结果成了 E 阶段唯一挂着的"看得见的问题"。
+**计划书说**:`paint()` 缺蓝色虚线,要补外圈描边(2px、`DashLine`、Z 值 200)。
+**实测**:`paint()` 的笔刷在构造时就配好了,**能正常画,也扛得住整场景渲染**。
+新增 `tst_SelectionFrameRender`(7 个用例,渲到 `QImage` 数像素)证明这一点。
+**结果:生产代码一行没改。**
 
-### 尾巴 B:`ControlBase::rotation` + handle 跟随(**已单独排,别顺手做**)
+### 尾巴 B:`ControlBase::rotation` + handle 跟随 —— ✅ `3f63ddf`
 
-竖管要能转 90°,所以 `ControlBase` 需要 `Q_PROPERTY(qreal rotation)`。但这不是加个属性就完事 ——
-**必须同时改 3 处**,漏任一个,旋转后画面就错位:
+**计划书说**"必须同时改 3 处",还标了风险等级,还要求"阻力大就拆"。
 
-| 位置 | 改什么 | 风险 |
-|---|---|---|
-| `ResizeHandleItem::layoutHandlesFor`(`src/editor/ResizeHandleItem.cpp:65-88`) | 8 个 handle 位置跟着转,**且每个 handle 的光标形状要跟着转**(原来 TL 角是左上箭头,转 90° 后它在视觉上的右上角,应该显示右箭头) | 中 |
-| `SelectionFrameItem` / `EditorMainWindow::updateSelectionFrame` | 走 `sceneBoundingRect()`,Qt 会自动返回旋转后的外接矩形 —— **可能不用改,但必须实测确认** | 低(先测再动) |
-| `GroupHandleItem::applyProportionalResize`(`src/editor/GroupHandleItem.cpp:72-105`) | 现在是纯 x/y 比例缩放,多选里含旋转控件时语义不对 | 中 |
-
-> ⚠ **这 3 处正是 E.4d 那 19 个 commit 刚逐个修好的同一片代码**
-> (`3163532` group handle position、`8a05de4` frame follow multi-move、`3372f67` handle 视觉对齐)。
-> 旋转会把它们**重新打开**。每改一处就跑一次 `tst_HandleVisualAlignment`(5 个 shrink-direction 用例)、
-> `tst_ResizeHandle`、`tst_EditorMainWindow`。
->
-> **阻力大就拆**:只加 `rotation` 属性不做 handle 跟随(先能用,完美跟随留 v0.3.0),
-> 别把这一块做成一个改不动的巨型 commit。
+**实测:3 处里有 2 处根本不用改。**逐条列在节 11,这里只留结论 ——
+真坏的是 **handle 光标** 和 **选中框** 两处,已修;其余三处(Qt 已有的 rotation 属性、
+Qt 自动做的父子 transform、group 等比缩放)经测试确认本来就是对的。
 
 ---
 
@@ -334,7 +325,7 @@ E.4d-follow-8 之后,按 Wqian 拍板的 **Path 2(降级 E)** 又做了 3 件事
 |---|---|---|
 | A | 修 10 个过时测试的 JSON 键名(坑 6) | **ctest 首次 53/53 全绿** |
 | B | 对齐/等尺寸 9 个动作补 Undo(`GeometryChangeCommand`) | 21 个新用例,Undo 覆盖 0 → 全覆盖 |
-| C | `ControlBase::rotation` + handle 跟随 | ⬜ **单独排,见节 7 尾巴 B** |
+| C | `ControlBase::rotation` + handle 跟随 | ✅ `3f63ddf`,见节 7 尾巴 B / 节 11 |
 
 **A 的归因更正**:那 10 个失败此前被记成"生产代码 `toJson`/`fromJson` 的键名不匹配(w/h vs width/height)"。
 **这是错的。**生产代码 `toJson`/`fromJson` 是**对称**的(反射输出 + 反射读回),
@@ -349,5 +340,65 @@ E.4d-follow-8 之后,按 Wqian 拍板的 **Path 2(降级 E)** 又做了 3 件事
 
 ---
 
-**E 阶段主体已完工(22 控件 + 编辑器核心 + Undo 全覆盖,53/53 全绿)。**
-**下次开工 → 节 7 的两条尾巴(建议先 A 视觉,再单独排 B 旋转)。**
+## 11. 两条尾巴收口(2026-09-29 晚)—— 计划书 vs 实测
+
+这两条尾巴在开工前都写了详细的改动计划。**做完回头对账,发现计划书里 5 条改动建议
+有 3 条是多余的**。过程本身比结果更值得记,因为这个偏差在本项目不是第一次。
+
+| 计划书说 | 实测 | 差别来源 |
+|---|---|---|
+| 尾巴 A:`paint()` 缺蓝色虚线,要补描边 | 笔刷构造时就配好了,**能画,7/7 渲染测试通过** | 只读了 `SelectionFrameItem.h` 的声明,没读 `.cpp` 实现 |
+| B-1:给 `ControlBase` 加 `Q_PROPERTY(qreal rotation)` | **不用加** —— `QGraphicsItem` 自己就有(`qgraphicsitem.h:497`),不是 FINAL,反射已经能列出来,JSON 已经存读 | 没查基类头文件。照做会变成"子类覆盖父类同名属性",moc 允许,但凭空多一层间接,底下那层还在跑 |
+| B-2:`layoutHandlesFor` 要让 8 个 handle 位置跟着转 | **不用改** —— handle 是 target 的**子 item**,父一转它们跟着转(Qt 的父子 transform) | 没意识到 handle 的父子关系。加一套旋转换算会跟 Qt 已做好的事重复,还多一个能算错的地方 |
+| B-3:`SelectionFrameItem` 可能不用改但要实测确认 | **实测确认要改** —— `sceneBoundingRect()` 会变,但 frame 没接 `rotationChanged`,不刷就是旧尺寸 | ✅ 计划书这条判断对了 |
+| B-4:`applyProportionalResize` 含旋转控件时语义不对 | 实测输出仍是有效值(非负、非 0、不跑飞)。**严格讲语义确实不对**(缩放一个已旋转的控件该同步旋转来保持形状),那是更大的问题,留 v0.3.0 | 判断偏保守,不算错 |
+
+**真正修的只有 2 处**:
+1. `ResizeHandleItem::applyCursorForRotation()` —— 原来在左边的点转 90° 后视觉上到了上边,
+   光标还是 `SizeHor`。按 target 当前 rotation 查 3 张 8 项表换光标;
+   **非 90 整数倍不动** —— 任意角度下"这个点算左边还是上边"没有唯一答案,猜错比不改更糟
+   (会出现"箭头朝左但只能上下拖")。
+2. `EditorMainWindow::onRotationChanged()` —— 接 `rotationChanged` 后同刷选中框和 handle 光标。
+   **光标刷新必须走信号**,不能塞在 `installSelectionFrame()` 里 —— 后者只在选中变化时跑,
+   属性面板改 rotation 根本不会触发它。
+
+### 踩到的坑(第 8 条已知坑)
+
+8. **★ Q_PROPERTY 的 NOTIFY 信号可以不住在声明它的类上**(`3f63ddf` 踩过,`error C2039`):
+   `QGraphicsItem` 的 `Q_PROPERTY(qreal rotation ... NOTIFY rotationChanged)` 看着像能用
+   `&QGraphicsItem::rotationChanged` 接,编译直接报"不是 QGraphicsItem 的成员" ——
+   那个 `void rotationChanged();` 实际声明在 **`QGraphicsObject`** 里(`qgraphicsitem.h:530`)。
+   **信号要有 moc 才存在,得有 QObject 基类**。属性写在基类、信号住在派生类,这个错位很常见。
+   正确写法:`connect(t, &ControlBase::rotationChanged, ...)`(经派生类取, moc 认)。
+
+9. **★ 别从 `scene()->items()` 里扫自己刚建的 item**(`tst_Rotation` 0xC0000005):
+   扫出来的第一个匹配项可能是别的测试留下的野指针,崩在 `QAtomicOps` 里,栈上看不出是谁。
+   **改用窗口自己的 accessor**(`EditorMainWindow::groupHandle()`)。项目里已有这个惯例。
+
+### 一条元教训
+
+"先读基类头文件 + 先写诊断测试,再改生产代码"这两件事,这次各自省下了一整块返工。
+B-1(rotation 属性)和 B-2(handle 跟随)都是**读一眼头文件就能否掉的**,却各自被写成了
+"必须做的改动",还附了风险等级。写计划书时容易把"我以为要改的"当成"要改的",
+**风险估得越细,越容易让人不去验证** —— 表格填满了,人就倾向于相信表格。
+
+---
+
+## 12. E 阶段完工 ✅(2026-09-29)
+
+**产出**:22 控件 + 写回 PLC 通道 + WYSIWYG 编辑器核心(调色板/拖拽/8 handle/多选/对齐/等尺寸)
++ Undo **全覆盖** + 旋转 + 选中框。**`ctest` 55/55 全绿**,`hmi.exe` 构建通过。
+
+**E.4d 修过的东西没有被旋转重新打开** —— 这是当初把旋转单独立项时最担心的风险,
+实测没有发生。`tst_HandleVisualAlignment` / `tst_ResizeHandle` / `tst_EditorMainWindow` 全绿。
+
+**推 v0.3.0 的两项**(Wqian 已拍板):
+- **E.5 主题(亮/暗)** —— 见节 3.5
+- **E.6 Lua(sol2)** —— 见节 3.4。**注意坑 3:sol2 的 LGPL 合规,商用前要找律师过边界**
+
+**v0.3.0 里 E 阶段的欠账**:
+- 等比缩放一个已旋转的控件时同步旋转(保持形状)—— 语义问题,本阶段只保证"不出离谱值"
+- 旋转目前只按 90° 的整数倍换光标;45° 一档要补表(算法不用改,`applyCursorForRotation` 里加表即可)
+- `SelectionFrameItem` 仍不区分单选/多选的样式(共用一个)
+
+**下一阶段 → F(商业级报警)。**开工前先看 `docs/现状.md`。
