@@ -104,6 +104,20 @@ public:
     void bind(Variable* v);          // 连接 valueChanged → updateDisplay
     void unbind();                    // 解绑
 
+    // ★ E.5(2026-09-29):按变量名绑定 —— 运行时画布从 JSON 恢复画面的入口
+    //   背景:JSON 里存的是 variableName 字符串(编辑器期手填),而 bind() 要的是
+    //         Variable*。中间这步"字符串 → 指针"以前没人做,所以编辑器存的画面
+    //         在主画面里永远绑不上 —— E 阶段标完工时漏掉的就是这一环。
+    //   查名支持两种:① 直接的名字(plc1.Speed)② 短名(Speed)。
+    //     因为 VariableManager 里 Variable::name() 存的是短名,编辑器属性面板
+    //     显示的却是全名,两种都收才不会让用户猜。
+    //   返回 true = 找到并绑定上了;false = 没找到,控件保持未绑定(不静默假装成功)。
+    bool bindByName(VariableManager* vm);
+    // ★ 运行时画布批量用:先给一批控件设好 varMgr_,再逐个 bindByName(nullptr)
+    //   —— varMgr_ 为空时直接返回 false,避免每个调用点都判空。
+    void setVariableManager(VariableManager* vm) { varMgr_ = vm; }
+    VariableManager* variableManager() const { return varMgr_; }
+
     // ★ E.1c(2026-09-28):UI → PLC 反向写通道
     //   背景:基类原本是单向的。onVariableValueChanged 只做「PLC 推过来 → 更新显示」,
     //         反方向推不出去。ToggleControl 点一下只翻本地 value_ + emit toggled,
@@ -144,7 +158,12 @@ private:
     //   不用改就变安全。现状.md 第五节约定 5 说的正是这件事(要求 connect
     //   variableReplaced),QPointer 是更省心的等价手段。
     QPointer<Variable> bound_;            // 当前绑定的 Variable(自动防悬空)
-    VariableManager* varMgr_ = nullptr;     // 全局 vm(查变量用)
+    // ★ E.5(2026-09-29):这个成员以前声明了但从来没赋值过(全文件无赋值点),
+    //   是条死成员。bindByName() 让它第一次有了用处。
+    //   【为什么用成员而不是全局单例】VariableManager 没有 instance(),
+    //   它是 hmi 构造时 new 出来的实例,生命周期跟主窗口绑定。用全局单例会
+    //   引入一个现在不存在的概念,且测试里每个用例都得清全局状态。
+    VariableManager* varMgr_ = nullptr;     // 查变量用(★ E.5 接真实实例)
 
 public:
     // ★ 静态注册表(E.4 编辑器拖拽用)— 每个派生类构造时 register 一次

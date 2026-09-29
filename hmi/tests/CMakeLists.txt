@@ -123,6 +123,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/editor/SelectionFrameItem.cpp
     # ★ E.4d 续-3:多选组 handle 容器
     ${HMI_SRC_DIR}/src/editor/GroupHandleItem.cpp
+    # ★ E.5(2026-09-29):运行时画布(主画面显示编辑器存的画面)
+    ${HMI_SRC_DIR}/src/editor/RuntimeCanvas.cpp
 )
 
 function(add_hmi_test test_name)
@@ -213,6 +215,9 @@ add_hmi_test(tst_SpinAnimator)
 add_hmi_test(tst_PropertySheet)
 # 阶段 E · E.2 周 11 EditorMainWindow
 add_hmi_test(tst_EditorMainWindow)
+# ★ E.5(2026-09-29):运行时画布 —— 编辑器存的画面能不能在主画面显示、变量绑不绑得上。
+#   重点测两件以前【零覆盖】的事:JSON 字符串 → Variable* 绑定,以及绑不上时能被看见。
+add_hmi_test(tst_RuntimeCanvas)
 # ★ E.4d-follow-8(2026-09-29):对齐/等尺寸的 Undo(9 个动作,原为零覆盖)
 add_hmi_test(tst_GeometryUndo)
 # ★ E.4d-follow-9(2026-09-29):选中框【真的画出来了吗】—— 渲染到 QImage 数像素,

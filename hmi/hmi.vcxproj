@@ -365,6 +365,10 @@
     <QtMoc Include="src\editor\SelectionFrameItem.h" />
     <ClInclude Include="src\editor\SelectionFrameItem.h" />
     <ClCompile Include="src\editor\SelectionFrameItem.cpp" />
+    <!-- ★ E.5(2026-09-29):运行时画布(主窗口显示编辑器存的画面) -->
+    <QtMoc Include="src\editor\RuntimeCanvas.h" />
+    <ClInclude Include="src\editor\RuntimeCanvas.h" />
+    <ClCompile Include="src\editor\RuntimeCanvas.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->

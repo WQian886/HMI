@@ -107,6 +107,14 @@ hmi::hmi(QWidget *parent)
     ui.buttonRowLayout->addWidget(editorBtn);
     connect(editorBtn, &QPushButton::clicked, this, &hmi::onEditorClicked);
 
+    // ★ E.5(2026-09-29):运行时画面按钮 — 显示【编辑器存的】工程文件
+    //   这是"编辑器 → 主画面"这条链的终点。以前没有这个按钮,
+    //   编辑器画完存盘,主画面永远看不到 —— E 阶段标完工时漏掉的就是这一环。
+    auto* runtimeBtn = new QPushButton(QStringLiteral("运行时画面"), this);
+    runtimeBtn->setMinimumSize(80, 32);
+    ui.buttonRowLayout->addWidget(runtimeBtn);
+    connect(runtimeBtn, &QPushButton::clicked, this, &hmi::onRuntimeCanvasClicked);
+
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
 
@@ -754,12 +762,75 @@ void hmi::onEditorClicked() {
         return;
     }
     if (!editorWindow_) {
-        editorWindow_ = new qwhmi::editor::EditorMainWindow(nullptr);  // 独立顶层窗口
+        // ★ E.5(2026-09-29):传主画面的 project_ + varMgr_。
+        //   原来传的是 EditorMainWindow(nullptr) —— 编辑器自己 new 了一个
+        //   4 个 manager 全空的 Project,后果是编辑器和主画面各有一份工程数据,
+        //   变量名都填了也绑不上主画面的 Variable。E.5 改成同一个数据源。
+        editorWindow_ = new qwhmi::editor::EditorMainWindow(project_, varMgr_);  // 独立顶层窗口
         editorWindow_->setAttribute(Qt::WA_DeleteOnClose, false);   // 进程内单例,不随关掉 delete
     }
     editorWindow_->show();
     editorWindow_->raise();
     editorWindow_->activateWindow();
+}
+
+// ★ E.5(2026-09-29):运行时画面 —— 显示编辑器存的工程文件
+//   【这条链补上之后】编辑器画控件 → 存 .hmi.json → 这里打开 → 主画面显示,
+//   而且变量是活的(varMgr_ 传的是主画面正在轮询的那张表)。
+//   以前这条链的终点不存在:编辑器只写不读,主画面只有 9 个 C++ 硬编码的 demo 控件。
+void hmi::onRuntimeCanvasClicked() {
+    static qwhmi::editor::RuntimeCanvas* canvas_ = nullptr;   // 进程内单例
+    if (canvas_ && canvas_->isVisible()) {
+        canvas_->hide();
+        return;
+    }
+    if (!canvas_) {
+        // ★ 传 varMgr_ 而不是自建:绑定要连的是主画面正在跑的那些 Variable
+        canvas_ = new qwhmi::editor::RuntimeCanvas(varMgr_);
+        canvas_->setAttribute(Qt::WA_DeleteOnClose, false);
+        canvas_->resize(1000, 700);
+    }
+
+    // 弹文件选择 —— 第一版不做"记住上次路径",先把链路打通
+    const QString path = QFileDialog::getOpenFileName(
+        canvas_, QStringLiteral("选择要显示的工程文件"), QString(),
+        QStringLiteral("HMI 工程 (*.hmi.json *.json);;所有文件 (*)"));
+    if (path.isEmpty()) {
+        // 取消 = 只是不换画面,窗口照常显示(空画布),不该报错退出
+        canvas_->show();
+        canvas_->raise();
+        return;
+    }
+
+    const int n = canvas_->load(path);
+
+    // ★ 把"静默失败"变成"看得见的提示" —— 这是 E.5 的核心价值。
+    //   以前没有这一层:控件建不出来、变量绑不上,统统无声无息,
+    //   用户看到的是一片空白画布,只能猜"是不是我哪里做错了"。
+    if (canvas_->lastError().isEmpty() && n == 0) {
+        QMessageBox::information(canvas_, QStringLiteral("运行时画面"),
+                                 QStringLiteral("工程文件里一个控件也没有。\n"
+                                                "请先在编辑器里放几个控件并保存。"));
+    } else if (!canvas_->lastError().isEmpty()) {
+        QMessageBox::warning(canvas_, QStringLiteral("加载失败"), canvas_->lastError());
+    }
+
+    if (!canvas_->unboundNames().isEmpty()) {
+        // ★ 变量名打错是【用户操作失误】,不是程序错误 ——
+        //   必须让他看见具体是哪几个名字没对上,而不是只说一句"部分控件未绑定"
+        QMessageBox::warning(canvas_, QStringLiteral("部分控件没绑上变量"),
+                             QStringLiteral("画面加载了 %1 个控件,其中 %2 个填了变量名\n"
+                                            "但在当前变量表里找不到:\n\n%3\n\n"
+                                            "变量表来自正在运行的工程(打开工程时会变)。\n"
+                                            "如果变量刚在编辑器里加过,先在主窗口【打开工程】再回来看。")
+                                 .arg(n)
+                                 .arg(canvas_->unboundNames().size())
+                                 .arg(canvas_->unboundNames().join(QStringLiteral("\n"))));
+    }
+
+    canvas_->show();
+    canvas_->raise();
+    canvas_->activateWindow();
 }
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable
 //   临时 demo,后续 E.4 WYSIWYG 完整编辑器替换

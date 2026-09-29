@@ -61,37 +61,34 @@
 
 namespace qwhmi::editor {
 
-EditorMainWindow::EditorMainWindow(QWidget* parent)
+EditorMainWindow::EditorMainWindow(Project* project, VariableManager* varMgr, QWidget* parent)
     : QMainWindow(parent),
       undoStack_(new QUndoStack(this)) {
     setWindowTitle(tr("HMI 编辑器 — 工程师模式"));
     resize(1024, 720);
+    varMgr_ = varMgr;
 
     // ★ E.3 修复:实例化每个控件一次触发 registerControlType,确保 loadFromFile 前注册表填好
     //   (否则:JSON 里有 "Bar" 但没人 new 过 BarControl → create("Bar") 返回 null)
-    //
-    // ★★ 2026-09-28 加控件时【必须同时往这里加一行】,漏了不会有任何编译错误 ——
-    //   只是那个控件:① 调色板上不出现 ② 工程文件里存着它,loadFromFile
-    //   静默跳过。两个症状都是"看起来像坏了但说不清哪坏",极难定位。
-    //   少一个控件的判断方法:调色板项数 < 22。tst_EditorMainWindow 有对应断言。
-    using namespace qwhmi::widgets;
-    delete new LabelControl;       delete new NumberDisplay;    delete new TextDisplay;
-    delete new BarControl;         delete new GaugeControl;     delete new LedControl;
-    delete new ImageControl;       delete new RectangleControl; delete new LineControl;
-    delete new GroupControl;       delete new ButtonControl;    delete new ToggleControl;
-    delete new SliderControl;      delete new InputEditControl;
-    delete new TrendControl;       delete new TableControl;     delete new AlarmListControl;
-    // ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
-    delete new TankControl;        delete new PipeControl;      delete new ValveControl;
-    delete new PumpControl;        delete new MotorControl;
+    //   ★ E.5(2026-09-29):列表已抽成静态方法,RuntimeCanvas 也要用同一份(见 .h 注释)
+    ensureControlTypesRegistered();
 
     setupCentralWidget();
     setupDockWidgets();
     setupMenuBar();
     setupAlignToolbar();   // ★ E.4d:对齐工具栏(6 按钮)
 
-    // ★ E.3:构造 Project(4 个 manager 暂传 nullptr — E.4c 集成时换成 hmi.cpp 的真实 manager)
-    project_ = new Project(nullptr, nullptr, nullptr, nullptr, nullptr, this);
+    // ★ E.5(2026-09-29):共用主画面的 Project,不再自建。
+    //   原来这里是 project_ = new Project(nullptr,×5,this) —— 4 个 manager 全空,
+    //   后果是编辑器和主画面各有一份互不相干的工程数据。
+    //   传入 nullptr 时(既有测试的调用方式)退回自建,行为不变。
+    if (project) {
+        project_ = project;
+        ownsProject_ = false;   // ★ 外部的,析构时不能删
+    } else {
+        project_ = new Project(nullptr, nullptr, nullptr, nullptr, nullptr, this);
+        ownsProject_ = true;
+    }
 
     // ★ E.3:监听 controlsLoaded(loadFromFile 后) → 清空旧控件 + 加入新控件
     connect(project_, &Project::controlsLoaded,
@@ -112,6 +109,27 @@ EditorMainWindow::EditorMainWindow(QWidget* parent)
     updateAlignToolbarState();   // ★ E.4d:初始 0 选中 → 6 对齐按钮禁用
 }
 
+// ★ E.5(2026-09-29):22 个控件类型的注册表预热(从构造函数原样搬出)
+//   【列表的正确性怎么保证】这里多写一个 = 调色板多一项;少写一个 = 该控件
+//   存进工程文件后 loadFromFile 静默跳过,画面上凭空少一块,且没有任何报错。
+//   tst_EditorMainWindow 里有断言守着 registeredTypeNames().size() == 22,
+//   加了控件记得同步改那个数字。
+void EditorMainWindow::ensureControlTypesRegistered() {
+    // ★★ 加控件时【必须同时往这里加一行】,漏了不会有任何编译错误 ——
+    //   只是那个控件:① 调色板上不出现 ② 工程文件里存着它,loadFromFile
+    //   静默跳过。两个症状都是"看起来像坏了但说不清哪坏",极难定位。
+    using namespace qwhmi::widgets;
+    delete new LabelControl;       delete new NumberDisplay;    delete new TextDisplay;
+    delete new BarControl;         delete new GaugeControl;     delete new LedControl;
+    delete new ImageControl;       delete new RectangleControl; delete new LineControl;
+    delete new GroupControl;       delete new ButtonControl;    delete new ToggleControl;
+    delete new SliderControl;      delete new InputEditControl;
+    delete new TrendControl;       delete new TableControl;     delete new AlarmListControl;
+    // ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
+    delete new TankControl;        delete new PipeControl;      delete new ValveControl;
+    delete new PumpControl;        delete new MotorControl;
+}
+
 EditorMainWindow::~EditorMainWindow() {
     // ★ E.4d/E.4d-续 安全析构顺序:
     //   1) 删除 SelectionFrameItem(它可能引用 scene_/controls_)— removeSelectionFrame
@@ -124,6 +142,13 @@ EditorMainWindow::~EditorMainWindow() {
         scene_->clearSelection();
     }
     if (view_) view_->disconnect(this);
+
+    // ★ E.5:只删自建的 Project。外部传进来的(主画面的)绝不能碰 ——
+    //   删了之后主画面再调 loadFromFile/saveToFile 就是访问已释放对象。
+    if (ownsProject_ && project_) {
+        delete project_;
+        project_ = nullptr;
+    }
 }
 
 void EditorMainWindow::setupCentralWidget() {
@@ -218,6 +243,12 @@ void EditorMainWindow::addControl(qwhmi::widgets::ControlBase* c) {
     scene_->addItem(c);
     // 注:不在这里 setSelected(true) — 避免循环触发 onSceneSelectionChanged → setTarget
     //     → setSelected 的递归。选中由 setTarget() 或用户点击触发。
+
+    // ★ E.5:有 varMgr_ 时立刻按 variableName 绑定。
+    //   这样用户在编辑器里填了变量名就能看到实时值,不用等发布到主画面才发现
+    //   名字打错了。绑定失败【不报错不弹窗】—— 编辑器里摆个还没连 PLC 的控件
+    //   是正常用法,弹窗反而烦;真要知道绑没绑上,看主画面运行时。
+    if (varMgr_) c->bindByName(varMgr_);   // bindByName 内部会存住 varMgr_
 }
 
 void EditorMainWindow::removeControl(qwhmi::widgets::ControlBase* c) {
@@ -244,6 +275,19 @@ void EditorMainWindow::setTarget(qwhmi::widgets::ControlBase* target) {
                 this, [this, t = target_]() {
                     refreshHandlesFor(t);
                 });
+        // ★ E.5:属性面板改 variableName → 重新绑定
+        //   不接这个信号的话,用户填完名字得取消选中再点回来才生效 ——
+        //   看起来就是"改了没反应",是最难自查的一类。
+        //   bindByName 内部会先 unbind 旧绑定再接新的,重复调用安全。
+        if (varMgr_) {
+            // ★ context 对象传 target_ 本身:QObject 析构时自动断连。
+            //   写成 this 的话每次 setTarget 切换选中都多挂一条 lambda,
+            //   改一次 variableName 触发 N 次 bindByName —— 而 setTarget
+            //   里有 early return (target_ == target),同一个控件反复点选
+            //   就会累积,越用越卡。Qt 的 context 机制就是治这个的。
+            connect(target_, &qwhmi::widgets::ControlBase::variableChanged,
+                    target_, [t = target_]() { t->bindByName(t->variableManager()); });
+        }
     }
 }
 

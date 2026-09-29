@@ -30,6 +30,7 @@ class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
 class Project;            // ★ E.3:文件菜单保存/加载用
+class VariableManager;    // ★ E.5:查变量做绑定
 
 namespace qwhmi::widgets { class ControlBase; }
 namespace qwhmi::editor  { class PropertySheet; class PaletteWidget; class ResizeHandleItem; class GroupHandleItem; }
@@ -39,7 +40,18 @@ namespace qwhmi::editor {
 class EditorMainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit EditorMainWindow(QWidget* parent = nullptr);
+    // ★ E.5(2026-09-29)签名变了:编辑器不再自己 new Project,改为接收主画面的。
+    //   【为什么改】原来构造里是 project_ = new Project(nullptr,×5,this),
+    //   4 个 manager 全传 nullptr —— 意味着编辑器:
+    //     ① 存盘只写 screens[0].controls,variables/alarms/actions/plcs 全部丢弃
+    //     ② 存出来的文件跟主画面的 project_ 是两份独立数据,各改各的
+    //   改成共用主画面那个 Project 后,两边是【同一个数据源】,
+    //   编辑器保存的就是主画面加载的,不存在"两份会漂移的副本"。
+    //   【向后兼容】project 传 nullptr 时退回旧行为(自建一个),55 个既有测试
+    //   里那些 new EditorMainWindow(nullptr) 的用例不用改。
+    explicit EditorMainWindow(Project* project = nullptr,
+                              VariableManager* varMgr = nullptr,
+                              QWidget* parent = nullptr);
     ~EditorMainWindow() override;
 
     // ★ 模式切换 — true = 编辑模式(属性面板可编辑),false = 运行时模式(disabled)
@@ -85,6 +97,15 @@ public:
     // ★ E.4a:从 PaletteWidget 拖入时调(测试也可直接调,绕过 QDropEvent 复杂度)
     void handlePaletteDrop(const QString& typeName, const QPointF& scenePos);
 
+    // ★ E.5(2026-09-29):把 22 个控件类型全部实例化一次,填满 ControlBase 注册表。
+    //   【为什么抽成 public static】原来这段"delete new XControl × 22"写在构造函数里,
+    //   只有 new 过 EditorMainWindow 的人才跑过。E.5 加了 RuntimeCanvas —— 它也
+    //   要 create(typeName) 重建控件,如果主画面先开 RuntimeCanvas、没开过编辑器,
+    //   注册表就是空的 → create 全部返回 nullptr → 画面空白且【不报任何错】。
+    //   抽出来之后两个入口共用一份列表,加控件只需改这一处。
+    //   幂等:重复调用只是多 new/delete 一轮,无副作用。
+    static void ensureControlTypesRegistered();
+
 public slots:
     // ★ E.4d 对齐动作(6 个,public 让测试也能直接调)
     void onAlignLeft();
@@ -129,7 +150,13 @@ private:
     QDockWidget*    leftDock_      = nullptr;     // ★ E.4a:调色板 dock
     PaletteWidget*  palette_       = nullptr;     // ★ E.4a
     QUndoStack*     undoStack_     = nullptr;
+    // ★ E.5:project_ 现在可能是【外部传入】的(主画面的 Project),不再必然自建。
+    //   ownsProject_ 标记所有权 —— 自建的要 delete,外部给的不碰。
+    //   漏了这条就是析构时把主画面的 Project 一起删了,主画面随后 loadFromFile
+    //   访问已释放对象 —— 又是一次"看起来好好的,一用就崩"。
     Project*        project_       = nullptr;     // ★ E.3
+    bool            ownsProject_   = false;       // ★ E.5:project_ 是否归本窗口所有
+    VariableManager* varMgr_       = nullptr;     // ★ E.5:绑定变量用
     QToolBar*       alignToolbar_  = nullptr;     // ★ E.4d:对齐工具栏
     QString         currentPath_;                // ★ E.3:当前打开的 .hmi.json 路径
 

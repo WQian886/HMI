@@ -81,6 +81,8 @@ set(SOURCES
     src/editor/GroupHandleItem.cpp
     # ★ E.4d 续:选中态视觉统一 SelectionFrameItem(蓝色虚线边框,paint() 视觉延后)
     src/editor/SelectionFrameItem.cpp
+    # ★ E.5(2026-09-29):运行时画布 RuntimeCanvas —— 主窗口显示编辑器存的画面
+    src/editor/RuntimeCanvas.cpp
 )
 
 set(HEADERS

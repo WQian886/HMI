@@ -20,6 +20,7 @@ namespace qwhmi::widgets { class TrendWidget; }  // ★ D.2(2026-09-20):历史�
 #include "ui_hmi.h"
 // ★ E.4a(2026-09-21):编辑器按钮入口
 #include "editor/EditorMainWindow.h"
+#include "editor/RuntimeCanvas.h"   // ★ E.5(2026-09-29):运行时画布
 
 class hmi : public QMainWindow
 {
@@ -196,6 +197,9 @@ private:
     void onDemoCanvasClicked();
     // ★ E.4a:弹/隐藏 EditorMainWindow(调色板 + 画布 + 属性面板 + JSON 存读)
     void onEditorClicked();
+    // ★ E.5(2026-09-29):弹/隐藏 RuntimeCanvas(把编辑器存的工程文件显示出来)
+    //   这是"编辑器画的画面怎么在主画面里显示"的答案。
+    void onRuntimeCanvasClicked();
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)

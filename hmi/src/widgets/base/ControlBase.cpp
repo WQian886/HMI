@@ -333,6 +333,55 @@ void ControlBase::unbind() {
     bound_ = nullptr;
 }
 
+// ★ E.5(2026-09-29):按名绑定 —— 补上"JSON 字符串 → Variable 指针"这一环
+//
+//   【为什么需要】编辑器把 variableName 存进 JSON,主画面读回来时手里只有
+//   字符串。以前 bind() 只收 Variable*,中间这步没人做 —— 于是编辑器存的画面
+//   在主画面里一个都绑不上。这是 E 阶段标完工时漏掉的一环。
+//
+//   【两种名字都要收】
+//   JSON 里存的是 bind() 自动写进去的全名 "plc1.Speed"(ControlBase.cpp:323),
+//   而 VariableManager::findVariable 只认 Variable::name() 即短名 "Speed"。
+//   属性面板里用户又可能直接手填短名。两种都试一遍,少一种就是"用户填对了
+//   却没绑上"这种没法自查的坑。
+bool ControlBase::bindByName(VariableManager* vm) {
+    if (!vm) return false;
+    varMgr_ = vm;   // 顺手存住,后续 writeToPlc 等路径可用
+    const QString name = variableName();
+    if (name.isEmpty()) return false;
+
+    // ★ 三个查找分支统一走 bindAndRestore,不要各写各的。
+    //   【为什么】第一版三条分支里只有两条记得"改回去",结果用户填短名 "Temp"
+    //   却被悄悄改写成 "plc1.Temp" —— 打开工程这个【只读动作】不该改工程文件的内容。
+    //   tst_RuntimeCanvas::bindByName_acceptsShortName 就是为这条断言存在的。
+    const auto bindAndRestore = [this, &name](Variable* v) {
+        if (!v) return false;
+        bind(v);
+        // bind() 内部会 setVariableName(规范全名),这里改回用户填的原样。
+        // 理由:variableName_ 是工程文件的一部分,"打开"这个动作不该动它。
+        setVariableName(name);
+        return true;
+    };
+
+    // 1) 直接按名查(findVariable 认的是短名)
+    if (Variable* v = vm->findVariable(name)) {
+        return bindAndRestore(v);
+    }
+    // 2) 全名 "plc1.Speed" → 剥掉 plcId 前缀再试
+    const int dot = name.indexOf(QLatin1Char('.'));
+    if (dot > 0) {
+        if (Variable* v = vm->findVariable(name.mid(dot + 1))) {
+            return bindAndRestore(v);
+        }
+    }
+    // 3) 找别名(D.5 机制:操作员看到的"转速" → plc1.Speed)
+    if (Variable* v = vm->findByAlias(name)) {
+        return bindAndRestore(v);
+    }
+    // 找不到就明确返回 false,不做任何"假装成功"的处理
+    return false;
+}
+
 void ControlBase::onVariableValueChanged() {
     if (!bound_) return;
     setValue(bound_->value());
