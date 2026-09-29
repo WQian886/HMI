@@ -49,6 +49,15 @@ public:
     // ★ 反向 — 移除目标上的所有 handle
     static void removeHandlesFor(qwhmi::widgets::ControlBase* target);
 
+    // ★ E.4d-follow-10(2026-09-29):按 target 当前的 rotation 重算光标
+    //   背景:handle 是 target 的【子 item】,父一转 8 个 handle 跟着转,
+    //         位置自动就对上了(Qt 的父子 transform 干的活,不用我们管)。
+    //   但 type_ 是构造时定死的 —— 那个 handle 原本在左边,转 90° 之后
+    //   它在视觉上到了上边,可光标还是 SizeHor(左右箭头)。
+    //   用户看到的是"朝下的箭头配一个横向的方块",鼠标拖动方向和视觉对不上。
+    //   这个静态函数给 target 的所有 handle 重刷一遍光标。
+    static void refreshCursorsFor(qwhmi::widgets::ControlBase* target);
+
 public:
     // ★ 测试入口(QGraphicsItem 的 mouse*Event 是 protected,测试要能调)
     void handleMousePress(QPointF scenePos);
@@ -68,6 +77,8 @@ protected:
 
 private:
     void applyResize(const QPointF& delta, bool shift);
+    // ★ 根据【旋转后视觉上所处的位置】决定光标,而非构造时的 type_
+    void applyCursorForRotation();
 
     HandleType type_;
     QGraphicsItem* target_ = nullptr;

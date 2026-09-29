@@ -512,9 +512,42 @@ void EditorMainWindow::installSelectionFrame() {
                 this, &EditorMainWindow::updateSelectionFrame);
         connect(t, &qwhmi::widgets::ControlBase::sizeChanged,
                 this, &EditorMainWindow::updateSelectionFrame);
+        // ★ E.4d-follow-10:旋转也会改 sceneBoundingRect(200x100 转 90° 变 100x200),
+        //   但 rotationChanged 是 QGraphicsItem 的信号,不在这两个连接里 ——
+        //   不接的话用户拖属性面板的 rotation,选中框还保持着旋转前的尺寸,
+        //   框和控件形状对不上(方框套竖条)。
+        //
+        //   连的是 onRotationChanged 而不是 updateSelectionFrame 本身:
+        //   旋转要做的【两件事】——刷选中框 + 刷 handle 光标。
+        //   而 installSelectionFrame 只在选中集变化时跑,
+        //   用户改 rotation 不会重跑它,所以光标那次刷新必须挂在信号上,
+        //   挂在 install 末尾等于永远不触发(只在"先转后选"时才生效)。
+        //
+        //   ★ 信号取的是 ControlBase:: 而不是 QGraphicsItem:: ——
+        //     QGraphicsItem 的 Q_PROPERTY 写着 NOTIFY rotationChanged,
+        //     但那个信号实际声明在【QGraphicsObject】上(它才继承 QObject,
+        //     信号得有 moc 才存在)。写成 &QGraphicsItem::rotationChanged
+        //     编译不过:error C2039 不是 QGraphicsItem 的成员。
+        //     属性写在基类、信号住在派生类,这个错位很容易踩。
+        connect(t, &qwhmi::widgets::ControlBase::rotationChanged,
+                this, &EditorMainWindow::onRotationChanged);
     }
 
     updateSelectionFrame();   // 设初始 rect
+    // ★ 装完 frame 刷一次光标 —— target 可能在 install 之前就转过了
+    //   (从 JSON 载入的工程文件里 rotation 早就写好了)
+    refreshHandlesCursor();
+}
+
+void EditorMainWindow::onRotationChanged() {
+    updateSelectionFrame();
+    refreshHandlesCursor();
+}
+
+void EditorMainWindow::refreshHandlesCursor() {
+    for (auto* t : targets_) {
+        if (t) ResizeHandleItem::refreshCursorsFor(t);
+    }
 }
 
 void EditorMainWindow::removeSelectionFrame() {
@@ -527,6 +560,8 @@ void EditorMainWindow::removeSelectionFrame() {
                    this, &EditorMainWindow::updateSelectionFrame);
         disconnect(t, &qwhmi::widgets::ControlBase::sizeChanged,
                    this, &EditorMainWindow::updateSelectionFrame);
+        disconnect(t, &qwhmi::widgets::ControlBase::rotationChanged,
+                   this, &EditorMainWindow::onRotationChanged);
     }
 
     scene_->removeItem(selectionFrame_);

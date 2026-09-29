@@ -13,6 +13,8 @@
 #include <QPainterPath>
 #include <QPen>
 
+#include <cmath>
+
 namespace qwhmi::editor {
 
 ResizeHandleItem::ResizeHandleItem(HandleType type,
@@ -39,6 +41,75 @@ ResizeHandleItem::ResizeHandleItem(HandleType type,
         case HandleType::Left:
         case HandleType::Right:
             setCursor(Qt::SizeHorCursor); break;
+    }
+    // ★ 构造时 target 可能已经转过(先建控件再 setRotation 的路径),
+    //   所以上面设完立刻按真实 rotation 校正一次
+    applyCursorForRotation();
+}
+
+// ★ E.4d-follow-10:旋转后重算光标。
+//   做法:把 type_ 按 target 的 rotation 映射成"旋转后在视觉上是什么位置",
+//   再照那个位置给光标。
+//
+//   为什么不用 mapToScene 反推位置:handle 带 ItemIgnoresTransformations,
+//   mapToScene 算出来的位置跟实际画出来的位置对不上,反推会得到错的结论。
+//   按角度查表更直白,而且只有 3 张 8 项的表,一眼能验 ——
+//   将来要支持 45° 只需补表,不用改算法。
+void ResizeHandleItem::applyCursorForRotation() {
+    if (!target_) return;
+
+    // ★ 规整到 [0,360):setRotation(-90) 是合法输入,不规整的话 quarter 会算成 -1,
+    //   C++ 里 -1 % 4 还是 -1,三个 case 全不匹配 → 静默不改光标。
+    qreal rot = std::fmod(target_->rotation(), 360.0);
+    if (rot < 0.0) rot += 360.0;
+    const int quarter = static_cast<int>(qRound(rot / 90.0)) % 4;
+    // ★ 不是 90 的整数倍就不动 —— 任意角度下"这个点算左边还是上边"
+    //   没有唯一答案,猜错比不改更糟(会出现"箭头朝左但只能上下拖")。
+    if (qAbs(rot - quarter * 90.0) > 0.01) return;
+
+    // 顺时针转 quarter 圈后,原来的"上"落到"右"、"右"落到"下"……
+    // kAfter90[原来在哪个位置] = 转完之后落在哪个位置
+    static const HandleType kAfter90[8] = {
+        HandleType::TopRight,   HandleType::Right,      HandleType::BottomRight,
+        HandleType::Top,        HandleType::Bottom,     HandleType::TopLeft,
+        HandleType::Left,       HandleType::BottomLeft,
+    };
+    static const HandleType kAfter180[8] = {
+        HandleType::BottomRight, HandleType::Bottom,    HandleType::BottomLeft,
+        HandleType::Right,       HandleType::Left,      HandleType::TopRight,
+        HandleType::Top,         HandleType::TopLeft,
+    };
+    static const HandleType kAfter270[8] = {
+        HandleType::BottomLeft, HandleType::Left,       HandleType::TopLeft,
+        HandleType::Bottom,     HandleType::Top,        HandleType::BottomRight,
+        HandleType::Right,      HandleType::TopRight,
+    };
+
+    const HandleType visual = (quarter == 1) ? kAfter90 [static_cast<int>(type_)]
+                      : (quarter == 2) ? kAfter180[static_cast<int>(type_)]
+                      : (quarter == 3) ? kAfter270[static_cast<int>(type_)]
+                      : type_;   // 0 度:就是原来的位置
+
+    switch (visual) {
+        case HandleType::TopLeft:
+        case HandleType::BottomRight:
+            setCursor(Qt::SizeFDiagCursor); break;
+        case HandleType::TopRight:
+        case HandleType::BottomLeft:
+            setCursor(Qt::SizeBDiagCursor); break;
+        case HandleType::Top:
+        case HandleType::Bottom:
+            setCursor(Qt::SizeVerCursor); break;
+        case HandleType::Left:
+        case HandleType::Right:
+            setCursor(Qt::SizeHorCursor); break;
+    }
+}
+
+void ResizeHandleItem::refreshCursorsFor(qwhmi::widgets::ControlBase* target) {
+    if (!target) return;
+    for (QGraphicsItem* c : target->childItems()) {
+        if (auto* h = qgraphicsitem_cast<ResizeHandleItem*>(c)) h->applyCursorForRotation();
     }
 }
 

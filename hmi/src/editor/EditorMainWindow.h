@@ -146,6 +146,12 @@ private:
     void installSelectionFrame();   // 按当前 targets_ 安装
     void removeSelectionFrame();
     void updateSelectionFrame();    // 选中变化或 target 缩放/移动后重摆
+    // ★ E.4d-follow-10(2026-09-29):旋转后要刷两样东西 ——
+    //   ① 选中框(rect 尺寸随 sceneBoundingRect 变)
+    //   ② handle 光标(原来在左边的点转 90° 后到了上边,光标要跟着换)
+    //   position/size 变更只影响 ①,所以旋转单独走这个槽。
+    void onRotationChanged();
+    void refreshHandlesCursor();
 
     SelectionFrameItem* selectionFrame_ = nullptr;   // ★ 当前选中边框(单选/多选合一)
     GroupHandleItem*   groupHandle_  = nullptr;   // ★ E.4d 续-3:多选组 handle 容器

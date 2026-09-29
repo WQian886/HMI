@@ -218,6 +218,9 @@ add_hmi_test(tst_GeometryUndo)
 # ★ E.4d-follow-9(2026-09-29):选中框【真的画出来了吗】—— 渲染到 QImage 数像素,
 #   补上 tst_EditorMainWindow 那 4 个只断言几何、不看画面的用例的盲区
 add_hmi_test(tst_SelectionFrameRender)
+# ★ E.4d-follow-10(2026-09-29):旋转 —— 先量出真正坏的是哪几件事,
+#   再决定改什么(QGraphicsItem 本来就有 rotation 属性,见文件头注释)
+add_hmi_test(tst_Rotation)
 # 阶段 E · E.4a 控件调色板 PaletteWidget
 add_hmi_test(tst_PaletteWidget)
 # 阶段 E · E.4b 8 handle 缩放 ResizeHandleItem
