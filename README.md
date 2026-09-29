@@ -74,10 +74,10 @@
 | 7 | 整合 demo(真 PLC + 24h 长跑 + 截图视频) | ↪️ 见 v0.2.0 阶段 A |
 | 8+ | 可选扩展(S7 / 曲线 / 串口 / 多 PLC / 权限) | ↪️ 见 v0.2.0 阶段 B–I |
 
-**下一步该做什么**(2026-09-28 现状):
-- **E.4d 收尾**(2-4 小时):补 `SelectionFrameItem.cpp` 的 `paint()` 视觉(对应 `bug图/图1.png`),CMakeLists.txt 显式加 `SelectionFrameItem` + `GroupHandleItem`,vcxproj.filters 给 E.4d 新增 .cpp 补 `<Filter>Source Files</Filter>`,删 5 个 `.bak` 残留,改 `.gitignore` 加 `hmi/x64/`/`hmi/out/`/`hmi/tests/build/` 三行。
+**下一步该做什么**(2026-09-29 现状):
+- **E 阶段尾巴**(半天 ~ 1 天,做完 E 阶段彻底关闭):补 `SelectionFrameItem.cpp` 的 `paint()` 视觉(对应 `bug图/图1.png`);`ControlBase::rotation` + handle 跟随(**已明确单独排**,要动的 3 处正是 E.4d 刚修好的代码,详细风险表见 `docs/阶段E.0_从这里继续.md` 节 7)。
 - **Wqian 一句话"阶段 F 启动"**:展开 F 阶段工单(商业级报警,2-3 周 P1)。
-- 详见 [`docs/路线图.md`](docs/路线图.md) 和 [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md) v0.2.0-rc1。
+- 详见 [`docs/现状.md`](docs/现状.md)(唯一权威)/ [`docs/路线图.md`](docs/路线图.md) 和 [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md)。
 
 ---
 
@@ -146,7 +146,7 @@ HMI/                              ← 仓库根(2026-09-08 从更上层下移至
     │   ├── auth/                                 B 阶段:用户/权限/审计(8 模块 + 8 测试)
     │   ├── drivers/                              C 阶段:ModbusDriver + S7/EIP stub
     │   ├── history/  export/  tag/               D 阶段:历史库 + CSV + 表达式 + Tag
-    │   ├── widgets/                              E 阶段控件库(18 控件)
+    │   ├── widgets/                              E 阶段控件库(22 控件)
     │   │   ├── base/ControlBase                  E.4d 基类
     │   │   └── 17 控件(Label/Number/Bar/Gauge/Led/Button/...)
     │   └── editor/                               E 阶段编辑器(E.4d 收尾中)

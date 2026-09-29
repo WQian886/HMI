@@ -1,6 +1,86 @@
 # CHANGELOG
 
-> 最后核对：**2026-09-28**（基于代码核对：E.4d-follow-7 = `3473fa6` 是当前稳定基线，19 个 commit 全在 E.4d；B/C/D 阶段代码已全部落地，A 阶段 8/8 验证早已通过）
+> 最后核对：**2026-09-29**（基于代码核对：`9d8ff10` = E.4d-follow-8 Undo 是当前稳定基线，`ctest` **53/53 全绿**）
+
+## [Unreleased] - 2026-09-28 ~ 09-29
+
+### 阶段 E · E.1c 补齐 + 收尾（Path 2「降级 E」）
+
+**写在最前面**：本节之前 CHANGELOG 停在 0.2.0-rc1（E.4d-follow-7 / 18 控件）。
+这 3 天做完了 E.1c 全部 5 个工业控件 + 写回 PLC 通道 + Undo 全覆盖，控件库 **22 个全落地**，
+`ctest` 从「52/53，10 个长期红」变成 **53/53 全绿**。
+
+#### 1. `ControlBase::writeToPlc` —— 控件写回 PLC 通道（计划外前置，但绕不过去）
+
+**发现**：`ControlBase` 当时是**单向**的。`onVariableValueChanged` 只做「PLC 推过来 → 更新显示」，
+反方向推不出去。而 `ToggleControl.cpp:63-70` 鼠标点击翻转本地值并发 `toggled` 信号，
+**grep 全仓库没有任何人接这个信号**。也就是说当时 22 个控件**全是只读显示器,一个都写不回 PLC**。
+
+对阀门/泵/电机是致命的 —— 不能点开的阀门、不能启停的泵就只是 5 张图片。
+
+- 新增 `ControlBase::writeToPlc(v)`：`setValue` + `Variable::setValue` + `markDirty`。
+  `markDirty()` → `WriteScheduler::onTick` 扫 `isDirty()` 发出去，**不用动 WriteScheduler**。
+- 拒绝条件：未绑定 / 变量只读 / 编辑器模式 → 返回 `false`。
+- 顺带修好 `ToggleControl` 断线的 `toggled`。
+- 测试：`tst_ControlBaseWrite`。**最要紧的一条是 `click_readOnly_doesNotFlip`** ——
+  只读变量必须连本地值都不许翻，否则画面会显示一个根本没发生的状态。
+
+#### 2. 5 个工业控件（E.1c 原计划 0 个，全部新写）
+
+| 控件 | 外观 | 交互 |
+|---|---|---|
+| `TankControl` | 矩形 + 底部液位填充 + 刻度 | 只显示（`minimum`/`maximum`/`tankColor`/`liquidColor`） |
+| `PipeControl` | 圆角矩形管身 | 只显示（流量 > 0 推导 `flowing`） |
+| `ValveControl` | 双三角（标准阀门符号） | **点击切换开/关 → writeToPlc** |
+| `PumpControl` | 圆 + 3 叶片转子 | **点击启停 → writeToPlc**，带旋转动画 |
+| `MotorControl` | 圆 + M 字 | **点击启停 → writeToPlc**，带旋转动画 |
+
+**`SpinAnimator`（泵/电机共用）修了一个真 bug**：原来的循环逻辑是死代码。
+`delta = next - lastLoop_*360` 里 `next` 恒 ≥ 0，`delta < 0` 永不成立，`lastLoop_` 从不递增；
+而且纯累加在**掉一帧**时会把整圈丢掉（角度从 355 跳到下一圈的 5，累加以为只走了 5°），
+表现为泵的转速随卡顿忽快忽慢。改用 `QAbstractAnimation::currentLoop()`（**是 public 的**）
++ 新增 `offset_` 让停止后重启从停下处续转而不是跳回 0°。
+测试 `tst_SpinAnimator` 的 `droppedFrame_doesNotLoseAWholeTurn` 锁住这一点。
+
+#### 3. 修一个静默失败的生产 bug：控件工厂注册表
+
+`tst_MotorControl::pumpAndMotor_areDistinctTypes` 报「Pump 不在注册表里」。
+根因：`ControlBase.cpp` 的工厂 `QHash<QString, FactoryFn>` **由构造函数填充**，
+而 `EditorMainWindow.cpp` 开头那串 `delete new XxxControl;` 就是为了逼所有构造函数跑一遍。
+**新增的 5 个控件没被加进那串 `delete`** —— 后果:① 调色板上不出现这 5 个控件
+② 工程文件里存着它们,`loadFromFile` 静默跳过。两个症状都是「看起来坏了但说不清哪坏」。
+已修 + 加 2 个回归断言(`tst_EditorMainWindow`:调色板项数 == 22)。
+
+#### 4. 10 个过时测试的 JSON 键名 —— 基线**首次**全绿（52/53 → 53/53）
+
+> ⚠ **归因更正**：这 10 个失败此前被记成「生产代码 `toJson`/`fromJson` 键名不匹配（w/h vs width/height）」。
+> **那是错的。** 生产代码是对称的（`propertiesToJson` 走反射输出嵌套的 `position`/`size`，
+> `propertiesFromJson` 读回来），**一个字都不用改**。
+> 错的是**测试在断言一个从未存在过的 JSON 格式** —— 写的是平铺 `x`/`y`/`w`/`h`，
+> 而 `Q_PROPERTY` 名是 `position`/`size`。`obj.contains(name)` 一个都匹配不上，
+> **整个对象被静默忽略**，控件保持默认值。失败信息只说「值不等」，完全看不出是键名没匹配上。
+
+改完顺手给 `tst_LabelControl` 加了 `toJson_fromJson_roundTrips`：
+原来的 toJson 测试只验输出内容，**两边一起错也照样绿**。
+
+#### 5. E.4d-follow-8：9 个对齐/等尺寸动作补 Undo
+
+EditorMainWindow 的 6 个对齐 + 3 个等尺寸原来直接调 `setPosition`/`setSize`，**零 Undo 包装**。
+用户按了左对齐，Ctrl+Z 撤不回来 —— 排版是反复试错的操作。
+
+- 新增 `GeometryChangeCommand`：记「一批控件的矩形」而不是 N 条单属性命令
+  （多选下「一次 Ctrl+Z = 一步操作」是硬要求，**退一半的排版比不撤销更困惑**）。
+- 快照/入栈抽成 `snapshotGeometry()` + `pushGeometryCommand()` 两个辅助，9 个动作强制同一套写法。
+- **几何没变就不 push** —— 否则 Ctrl+Z 会「按了没反应」。
+- merge 保留**最早**的 `oldRects`（写反的话退一次之后还有控件没对齐）。
+- `tst_GeometryUndo` 21 用例全绿。**这 9 个动作的 Undo 覆盖此前是 0。**
+
+### 已知遗留
+- 🔴 `SelectionFrameItem::paint()` 视觉（`bug图/图1.png`）
+- 🔴 `ControlBase::rotation` + handle 跟随（**已明确单独排**，要动的 3 处正是 E.4d 刚修好的代码）
+- ⬜ E.5 主题 / E.6 Lua —— 已拍板推 v0.3.0
+
+---
 
 ## [0.2.0-rc1] - 2026-09-28
 
@@ -32,7 +112,10 @@
 
 ### 阶段 E · 画面框架(控件库 + WYSIWYG 编辑器)· **🟡 收尾中（E.4d）**
 
-#### 控件库（E.1）✅ 18 控件
+> ⚠ 本节记录的是 **rc1 时点(2026-09-28)的快照**，当时控件库 18 个。后续 E.1c 补了 5 个工业控件
+> + 写回 PLC 通道 + Undo，见本文档顶部 **[Unreleased]** 节。**看当前状态请看 [Unreleased]。**
+
+#### 控件库（E.1）✅ 18 控件（rc1 时点）
 - 基类：`src/widgets/base/ControlBase.{h,cpp}`（E.4d-follow-6 已修 setPos 路径不触发 positionChanged）
 - 静态显示：`LabelControl` / `NumberDisplay` / `TextDisplay` / `BarControl` / `GaugeControl` / `LedControl` / `ImageControl` / `RectangleControl` / `LineControl` / `GroupControl`
 - 控制：`ButtonControl` / `ToggleControl` / `SliderControl` / `InputEditControl`（含 placeholder 实功能）
@@ -143,12 +226,17 @@
 
 ---
 
-## 下一步 · E.4d 收尾 + 阶段 F 启动决策
+## 下一步 · E 阶段尾巴 + 阶段 F 启动决策（2026-09-29 更新）
 
-E.4d 收尾（约 2-4 小时）：
+E 阶段尾巴（半天 ~ 1 天，做完 E 阶段彻底关闭）：
 - 补 `SelectionFrameItem.cpp` 的 `paint()` 视觉（对应 `bug图/图1.png`）
-- vcxproj.filters 给 E.4d 新增 4 个 .cpp 补 `<Filter>Source Files</Filter>`
-- CMakeLists.txt 显式 SOURCES/HEADERS 加 `SelectionFrameItem`、`GroupHandleItem`
+- `ControlBase::rotation` + handle 跟随 —— **已明确单独排**，风险最高。
+  要同时动 `ResizeHandleItem::layoutHandlesFor` / `SelectionFrameItem` / `GroupHandleItem::applyProportionalResize`
+  三处，而这 3 处正是 E.4d 那 19 个 commit 刚逐个修好的代码。
+  每改一处跑一次 `tst_HandleVisualAlignment` + `tst_ResizeHandle` + `tst_EditorMainWindow`。
+  阻力大就只加属性不做 handle 跟随。详细风险表见 `docs/阶段E.0_从这里继续.md` 节 7。
+
+> ~~原清单里的 vcxproj.filters 分组 / CMakeLists 显式列表 / `.bak` 清理 / `.gitignore` 已随 `1114bc0` 完成。~~
 
 阶段 F 启动（商业级报警，2-3 周 P1）：
 - Wqian 一句话"阶段 F 启动" → 展开 F 工单
