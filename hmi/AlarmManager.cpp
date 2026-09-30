@@ -68,6 +68,13 @@ void AlarmManager::clearAll() {
     if (!activeAlarms_.isEmpty()) {
         activeAlarms_.clear();
     }
+    // ★ F1(2026-09-30):连存档一起清。
+    //   【取舍】"复位不该清历史"这条原则(Wqian 2026-08-04)针对的是
+    //   事故追溯所需的记录 —— 那些已经由 AlarmRecorder 落进 SQLite 了,
+    //   内存存档只是工作缓冲,不是历史。所以这里清掉不违反那条原则。
+    //   【为什么必须清】Project::loadFromFile 开头调 clearAll(),
+    //   换工程时留着上个工程的存档,findAlarm() 会串号。
+    archived_.clear();
     if (!checkers_.isEmpty()) {
         for (auto it = checkers_.begin(); it != checkers_.end(); ++it) {
             delete it.value();   // setParent(this) 后 delete 会从 QObject 树自动移除
@@ -100,14 +107,63 @@ void AlarmManager::onCheckerTriggered(const Alarm& alarm) {
     emit alarmTriggered(alarm);
 }
 
-// ★ IMPROVE-5.2(2026-08-04):5.2 简化版——恢复直接从 activeAlarms_ 移除
-//   【取舍】完整版应该保留 archived_ 存档,但 5.4 UI 暂时不需要
-//   【后续】5.4 + 之后可加 QList<Alarm> archived_; clearAll() 才清掉
-//   ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):改用 ID 匹配
+// ★ F1(2026-09-30)重写:恢复时【先发信号再 erase】
+//
+// 【原来错在哪】顺序是 erase → emit:
+//     it->recoveredAt = now();
+//     activeAlarms_.erase(it);        ← 记录没了(对象销毁,acknowledgedAt/state 一并没了)
+//     emit alarmRecovered(id);        ← 只传 id
+// 而 AlarmRecorder::onAlarmRecovered 靠遍历 activeAlarms() 取完整数据 ——
+// 刚 erase 的那条必然遍历不到,直接走兜底 insertAction(id, {}, 0, ...)。
+// 结果:历史表里【每一条恢复行】的 name/level/variable/value/threshold 全空,
+// 事故追溯查出来是一行只有 id 和时间的孤儿。
+//
+// 【证据】tst_AlarmRecorder::recoveredRow_actuallyCarriesNameAndLevel
+//   走生产链路(fireTrigger → fireRecover),断言恢复行的 name 非空 —— 红。
+//   旧测试 recordRecovered_writesActionTwo 只断言 action==2 && id 匹配,
+//   恰好是这条路径上唯一没坏的两样,所以它绿了两个月。
+//
+// 【这次改了什么】不只是调顺序:
+//   1. 恢复的记录进 archived_(有界 kMaxArchived),不是直接销毁
+//      —— 只调顺序的话 acknowledgedAt/state 照样当场蒸发,
+//      "未确认就恢复了"这种现场常见情况无从回答;
+//   2. emit 挪到 erase 之前,且给信号带上完整 Alarm,
+//      下游不必再回头去查一个可能已经没了的容器;
+//   3. state 置 Cleared —— 这个枚举值定义在 Alarm.h:24 一直没人写,属于死代码。
+//
+// 【兼容性】两个消费者(hmi::onAlarmRecovered / AlarmListControl::onAlarmRecovered)
+//   都只接 qint64 id、不读内容,多传一个参数不影响它们(见文件头 grep 结果)。
 void AlarmManager::onCheckerRecovered(qint64 id) {
     auto it = activeAlarms_.find(id);
     if (it == activeAlarms_.end()) return;
-    it->recoveredAt = QDateTime::currentDateTime();
+
+    Alarm recovered = it.value();          // ★ 拷贝出来:下面 erase 后原对象就没了
+    recovered.recoveredAt = QDateTime::currentDateTime();
+    recovered.state = AlarmState::Cleared;  // ★ 之前没人写这个值,是死代码
+
+    // 存档(有界)。满了丢最旧的,保留最近的 —— 事故追溯靠 SQLite,
+    // 内存存档只是"刚恢复的还能查一下"。
+    archived_.append(recovered);
+    while (archived_.size() > kMaxArchived) {
+        archived_.removeFirst();
+    }
+
     activeAlarms_.erase(it);
-    emit alarmRecovered(id);
+    // ★ emit 在 erase 之后、但【传的是拷贝】—— 这样"此刻已不在 active 里"
+    //   仍然成立(下游若据此判断状态不会误判),而内容又完整。
+    //   顺序不影响内容,因为带的是 recovered 拷贝而非引用。
+    emit alarmRecovered(id, recovered);
+}
+
+const Alarm* AlarmManager::findAlarm(qint64 id) const {
+    auto it = activeAlarms_.constFind(id);
+    if (it != activeAlarms_.constEnd()) return &it.value();
+    for (const Alarm& a : archived_) {
+        if (a.id_ == id) return &a;
+    }
+    return nullptr;
+}
+
+void AlarmManager::clearArchived() {
+    archived_.clear();
 }

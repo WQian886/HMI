@@ -182,20 +182,36 @@ void AlarmRecorder::onAlarmAcknowledged(qint64 id) {
     insertAction(id, {}, 0, /*action=*/1, QDateTime::currentDateTime());
 }
 
-void AlarmRecorder::onAlarmRecovered(qint64 id) {
-    if (!mgr_) return;
-    const auto alarms = mgr_->activeAlarms();
-    for (const Alarm& a : alarms) {
-        if (a.id_ == id) {
-            const QDateTime at = a.recoveredAt.isValid()
-                                 ? a.recoveredAt : QDateTime::currentDateTime();
-            insertAction(id, a.name, static_cast<int>(a.level),
-                         /*action=*/2, at,
-                         a.variableName, a.triggerValue, a.threshold);
-            return;
-        }
+// ★ F1(2026-09-30)重写:直接用信号带来的 Alarm,不再回头遍历 activeAlarms()。
+//
+// 【原来错在哪】AlarmManager::onCheckerRecovered 的顺序是 erase → emit,
+// 恢复的记录在信号发出前就已经没了。而这里靠遍历 mgr_->activeAlarms()
+// 找完整数据 —— 必然找不到,走到末尾兜底:
+//     insertAction(id, {}, 0, action=2, now())
+// 结果:历史表里每一条"恢复"行的 name/level/variable/value/threshold 全空。
+// 事故追溯查出来是一行只有 id 和时间的孤儿。
+//
+// 【证据】tst_AlarmRecorder::recoveredRow_actuallyCarriesNameAndLevel(红→绿)
+//
+// 【为什么原来那种"找不到就写空行"的兜底要保留】
+//   理论上信号带了内容就不该有找不到的情况。但兜底还留着,因为
+//   历史表是"宁可有残缺的一行,也不能整条丢失"—— 写空行至少还知道
+//   "这条 id 在这个时刻恢复过"。真出现了要 qWarning,不能静默。
+void AlarmRecorder::onAlarmRecovered(qint64 id, const Alarm& recovered) {
+    if (recovered.name.isEmpty()) {
+        // 信号带了内容却还是空的 —— 说明有别的路径在发这个信号。
+        // 静默写空行会把这个"应该有内容却没有"藏起来,和原来那个 bug 同一形状。
+        // 用本文件其余地方一致的 qWarning(不引 auth 的日志 category,
+        // 那是为了 alarm.ack 审计才有的,这里不是审计事件)。
+        qWarning().noquote()
+            << QStringLiteral("[AlarmRecorder] 恢复信号没带内容(alarmId=%1),将写残缺行。"
+                              "这不该发生,查一下是谁发的 alarmRecovered。").arg(id);
     }
-    insertAction(id, {}, 0, /*action=*/2, QDateTime::currentDateTime());
+    const QDateTime at = recovered.recoveredAt.isValid()
+                         ? recovered.recoveredAt : QDateTime::currentDateTime();
+    insertAction(id, recovered.name, static_cast<int>(recovered.level),
+                 /*action=*/2, at,
+                 recovered.variableName, recovered.triggerValue, recovered.threshold);
 }
 
 void AlarmRecorder::onAllCleared() {

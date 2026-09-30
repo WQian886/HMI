@@ -28,6 +28,26 @@ public:
     int  count() const;                                  // active 报警数
     QList<Alarm> activeAlarms() const;                   // 给 5.4 UI 用
 
+    // ★ F1(2026-09-30):按 id 找报警,active 找不到就翻 archived_
+    //   【为什么需要】恢复时 activeAlarms_ 里的记录会被 erase 掉,
+    //   而 AlarmRecorder 靠遍历 activeAlarms() 取数据填历史行,
+    //   于是"每一条恢复行的 name/level/variable 全是空的"(已用测试证明)。
+    //   现在恢复的记录进 archived_,这个函数是它的正确取法。
+    //   查不到返回 nullptr。
+    const Alarm* findAlarm(qint64 id) const;
+
+    // ★ F1(2026-09-30):已恢复报警的存档(有界,见 kMaxArchived)
+    //   【取舍】存档不是"永久保留" —— 那正是 AlarmRecorder 落 SQLite 的活,
+    //   两边都永久保留等于同一份数据存两遍、还各有一份过期策略。
+    //   内存里只留最近 N 条,够 UI 回看和刚恢复时的联动查询用。
+    QList<Alarm> archivedAlarms() const { return archived_; }
+    void clearArchived();
+
+    // 存档上限。超过时丢最旧的(见 onCheckerRecovered)。
+    // 【为什么要有界】这是台 7×24 不关机的机器,没人会来点"清存档"。
+    // 无界增长的结果是运行几个月后吃光内存,而报警数据本该在 SQLite 里。
+    static constexpr int kMaxArchived = 500;
+
     // ★ IMPROVE-6.2(2026-08-07):配置存读访问器(返回所有 Checker 给 saveToFile 用)
     QList<AlarmChecker*> checkers() const { return checkers_.values(); }
 
@@ -50,7 +70,12 @@ signals:
     // 报警确认 → 5.5 UI(停闪),用 ID 唯一标识避免同名匹配错误(5.5 BUGFIX)
     void alarmAcknowledged(qint64 id);
     // 报警恢复 → 5.5 UI(标记恢复时间),用 ID 唯一标识(5.5 BUGFIX)
-    void alarmRecovered(qint64 id);
+    //
+    // ★ F1(2026-09-30):多带一个 const Alarm& —— 恢复之后 activeAlarms_ 里
+    //   就没这条了,只传 id 的话下游想记点什么都得回查一个可能已空的容器
+    //   (AlarmRecorder 就是这么存出孤儿行的)。
+    //   实参是拷贝,不是 activeAlarms_ 里的引用 —— 接收方可以安全持有。
+    void alarmRecovered(qint64 id, const Alarm& recovered);
     // 全部清除 → 5.5 UI(清空列表)
     void allCleared();
 
@@ -61,4 +86,13 @@ private slots:
 private:
     QHash<qint64, Alarm>          activeAlarms_;   // id → 当前 active 报警(5.5 BUGFIX)
     QHash<QString, AlarmChecker*> checkers_;       // name → checker 实例
+
+    // ★ F1(2026-09-30):已恢复报警存档(按恢复顺序 append,最旧的在前)
+    //   【背景】5.2 IMPROVE 的注释写着"完整版应该保留 archived_ 存档,但 5.4 UI 暂时不需要",
+    //           当时判断"暂时不需要"是对的 —— 结果 6.x 接 AlarmRecorder 时踩了:
+    //           恢复时记录被 erase,Recorder 取不到内容,历史表存出孤儿行。
+    //           "暂时不需要"的判断,代价由接下游的人承担了。
+    //   【现在为什么需要】不是 UI 需要,是【数据落库需要】——
+    //   AlarmRecorder 要在恢复的那一刻拿到完整记录,否则历史查询结果是残缺的。
+    QList<Alarm>                  archived_;
 };

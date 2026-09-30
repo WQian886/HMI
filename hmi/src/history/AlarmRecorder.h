@@ -68,7 +68,9 @@ private slots:
     // ★ D.3:接 AlarmManager 信号
     void onAlarmTriggered(const Alarm& alarm);
     void onAlarmAcknowledged(qint64 id);
-    void onAlarmRecovered(qint64 id);
+    // ★ F1(2026-09-30):多带一个 Alarm —— 恢复后记录已不在 activeAlarms_ 里,
+    //   只收 id 的话只能写残缺行(历史查询出来是只有 id 的孤儿)。详见 .cpp。
+    void onAlarmRecovered(qint64 id, const Alarm& recovered);
     void onAllCleared();
 
 private:

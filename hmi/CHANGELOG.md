@@ -1,6 +1,6 @@
 # CHANGELOG
 
-> 最后核对：**2026-09-30**（基于代码核对：`ctest` **58 个目标 58 通过**，`hmi.exe` 构建通过）
+> 最后核对：**2026-09-30**（基于代码核对：`ctest` **59 个目标 59 通过**，`hmi.exe` 构建通过）
 
 ## [Unreleased] - 2026-09-30
 
@@ -249,6 +249,77 @@ poll_interval_ms / alwaysPoll / range 逐字段断言全对；v1→v2→v3 schem
 两种错报不同句 · 未知字段忽略而不拒载 · 标准字段不刷噪音 · 失败不留半成品（两条路径）。
 
 **改动文件**：`JsonSerializer.h/.cpp`、`Project.cpp`、`VariableManager.h`（仅注释）。
+
+#### 7. F1 · 报警历史存出孤儿行 —— 「超额完成」是单测层面的
+
+开 F 之前通读报警代码。**F6 之前标的 ✅「超额完成:4 档 + 列表 + 闪烁 +
+触发/确认/恢复三态」要降级为 🟡** —— 那是**单测层面**的 ✅,不是产品层面的。
+
+##### 7.1 历史表里每一条"恢复"行都是孤儿
+
+`AlarmManager::onCheckerRecovered` 的顺序是 **erase → emit**:
+
+```cpp
+it->recoveredAt = now();
+activeAlarms_.erase(it);        // ← 记录没了
+emit alarmRecovered(id);        // ← 只传 id
+```
+
+而 `AlarmRecorder::onAlarmRecovered` 靠**遍历 `activeAlarms()`** 取完整数据 ——
+刚 erase 的那条**必然遍历不到**,直接走兜底 `insertAction(id, {}, 0, ...)`。
+
+**结果:历史表里每一条"恢复"行的 `name`/`level`/`variable_name`/
+`trigger_value`/`threshold` 全空。** 事故追溯查出来是一行只有 id 和时间的孤儿。
+
+**为什么两个月没人发现:** 旧测试 `recordRecovered_writesActionTwo` 只断言
+`action==2 && id 匹配` —— 恰好是这条路径上**唯一没坏的两样**。
+断言挑在了不会红的地方。
+
+##### 7.2 修法(不只是调顺序)
+
+1. 恢复的记录进 `archived_`(有界 500 条)而非直接销毁
+   —— 只调顺序的话 `acknowledgedAt`/`state` 照样当场蒸发,
+   「没来得及确认值就回来了」这种现场最常见的情况无从回答
+2. `alarmRecovered` 多带一个 `const Alarm&` —— 下游不必回查一个可能已空的容器
+3. `state` 置 `Cleared` —— 这个枚举值定义在 `Alarm.h:24` 一直没人写,是死代码
+4. `clearAll()` 连存档一起清 —— 换工程时 `findAlarm()` 会串到上个工程的数据
+5. `findAlarm(id)` 正确的取法:先 active 后 archived_
+
+##### 7.3 改信号签名的回归风险已钉住
+
+全仓有两个消费者是**老签名**(只接 `qint64`):
+`hmi::onAlarmRecovered`(`hmi.cpp:1350`)、
+`AlarmListControl::onAlarmRecovered`(`AlarmListControl.h:49`)。
+
+Qt 允许"多参信号 → 少参槽"所以不影响它们,但**没有编译期检查兜底**:
+失配的症状是"UI 不更新了",跟代码看着没问题完全不搭边,极难查。
+`legacyIdOnlySlot_stillReceivesRecovery` 专门钉这条。
+
+##### 7.4 测试有效性做了反向验证
+
+临时把行为改回旧的 erase 顺序(保留新 API,只让行为退化),
+`tst_AlarmRecorder` **7 条立刻变红**,改回来又全绿。
+**这证明这些测试测的是行为,不是代码的形状。**
+新增 7 条用例,`ctest` 仍 **59/59 全绿**(并入既有 `tst_AlarmRecorder`)。
+
+##### 7.5 附带发现:报警 UI 有两套,能力不对等
+
+| | `hmi.cpp` 的 `ui.alarmTable` | `src/widgets/AlarmListControl` |
+|---|---|---|
+| 用在哪 | 主画面(运行时) | 编辑器画布 |
+| 闪烁 | ✅ `alarmBlinkTimer_` 500ms(`hmi.cpp:387-389`) | ❌ 无 |
+| 未确认计数 | ❌ | ❌ |
+| 确认入口 | ❌ 只读 | ❌ 只读 |
+
+两套都只按 `id` 更新行文字。**F 阶段要么统一,要么明确"主画面那套才是运行时权威"。**
+
+> **教训(第四次同类)**:`efb0f56` 归因错误、B 组 4 张图 2 个月没确认、
+> F3 未知字段静默丢弃、F1 断言挑在不会红的地方 ——
+> **都是"测试绿了 ≠ 功能能用"**。这次靠**读生产代码 + 反向验证测试有效性**抓到,
+> 不是靠加测试。
+
+**改动文件**:`AlarmManager.h/.cpp`、`src/history/AlarmRecorder.h/.cpp`、
+`tests/tst_AlarmRecorder.cpp`。
 
 ---
 
