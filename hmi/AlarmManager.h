@@ -52,14 +52,31 @@ public:
     QList<AlarmChecker*> checkers() const { return checkers_.values(); }
 
     // 5.5 阶段接:用户点确认按钮(用 ID 唯一标识,避免同名报警匹配错误)
-    void acknowledge(qint64 id);
+    //
+    // ★ F3(2026-09-30):改成返回 bool。
+    //   【为什么】原来是 void。三种"没确认成"的情况全都静默:
+    //     ① 权限不足 —— 只 qCWarning 一行就 return
+    //     ② id 不在 active 里
+    //     ③ 已经确认过了
+    //   UI 层拿不到任何信息,只能"点了没反应"。而 F3 恰好要加确认入口 ——
+    //   操作员双击一行,界面纹丝不动,他无法分辨是"没权限"(该找工程师)
+    //   还是"已经确认过了"(正常)。这正是本项目反复吃的静默失败。
+    //   返回 true = 这次真的把它标成已确认了。
+    //   返回 false = 没成功(权限不足 / 找不到 / 已是已确认状态)。
+    //   【注意】③ 返回 false 是有意的:重复确认不是错误,但也不是"成功了一次"。
+    //   调用方要区分 ① 和 ③ 的话,③ 可以自己先查状态。
+    bool acknowledge(qint64 id);
 
     // ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):把所有 active 报警标记为已确认(不删记录)
     //   【背景】Wqian 反馈:复位不应该清报警记录(事故追溯需要)
     //   【改法】遍历 activeAlarms_,逐个调 acknowledge()(各自 emit alarmAcknowledged)
     //   【取舍】保留记录比 clearAll 更安全;clearAll 留作工程师手动清
     //   【参照】Wqian 2026-08-04 反馈
-    void acknowledgeAll();
+    //
+    // ★ F3:返回"这次真正确认了几条"(权限不足时一条都没确认,返回 0)。
+    //   原来返回 void,复位按钮调它之后不知道自己到底确认了没有。
+    //   hmi.cpp:742 的复位路径现在会拿这个数来提示操作员。
+    int acknowledgeAll();
 
     // 5.5 阶段接:复位按钮 → 清所有 acknowledged 的报警(留作工程师手动清,5.5 不调用)
     void clearAll();

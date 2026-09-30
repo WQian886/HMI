@@ -739,7 +739,23 @@ void hmi::onResetClicked() {
         resetTimer_->start();  // 启动 3 秒单次定时器,到点 onResetFinished 自动转 Stopped
     }
     // 阶段 5.5:复位联动 — 把所有 active 报警标记为"已确认"(保留记录,不删)
-    alarmMgr_->acknowledgeAll();
+    //
+    // ★ F3(2026-09-30):接住 acknowledgeAll 的返回值。
+    //   【顺手发现的一个事实,先记在这,没擅自改】
+    //   上面 count() > 0 就 return 了,所以能走到这里时 count() 必然 == 0,
+    //   而 acknowledgeAll 遍历的正是 activeAlarms_ —— 【它永远确认不到任何东西】。
+    //   也就是说这行从 2026-08-04 加进来至今一直是空转,复位并不会确认任何报警。
+    //   这算不算 bug 取决于当初的本意:
+    //     · 如果本意是"复位时把残留报警标记已确认" → 上面的 count 守卫挡掉了,逻辑矛盾
+    //     · 如果本意是"有报警就不许复位" → 那这行就是多余的,应该删
+    //   改法涉及复位语义(属于 Wqian 的决定),本次只把返回值接住,
+    //   并在这里 qWarning 出来 —— 免得下一个读代码的人以为它在干活。
+    const int acked = alarmMgr_->acknowledgeAll();
+    if (acked == 0 && alarmMgr_->count() == 0) {
+        // 走到这里说明本来就一条都没有,属于正常情况,不打扰操作员。
+        // 留这条分支是为了:将来有人挪动上面的 count 守卫时,这里会立刻暴露出来。
+        qDebug() << "[复位] 当前没有 active 报警,acknowledgeAll 无事可做(预期行为)";
+    }
 }
 
 void hmi::onResetFinished() {
@@ -786,7 +802,9 @@ void hmi::onRuntimeCanvasClicked() {
     }
     if (!canvas_) {
         // ★ 传 varMgr_ 而不是自建:绑定要连的是主画面正在跑的那些 Variable
-        canvas_ = new qwhmi::editor::RuntimeCanvas(varMgr_);
+        // ★ F3(2026-09-30):同时传 alarmMgr_ —— 少了它,运行时画面上摆的
+        //   AlarmListControl 拿不到报警数据源,表格永远空着,而且不报错。
+        canvas_ = new qwhmi::editor::RuntimeCanvas(varMgr_, alarmMgr_);
         canvas_->setAttribute(Qt::WA_DeleteOnClose, false);
         canvas_->resize(1000, 700);
     }
@@ -1421,14 +1439,40 @@ void hmi::onAlarmContextMenu(const QPoint& pos) {
 //   【改法】从 Qt::UserRole 读 ID → alarmMgr_->acknowledge(id)
 //   【取舍】每个 Alarm 唯一 ID(QDateTime::currentMSecsSinceEpoch()),保证不重不漏
 //   【参照】5.5 BUGFIX:AlarmManager.activeAlarms_ 改用 ID 索引
+//
+// ★ F3(2026-09-30):接住 acknowledge 的返回值,失败时明确告诉操作员。
+//   【原来错在哪】返回值是 void,权限不足时 AlarmManager 只 qCWarning 一行就返回,
+//   而这里紧接着无条件 qDebug "[Alarm 确认]" —— 日志说确认了,实际没确认。
+//   界面上的表现是:操作员点了"确认",什么也没变,却没有任何提示。
+//   权限不足是一个需要【找管理员】才能解决的问题,静默失败等于让操作员干瞪眼。
 void hmi::onAlarmAcknowledge() {
     int row = ui.alarmTable->currentRow();
     if (row < 0) return;
     auto* nameItem = ui.alarmTable->item(row, 1);
     if (!nameItem) return;
     qint64 id = nameItem->data(Qt::UserRole).toLongLong();
-    alarmMgr_->acknowledge(id);
-    qDebug() << "[Alarm 确认]" << nameItem->text() << "id=" << id;
+    if (alarmMgr_->acknowledge(id)) {
+        qDebug() << "[Alarm 确认]" << nameItem->text() << "id=" << id;
+        return;
+    }
+    // 走到这里是失败。三种可能,提示文案要分开,别都写成"失败":
+    //   ① 权限不足 → 该找管理员
+    //   ② 已经确认过 → 不用管,不是错误
+    //   ③ 已经恢复/被清掉 → 这行只是历史,不用管
+    if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                                     qwhmi::auth::Permission::AcknowledgeAlarm)) {
+        QMessageBox::warning(this, "无法确认报警",
+            QString("当前用户「%1」没有确认报警的权限。\n请让管理员确认后再试。")
+                .arg(qwhmi::auth::CurrentUser::instance().name()));
+        return;
+    }
+    // 有权限却没确认成 → 只可能是 ②③,都是"不用管",给个轻提示即可
+    // ★ 必须判空:第 4 列理论上总有内容,但 acknowledge 失败也可能是因为
+    //   这一行是 clearAll 之后残留的半截行。真崩在这里就是"给个提示把程序搞挂"。
+    auto* statusItem = ui.alarmTable->item(row, 4);
+    if (!statusItem) return;   // 拿不到状态列就什么都不说,总比崩了好
+    QMessageBox::information(this, "无需确认",
+        QString("这条报警已经是「%1」状态。").arg(statusItem->text()));
 }
 
 // ★ IMPROVE-5.5(2026-08-04):全部清除 → 清空表格 + 停闪烁

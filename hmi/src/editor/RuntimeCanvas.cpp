@@ -6,6 +6,7 @@
 #include "editor/EditorMainWindow.h"   // ★ 只为 ensureControlTypesRegistered()
 #include "widgets/base/ControlBase.h"
 #include "Project.h"
+#include "../../AlarmManager.h"       // ★ F3:setAlarmManager
 #include "../../VariableManager.h"
 
 #include <QFileInfo>
@@ -16,9 +17,10 @@
 
 namespace qwhmi::editor {
 
-RuntimeCanvas::RuntimeCanvas(VariableManager* varMgr, QWidget* parent)
+RuntimeCanvas::RuntimeCanvas(VariableManager* varMgr, AlarmManager* alarmMgr, QWidget* parent)
     : QWidget(parent),
-      varMgr_(varMgr) {
+      varMgr_(varMgr),
+      alarmMgr_(alarmMgr) {
     setWindowTitle(tr("HMI 运行时画面"));
 
     scene_ = new QGraphicsScene(this);
@@ -119,6 +121,16 @@ void RuntimeCanvas::loadControls(const QList<qwhmi::widgets::ControlBase*>& cont
         //   不给基准的话相对路径解析不出来 —— 主画面上每个带图控件都变成手绘,
         //   而且只在日志里留一行 qWarning,画面上完全看不出"图丢了"。
         if (!basePath_.isEmpty()) c->setBasePath(basePath_);
+        // ★ F3(2026-09-30):运行时画布上的控件必须是【运行时模式】。
+        //   这是 F3 能落地的前提,不是顺手加的:
+        //   内嵌 widget 的控件(AlarmListControl)在编辑模式下,
+        //   代理被设成 Qt::NoButton 让父收事件(为了选中/拖动/8 个 handle)——
+        //   代价是内嵌表格一个鼠标事件都收不到,双击确认根本不可能触发。
+        //   不设这一句,画面上的报警列表看着正常,双击却毫无反应。
+        c->setRuntimeMode(true);
+        // ★ F3:接报警数据源。少了这一句,AlarmListControl 的 alarmMgr_ 恒为 null,
+        //   表格永远空白且零报错(见 RuntimeCanvas.h 里的说明)。
+        if (alarmMgr_) c->setAlarmManager(alarmMgr_);
         controls_.append(c);
         scene_->addItem(c);
     }

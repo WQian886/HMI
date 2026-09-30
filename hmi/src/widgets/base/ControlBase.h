@@ -31,6 +31,7 @@
 #include "../../Variable.h"
 
 class VariableManager;
+class AlarmManager;      // ★ F3:只存指针 + 传给派生类钩子,不需要完整类型
 class QPainter;
 class QStyleOptionGraphicsItem;
 class QWidget;
@@ -160,6 +161,56 @@ public:
     void setVariableManager(VariableManager* vm) { varMgr_ = vm; }
     VariableManager* variableManager() const { return varMgr_; }
 
+    // ===== ★ F3(2026-09-30):运行时 / 编辑模式 =====
+    //
+    // 【为什么需要这个开关 —— 这是 F3 撞上 E.4b 的硬冲突】
+    //   AlarmListControl 用 QGraphicsProxyWidget 包一个真 QTableWidget。
+    //   E.4b 为了让控件在编辑器里能被选中/拖动/缩放,给它设了
+    //   setAcceptedMouseButtons(Qt::NoButton)(见 AlarmListControl.cpp:34)。
+    //   那个设置的作用是【代理不吃鼠标事件】,事件穿透到父 item ——
+    //   父才有 press 才能被选中、能拖。
+    //   但代理不吃事件的直接后果是:内嵌的 QTableWidget 也一个鼠标事件都收不到,
+    //   连选中行都不行,更别说双击确认。
+    //   两边都要,就必须能切:编辑模式穿透(选得中、拖得动),运行时模式吃事件(点得动)。
+    //
+    // 【为什么不靠"在不在编辑器里"判断】
+    //   EditorMainWindow 有 editorMode_ 开关,但它只用来灰掉属性面板,
+    //   从没往控件上传过;而且 RuntimeCanvas 是另一个顶层窗口,跟它无关。
+    //   让控件自己去猜宿主是谁,就会又出现"运行时画布上的按钮点不动"这类问题。
+    //   谁创建控件谁显式声明 —— 跟 setVariableManager 同一个思路。
+    //
+    // 【默认 false】默认编辑模式。理由:编辑器/调色板/绝大多数测试都是编辑场景,
+    //   默认成编辑模式意味着"不主动声明就是安全的",漏声明的表现是"运行时点不动"
+    //   (立刻能看出来),而不是"编辑器里莫名拖不动"(隐蔽得多,还容易被当成 bug 报上来)。
+    void setRuntimeMode(bool on);
+    bool runtimeMode() const { return runtimeMode_; }
+
+    // 派生类钩子:运行时模式切换时按需调整自己的交互。
+    // 默认空实现 —— 纯矢量控件(按钮/阀门/泵)两种模式行为一致,不用管。
+    // 需要管的是内嵌 widget 的那几个:AlarmListControl / TrendControl / TableControl。
+    virtual void onRuntimeModeChanged(bool /*runtime*/) {}
+
+    // ★ F3:给需要报警数据的控件一个统一的注入口。
+    //   跟 setVariableManager 对称:RuntimeCanvas 批量设一次,控件自己决定要不要。
+    //   目前只有 AlarmListControl 用得上;别的控件忽略即可。
+    //
+    // 【为什么必须有 —— 这是 F3 挖出来的第 5 个静默失败】
+    //   RuntimeCanvas::loadControls 以前只做 setBasePath + scene_->addItem,
+    //   【从没调过 bindAlarmManager】。所以运行时画布上的 AlarmListControl
+    //   拿到的 alarmMgr_ 恒为 nullptr —— 表格永远是空的,一行都没有,
+    //   而且不报错、不弹窗、终端里也一行日志都没有。
+    //   画面上"摆了个报警列表但永远是空的",用户能做的只有猜。
+    //   这跟 E.5 修的"编辑器存的画面不绑变量"是同一类病:
+    //   链路的一环没人做,两端各自都正常,拼起来才缺。
+    //
+    //   【不要写成 inline 就直接存指针】—— 那样 onAlarmManagerChanged 永远不会被调用,
+    //   变成一个"声明了但没人调"的死钩子(本项目的 E.5 dead member、5.2 死枚举
+    //   都是这个形状)。实现在 ControlBase.cpp,里面存完就通知。
+    void setAlarmManager(AlarmManager* mgr);
+    AlarmManager* alarmManager() const { return alarmMgr_; }
+    // 派生类钩子:拿到 / 失去报警管理器。默认空实现。
+    virtual void onAlarmManagerChanged(AlarmManager* /*mgr*/) {}
+
     // ★ E.1c(2026-09-28):UI → PLC 反向写通道
     //   背景:基类原本是单向的。onVariableValueChanged 只做「PLC 推过来 → 更新显示」,
     //         反方向推不出去。ToggleControl 点一下只翻本地 value_ + emit toggled,
@@ -208,6 +259,10 @@ private:
     //   它是 hmi 构造时 new 出来的实例,生命周期跟主窗口绑定。用全局单例会
     //   引入一个现在不存在的概念,且测试里每个用例都得清全局状态。
     VariableManager* varMgr_ = nullptr;     // 查变量用(★ E.5 接真实实例)
+
+    // ★ F3(2026-09-30)
+    bool runtimeMode_ = false;             // 默认编辑模式(见 setRuntimeMode 注释)
+    AlarmManager* alarmMgr_ = nullptr;     // 报警数据源(只有 AlarmListControl 用)
 
     // ★ E.8 底图成员
     QString imagePath_;

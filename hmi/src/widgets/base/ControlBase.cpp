@@ -472,6 +472,29 @@ bool ControlBase::bindByName(VariableManager* vm) {
     return false;
 }
 
+// ===== ★ F3(2026-09-30):运行时 / 编辑模式 =====
+
+// 【为什么这里只做两件事,不"聪明"地猜】
+//   ① 存状态 ② 通知派生类。
+//   不在这里去遍历子 item、不去猜宿主是谁 —— 那些都是派生类自己的事
+//   (AlarmListControl 才知道自己有个 QGraphicsProxyWidget 要放行鼠标)。
+//   基类要是"顺手"替所有控件改交互,就会重演 E.4b 之前的那个问题:
+//   一个基类默认行为,悄悄改掉了 22 个控件的选中/拖动语义。
+void ControlBase::setRuntimeMode(bool on) {
+    if (runtimeMode_ == on) return;   // 幂等:重复设不重复通知,免得派生类反复重排
+    runtimeMode_ = on;
+    onRuntimeModeChanged(runtimeMode_);
+}
+
+// 【与 setRuntimeMode 完全对称】存完就通知派生类,不管这次是不是"换了个不同的"
+// —— 派生类要能靠 onAlarmManagerChanged(mgr == nullptr) 感知"我被断供了",
+//   AlarmListControl 正是这么把表格清空的。幂等判断故意只比指针不比别的:
+//   同一个 mgr 重复设也要通知,否则"第一次设了没接上,再设一次想补救"会无效。
+void ControlBase::setAlarmManager(AlarmManager* mgr) {
+    alarmMgr_ = mgr;
+    onAlarmManagerChanged(alarmMgr_);
+}
+
 void ControlBase::onVariableValueChanged() {
     if (!bound_) return;
     setValue(bound_->value());

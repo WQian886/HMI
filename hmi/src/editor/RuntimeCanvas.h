@@ -37,6 +37,7 @@ class QGraphicsScene;
 class QGraphicsView;
 class Project;
 class VariableManager;
+class AlarmManager;
 
 namespace qwhmi::widgets { class ControlBase; }
 
@@ -47,7 +48,18 @@ class RuntimeCanvas : public QWidget {
 public:
     // varMgr:绑定变量用(传 hmi 的 varMgr_,别自己 new —— 两份变量表不是一回事)
     // project:共享主画面的 Project 实例,不接它的 signals,只被动调 load()
-    explicit RuntimeCanvas(VariableManager* varMgr, QWidget* parent = nullptr);
+    //
+    // ★ F3(2026-09-30):多收一个 alarmMgr。
+    //   【为什么必须传】以前 loadControls 只做 setBasePath + addItem,
+    //   【从没给任何控件接报警数据源】。于是运行时画布上摆的 AlarmListControl
+    //   拿到的 manager 恒为 nullptr —— 表格永远空,一行都没有,
+    //   而且不报错、不弹窗、日志里也一行都没有。
+    //   跟 E.5 修的"编辑器存的画面不绑变量"是同一类病:链路缺一环,
+    //   两端各自看着都正常,拼起来才缺。
+    //   可以传 nullptr(测试里就是这么用的),此时只是不接报警,不影响别的控件。
+    explicit RuntimeCanvas(VariableManager* varMgr,
+                           AlarmManager* alarmMgr = nullptr,
+                           QWidget* parent = nullptr);
     ~RuntimeCanvas() override;
 
     // ★ 从工程文件加载画面。返回成功创建的控件数。
@@ -77,6 +89,7 @@ private:
     QGraphicsView*  view_      = nullptr;
     QGraphicsScene* scene_     = nullptr;
     VariableManager* varMgr_   = nullptr;
+    AlarmManager*    alarmMgr_ = nullptr;   // ★ F3:给 AlarmListControl 用
     QList<qwhmi::widgets::ControlBase*> controls_;
 
     // ★ 绑定统计 —— 见 boundCount() 注释

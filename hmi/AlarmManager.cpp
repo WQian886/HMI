@@ -32,18 +32,22 @@ QList<Alarm> AlarmManager::activeAlarms() const {
     return activeAlarms_.values();
 }
 
-void AlarmManager::acknowledge(qint64 id) {
+// ★ F3(2026-09-30):改成返回 bool —— 三种失败以前全是静默 return,
+//   UI 只能"点了没反应",操作员分不清是权限问题还是已经确认过。
+//   详见 AlarmManager.h 里的说明。三条失败路径现在各有各的返回值,
+//   并且权限那条把"为什么被拒"也带出来(qCWarning 保留,给日志用)。
+bool AlarmManager::acknowledge(qint64 id) {
     // ★ B3(2026-09-17):确认报警前 checkPermission(AcknowledgeAlarm)
     if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
                               qwhmi::auth::Permission::AcknowledgeAlarm)) {
         qCWarning(qwhmi::auth::hmiPerm)
             << "本用户" << qwhmi::auth::CurrentUser::instance().name()
             << "无 AcknowledgeAlarm 权限,确认被拒 alarmId=" << id;
-        return;
+        return false;
     }
     auto it = activeAlarms_.find(id);
-    if (it == activeAlarms_.end()) return;
-    if (it->state != AlarmState::Active) return;  // 已经确认/清除就不重复
+    if (it == activeAlarms_.end()) return false;   // 找不到(已恢复/已清除)
+    if (it->state != AlarmState::Active) return false;  // 已经确认/清除就不重复
     // ★ B5(2026-09-17):记一下原报警名,audit 行可读
     const QString alarmName = it->name;
     it->state = AlarmState::Acknowledged;
@@ -55,6 +59,7 @@ void AlarmManager::acknowledge(qint64 id) {
         "alarm.ack", QString::number(id),
         QStringLiteral("name=%1").arg(alarmName),
         QStringLiteral("ok"));
+    return true;
 }
 
 // ★ 阶段 6.3 FIX(2026-08-07):clearAll 必须真清一切 —— 不光清 activeAlarms_,也要清 checkers_
@@ -86,12 +91,16 @@ void AlarmManager::clearAll() {
 
 // ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):保留记录,只标记已确认
 //   详见 h 文件说明
-void AlarmManager::acknowledgeAll() {
+// ★ F3:返回真正确认成功的条数。权限不足时 acknowledge 全返回 false,
+//   这里就是 0 —— hmi.cpp 的复位路径据此提示"没权限",而不是假装复位完成了。
+int AlarmManager::acknowledgeAll() {
     // ★ 拷贝 keys 避免遍历中容器被改(虽然 acknowledge 不删,但保险)
     const QList<qint64> ids = activeAlarms_.keys();
+    int done = 0;
     for (qint64 id : ids) {
-        acknowledge(id);  // 单个 acknowledge 已经会 emit alarmAcknowledged
+        if (acknowledge(id)) ++done;   // 单个 acknowledge 已经会 emit alarmAcknowledged
     }
+    return done;
 }
 
 // ★ BUGFIX-5.2(2026-08-04):同一报警重复触发 → 不覆盖已有的(否则丢失原始 triggeredAt)

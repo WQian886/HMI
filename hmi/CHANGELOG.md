@@ -4,6 +4,49 @@
 
 ## [Unreleased] - 2026-09-30
 
+### F3 报警列表交互 —— 操作员终于能确认报警了
+
+范围由 Wqian 拍板:**只改 `AlarmListControl`**(主画面那张 5 列表格 5.5 就有右键确认,不动),
+确认手势用**双击行**。
+
+**开工前挖出两件比"加个按钮"严重得多的事:**
+
+1. **运行时画布上的报警列表从来没接过数据源。**`RuntimeCanvas::loadControls` 以前
+   只做 `setBasePath` + `addItem`,**从没调过 `bindAlarmManager`** —— 画面上摆的
+   `AlarmListControl` 拿到的 manager 恒为 `nullptr`,表格永远空,
+   **不报错、不弹窗、日志一行都没有**。跟 E.5 修的「编辑器存的画面不绑变量」
+   是同一类病:链路缺一环,两端各自看着都正常,拼起来才缺。
+   → `RuntimeCanvas` 构造多收一个 `AlarmManager*`,`hmi.cpp` 传 `alarmMgr_`。
+
+2. **双击在当时的代码里是不可能的。**
+   `proxy_->setAcceptedMouseButtons(Qt::NoButton)` 是 E.4b 修「选不中/拖不动」加的
+   —— 代理不吃事件,事件穿透到父 item。代价是**内嵌的 `QTableWidget`
+   一个鼠标事件都收不到**,连选中行都不行。两边需求正面冲突,只能切:
+   → 新增 `ControlBase::setRuntimeMode()`(默认**编辑**模式),
+   运行时模式才让代理吃事件;同时关掉 `ItemIsMovable`,
+   免得双击被当成拖拽、把报警列表从屏幕上拖走。
+
+**顺带修的 3 个静默失败(本项目第 4/5/6 次):**
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 4 | `acknowledge()` 返回 `void`,权限不足只 `qCWarning` 一行 → 界面"点了没反应",分不清是没权限还是已经确认过 | 改成返回 `bool`;两个 UI 都按三种失败分别给提示 |
+| 5 | `addAlarmRow` 无条件写"未确认" → 任何一次 `refreshNow()` 都把已确认的报警变回未确认,操作员于是再点一次,第二次又没反应 | 按 `Alarm.state` 填 |
+| 6 | 4 档等级只有 Critical/Emergency 有色 —— 报警列表里每行都是报警,没有"这行没报警"作参照,Info/Warning 根本分不出来 | 4 档各一色,两两不同;已确认/已恢复淡化成灰底 |
+
+未确认计数用 **`AlarmManager` 里 `state == Active` 的条数**算,**不是表格行数** ——
+`acknowledge` 只改 state 不删记录(5.5 有意为之),按行数算数字永远降不下来,
+而这个指示灯的全部价值就是"降下来才说明活儿办完了"。
+
+**测试有效性已反向验证**(两轮,共 **8 条变红**):
+断双击连线 + 计数退回数行数 → 6 条红;运行时模式退回永远穿透 + 配色退回两档有色 → 2 条红。
+`doubleClick_actuallyAcknowledges` 断言的是 `Alarm::state == Acknowledged`
+**而不是表格文字** —— 文字谁都能写,state 才是真被确认了的证据。
+
+**顺带发现,未擅自改**:`hmi.cpp` 的 `acknowledgeAll()` 因为上面 `count() > 0`
+就 return 的守卫,**永远确认不到任何报警**,从 2026-08-04 一直是空转。
+改不改涉及复位语义,属 Wqian 的决定;本次只把返回值接住并留了 qWarning。
+
 > ⚠ **本节编号说明**:`阶段E.0_从这里继续.md` 的计划表里 **E.5 = 主题(亮/暗)**,
 > 而 `1946fc7` 的 commit message 把「运行时画布」也写成了 E.5 —— **编号撞车**。
 > 本节一律写全称。**建议**:运行时画布改称 E.7a、复制粘贴改称 E.7b(E.7 计划表里空着)。
