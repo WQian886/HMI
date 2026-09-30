@@ -55,13 +55,24 @@ enum class Direction { Above, Below };
 // ★ IMPROVE-5.3-收尾(2026-08-07):Checker 配置(为阶段 6 JSON 铺路)
 //   【背景】原来 HighAlarmChecker 构造里 threshold / level 散着;5.6 收尾要扩到联动配置
 //   【改法】4 个字段集中在一个 struct,阶段 6 上 JSON 时反序列化成它 → new ThresholdAlarmChecker 不用动
-//   【取舍】4 个字段够 5.3 用;不加 hysteresis(滞回)/ ack_required(必确认)等高级特性
+//   【取舍】4 个字段够 5.3 用;不加 ack_required(必确认)等高级特性
 //   【参照】Wqian 2026-08-07 阶段 5.3 收尾拍板
 struct CheckerConfig {
     AlarmLevel level         = AlarmLevel::Warning;  // 报警等级
     Direction  direction     = Direction::Above;     // 阈值方向
     double     threshold     = 0.0;                   // 阈值(> / < 该值触发)
     int        minDurationMs = 500;                   // 最小持续时间(防抖,抖 < 此值不报)
+
+    // ★ F2(2026-09-30):滞回(hysteresis)—— 触发沿和恢复沿分开
+    //   【背景】minDurationMs 只管"抖了多久",管不了"来回抖"。
+    //         模拟量在阈值附近来回越线,只要每次越线都超过 minDurationMs,
+    //         就会 触发→恢复→触发→恢复 反复,操作员被同一条报警刷屏(chatter)。
+    //         真实工况里"高→正常→又高"就是两条独立记录,操作员看不出这俩是一回事。
+    //   【改法】触发仍看 threshold;恢复要看 threshold ∓ hysteresis。
+    //         Above 方向:> threshold 触发,< (threshold - hysteresis) 才恢复。
+    //   【取舍】单边滞回(不用双阈值区间),工业 HMI 常规做法,参数也好配。
+    //         hysteresis = 0 时退化成老行为 —— 这是必须守住的不变量。
+    double     hysteresis    = 0.0;                   // 滞回量(0 = 不启用,行为同 5.3)
 };
 
 // ★ IMPROVE-5.2(2026-08-04):报警检测器基类(具体逻辑由 5.3 子类实现)

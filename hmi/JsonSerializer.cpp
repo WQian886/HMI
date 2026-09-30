@@ -52,6 +52,7 @@ QJsonObject JsonSerializer::toJson(const CheckerConfig& cfg) {
     obj["direction"]        = directionToString(int(cfg.direction));
     obj["threshold"]        = cfg.threshold;
     obj["min_duration_ms"]  = cfg.minDurationMs;
+    obj["hysteresis"]       = cfg.hysteresis;   // ★ F2:滞回(老工程没这个字段也不影响读)
     return obj;
 }
 
@@ -206,6 +207,9 @@ CheckerConfig JsonSerializer::checkerConfigFromJson(const QJsonObject& obj) {
     cfg.direction     = directionFromString(obj["direction"].toString());
     cfg.threshold     = obj["threshold"].toDouble();
     cfg.minDurationMs = obj["min_duration_ms"].toInt(500);  // 默认 500ms
+    // ★ F2:滞回。老工程文件没这个键 → toDouble() 给 0.0,即"不启用"。
+    //   【为什么默认必须是 0 而不是猜一个值】默认值猜错 = 静默改变所有老工程的报警行为。
+    cfg.hysteresis    = obj["hysteresis"].toDouble(0.0);
     return cfg;
 }
 

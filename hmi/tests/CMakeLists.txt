@@ -176,6 +176,10 @@ add_hmi_test(tst_ProtocolSwitch)
 add_hmi_test(tst_HistoryRecorder)
 # 阶段 D · D.3 报警持久化
 add_hmi_test(tst_AlarmRecorder)
+# ★ F2(2026-09-30):报警抑制(滞回 + 状态机)
+#   【为什么单独建】ThresholdAlarmChecker 是"报警该不该触发"的决策点,
+#   全仓没有任何测试碰过它 —— minDurationMs 防抖从来没被一条用例守过。
+add_hmi_test(tst_ThresholdAlarmChecker)
 # 阶段 D · D.4 CSV 导出
 add_hmi_test(tst_CsvExporter)
 # 阶段 D · D.6 派生表达式解析

@@ -20,15 +20,18 @@ ThresholdAlarmChecker::ThresholdAlarmChecker(const QString& alarmName,
 
     // ★ IMPROVE-5.3-收尾(2026-08-07):最小持续时间定时器(防抖)
     //   【背景】PLC 模拟信号在阈值附近会抖;值刚好过线一下(< 500ms)不该报
-    //   【改法】QTimer 单次触发:值超限 → start(500);到点再确认 active_ 还为 true → emit triggered
+    //   【改法】QTimer 单次触发:值超限 → start(500);到点再确认仍处于"待触发"→ emit triggered
     //          值回到正常 → timer.stop() 取消未触发的定时器
     //   【取舍】单次 + setSingleShot(true) 够用;抖动场景下天然过滤(抖回正常 → 取消)
     //   【参照】PLC 程序员的 TON 定时器(同样功能)
     durationTimer_ = new QTimer(this);
     durationTimer_->setSingleShot(true);
     connect(durationTimer_, &QTimer::timeout, this, [this]() {
-        // 计时到点:二次确认 active_ 状态(防止值已经回到正常但定时器未及时 stop 的边界情况)
-        if (!active_) return;
+        // 计时到点:二次确认状态(防止值已经回到正常但定时器未及时 stop 的边界情况)
+        //   ★ F2:判据从 active_ 换成 state_ == Pending —— 必须是"仍待触发"才发,
+        //   Fired 状态说明已经报过了,不能再报第二次。
+        if (state_ != State::Pending) return;
+        state_ = State::Fired;
         Alarm a;
         a.id_           = QDateTime::currentMSecsSinceEpoch();
         currentId_      = a.id_;
@@ -95,25 +98,56 @@ void ThresholdAlarmChecker::onRawRead(Variable* v, quint16 rawValue) {
     // ★ IMPROVE-5.3-收尾(2026-08-07):方向参数化(> Above / < Below)
     //   【改法】switch 按 config_.direction 决定比较方向,合并 High/Lov 两份逻辑
     //   【取舍】二元方向够 5.3 用;区间(<a && >b)留阶段 7+
+    //
+    // ★ F2(2026-09-30):【触发沿 vs 恢复沿分开】
+    //   overThreshold  = 触发沿,仍严格看 threshold(滞回不该让报警变迟钝)
+    //   pastRecovery   = 恢复沿,看 threshold ∓ hysteresis
+    //   hysteresis=0 时两者恒等 → 行为与 5.3 逐位相同。
     bool overThreshold = false;
+    double recoveryLimit = config_.threshold;
     switch (config_.direction) {
-        case Direction::Above: overThreshold = (val >  config_.threshold); break;
-        case Direction::Below: overThreshold = (val <  config_.threshold); break;
+        case Direction::Above:
+            overThreshold = (val > config_.threshold);
+            recoveryLimit = config_.threshold - config_.hysteresis;
+            break;
+        case Direction::Below:
+            overThreshold = (val < config_.threshold);
+            recoveryLimit = config_.threshold + config_.hysteresis;
+            break;
     }
+    // 已触发过之后,恢复要用带滞回的沿;还在"待触发"时退回触发沿(否则
+    // 一个本来就没报出去的报警,会因为滞回永远挂着 pending —— 那是另一种静默漏报)。
+    const bool pastRecovery = (state_ == State::Fired)
+                           ? !(val > recoveryLimit)   // Above:跌到 threshold-hyst 以下才算恢复
+                           : !overThreshold;           // 待触发阶段:回到 threshold 内即撤销
 
-    if (overThreshold && !active_) {
-        // 进入"待触发"状态:启动最小持续时间定时器
-        //   timer 到点才真正 emit(给抖动留 cancel 的机会)
-        active_ = true;
-        durationTimer_->start(config_.minDurationMs);
-    } else if (!overThreshold && active_) {
-        // 值回到正常:取消未触发的定时器 + 如果已经触发过则发 recovered
-        active_ = false;
-        durationTimer_->stop();
-        if (currentId_ != 0) {
-            emit recovered(currentId_);
-            currentId_ = 0;
+    switch (state_) {
+    case State::Idle:
+        if (overThreshold) {
+            state_ = State::Pending;
+            durationTimer_->start(config_.minDurationMs);
         }
+        break;
+
+    case State::Pending:
+        // 抖回来了 → 撤销待触发。这是 minDurationMs 存在的全部意义。
+        if (pastRecovery) {
+            state_ = State::Idle;
+            durationTimer_->stop();
+        }
+        break;
+
+    case State::Fired:
+        // ★ 已报警,等恢复沿。滞回在这一档起作用:值在死区里来回不算恢复,
+        //   所以不会"恢复→再触发"刷出第二条记录(chatter 的根因)。
+        if (pastRecovery) {
+            state_ = State::Idle;
+            durationTimer_->stop();
+            if (currentId_ != 0) {
+                emit recovered(currentId_);
+                currentId_ = 0;
+            }
+        }
+        break;
     }
-    // 其他情况:超限但已 active(待触发 / 已触发)→ 不动;正常且未 active → 不动
 }
