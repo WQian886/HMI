@@ -7,6 +7,7 @@
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <limits>
 
 namespace qwhmi::editor {
 
@@ -52,11 +53,19 @@ void SizeEditor::setValue(const QSizeF& s) {
     h_->setValue(s.height());
 }
 
+void SizeEditor::setWEnabled(bool on) { w_->setEnabled(on); }
+void SizeEditor::setHEnabled(bool on) { h_->setEnabled(on); }
+void SizeEditor::setWValid(bool valid) { wValid_ = valid; }
+void SizeEditor::setHValid(bool valid) { hValid_ = valid; }
+
 void SizeEditor::onWidthChanged(double v) {
-    emit valueChanged(QSizeF(v, h_->value()));
+    // ★ h 无效(异值置空)时发 NaN,别把 0 这个假值刷到所有控件上
+    const double h = hValid_ ? h_->value() : std::numeric_limits<double>::quiet_NaN();
+    emit valueChanged(QSizeF(v, h));
 }
 void SizeEditor::onHeightChanged(double v) {
-    emit valueChanged(QSizeF(w_->value(), v));
+    const double w = wValid_ ? w_->value() : std::numeric_limits<double>::quiet_NaN();
+    emit valueChanged(QSizeF(w, v));
 }
 
 } // namespace qwhmi::editor

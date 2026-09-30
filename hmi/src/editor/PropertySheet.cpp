@@ -27,6 +27,7 @@
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWidget>
+#include <cmath>
 
 namespace qwhmi::editor {
 
@@ -126,7 +127,65 @@ void PropertySheet::rebuildForm() {
             } else {
                 // ★ 异值:显示空 + 禁用(视觉上变灰,提示用户"值不同")
                 setEditorValueFromProperty(editor, prop, QVariant());   // 值置空
-                editor->setEnabled(false);
+                // ★ 复合编辑器(position / size)不能整块灰 —— 下面按分量各判各的。
+                //   这里若也 setEnabled(false),分量的 setXEnabled(true) 会被父控件的
+                //   disabled 状态压住,修等于没修。
+                const int t2 = prop.userType();
+                if (t2 != QMetaType::QPointF && t2 != QMetaType::QSizeF) {
+                    editor->setEnabled(false);
+                }
+            }
+
+            // ★ B 组修复(见 docs/bug图/README.md):position / size 是
+            //   QPointF / QSizeF 复合属性,上面那段是拿【整个值】比 ——
+            //   两个控件只要有一个分量不同,整个复合编辑器就被置灰。
+            //   而多选时 position 几乎必然不同值,等于"多选后永远看不了位置",
+            //   图上表现就是 x/y 全灰 + 显示 0.00(异值置空后读回默认值 0)。
+            //   这里改成【按分量】分别判定:同值的分量照常显示可编辑,
+            //   只有真正不同的那一个分量才置灰。
+            if (const int type = prop.userType(); type == QMetaType::QPointF) {
+                const QPointF first = firstVal.toPointF();
+                bool sameX = true, sameY = true;
+                for (auto* other : targets_) {
+                    if (other == t) continue;
+                    const QPointF p = other->property(prop.name()).toPointF();
+                    if (p.x() != first.x()) sameX = false;
+                    if (p.y() != first.y()) sameY = false;
+                    if (!sameX && !sameY) break;
+                }
+                if (auto* pe = qobject_cast<PositionEditor*>(editor)) {
+                    pe->setXValid(sameX);
+                    pe->setYValid(sameY);
+                    pe->setXEnabled(sameX);
+                    pe->setYEnabled(sameY);
+                    // ★ 逐分量写值:同值的显示真值,异值的置空(由 setValue 前的
+                    //   置 0 + valid 标记共同表达"别动它")
+                    pe->setValue(QPointF(sameX ? first.x() : 0.0,
+                                         sameY ? first.y() : 0.0));
+                }
+                // 两个分量全同 → 恢复整体可编辑;只有一个同 → 整个编辑器保持 enabled,
+                // 由分量各自控制灰度(上面 setXEnabled/setYEnabled 已经做了)。
+                // 注意:不能在这里 editor->setEnabled(common),否则会把同值分量也一起灰掉。
+                isCommonValue_[name] = (sameX && sameY);
+            } else if (type == QMetaType::QSizeF) {
+                const QSizeF first = firstVal.toSizeF();
+                bool sameW = true, sameH = true;
+                for (auto* other : targets_) {
+                    if (other == t) continue;
+                    const QSizeF s = other->property(prop.name()).toSizeF();
+                    if (s.width()  != first.width())  sameW = false;
+                    if (s.height() != first.height()) sameH = false;
+                    if (!sameW && !sameH) break;
+                }
+                if (auto* se = qobject_cast<SizeEditor*>(editor)) {
+                    se->setWValid(sameW);
+                    se->setHValid(sameH);
+                    se->setWEnabled(sameW);
+                    se->setHEnabled(sameH);
+                    se->setValue(QSizeF(sameW ? first.width()  : 0.0,
+                                        sameH ? first.height() : 0.0));
+                }
+                isCommonValue_[name] = (sameW && sameH);
             }
 
             connectEditorToProperty(editor, prop);
@@ -371,6 +430,41 @@ void PropertySheet::applyEditorChange(const QString& propName, const QVariant& n
     if (suppressApply_) return;
     if (targets_.isEmpty() || !undoStack_) return;
 
+    // ★ B 组修复:PositionEditor / SizeEditor 用 NaN 标记"这个分量是异值,别动它"
+    //   (异值时那一格被置空成 0,直接写回去会把所有控件的该分量刷成 0)。
+    //   这里按分量拆开:只有"真值"分量才写,各自算出该控件的新值。
+    const int userType = findProp(propName).userType();
+    if (userType == QMetaType::QPointF || userType == QMetaType::QSizeF) {
+        const bool isPoint = (userType == QMetaType::QPointF);
+        const double c0 = isPoint ? newValue.toPointF().x()   : newValue.toSizeF().width();
+        const double c1 = isPoint ? newValue.toPointF().y()   : newValue.toSizeF().height();
+        const bool c0Valid = !std::isnan(c0);
+        const bool c1Valid = !std::isnan(c1);
+        if (!c0Valid && !c1Valid) return;   // 两格都是异值,无事发生
+
+        const QByteArray nameUtf8 = propName.toUtf8();
+        for (auto* t : targets_) {
+            const QVariant oldValue = t->property(nameUtf8.constData());
+            QVariant nv = oldValue;   // ★ 各自保留自己的另一个分量
+            if (isPoint) {
+                QPointF p = oldValue.toPointF();
+                if (c0Valid) p.setX(c0);
+                if (c1Valid) p.setY(c1);
+                nv = QVariant::fromValue(p);
+            } else {
+                QSizeF s = oldValue.toSizeF();
+                if (c0Valid) s.setWidth(c0);
+                if (c1Valid) s.setHeight(c1);
+                nv = QVariant::fromValue(s);
+            }
+            if (oldValue == nv) continue;
+            undoStack_->push(new PropertyChangeCommand(t, propName, oldValue, nv));
+        }
+        // ★ 改完之后刷新分量的"真值/异值"状态
+        syncFormFromTarget();
+        return;
+    }
+
     const QByteArray nameUtf8 = propName.toUtf8();
 
     if (targets_.size() == 1) {
@@ -424,7 +518,45 @@ void PropertySheet::syncFormFromTarget() {
             if (!item) continue;
             QWidget* field = item->widget();
             if (field && field->objectName() == name) {
-                if (common) {
+                // ★ B 组修复:复合属性按分量刷新,不能整块置灰
+                const int type = prop.userType();
+                if (type == QMetaType::QPointF) {
+                    const QPointF first = firstVal.toPointF();
+                    bool sameX = true, sameY = true;
+                    for (auto* t : targets_) {
+                        const QPointF p = t->property(name.toUtf8().constData()).toPointF();
+                        if (p.x() != first.x()) sameX = false;
+                        if (p.y() != first.y()) sameY = false;
+                        if (!sameX && !sameY) break;
+                    }
+                    if (auto* pe = qobject_cast<PositionEditor*>(field)) {
+                        pe->setXValid(sameX);
+                        pe->setYValid(sameY);
+                        pe->setXEnabled(sameX);
+                        pe->setYEnabled(sameY);
+                        pe->setValue(QPointF(sameX ? first.x() : 0.0,
+                                             sameY ? first.y() : 0.0));
+                    }
+                    isCommonValue_[name] = (sameX && sameY);
+                } else if (type == QMetaType::QSizeF) {
+                    const QSizeF first = firstVal.toSizeF();
+                    bool sameW = true, sameH = true;
+                    for (auto* t : targets_) {
+                        const QSizeF s = t->property(name.toUtf8().constData()).toSizeF();
+                        if (s.width()  != first.width())  sameW = false;
+                        if (s.height() != first.height()) sameH = false;
+                        if (!sameW && !sameH) break;
+                    }
+                    if (auto* se = qobject_cast<SizeEditor*>(field)) {
+                        se->setWValid(sameW);
+                        se->setHValid(sameH);
+                        se->setWEnabled(sameW);
+                        se->setHEnabled(sameH);
+                        se->setValue(QSizeF(sameW ? first.width()  : 0.0,
+                                            sameH ? first.height() : 0.0));
+                    }
+                    isCommonValue_[name] = (sameW && sameH);
+                } else if (common) {
                     setEditorValueFromProperty(field, prop, firstVal);
                     field->setEnabled(true);
                 } else {

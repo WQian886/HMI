@@ -61,6 +61,9 @@ private slots:
     void multiSelect_commonValuesShownAndEditable();
     void multiSelect_diffValuesShownEmptyAndDisabled();
     void multiSelect_editPushesToAllTargets();
+    void multiSelect_positionNotAllZero();      // ★ bug图 B 组 4 张的根因回归
+    void multiSelect_positionPartialCommon();   // ★ 按分量判同值(B 组修复核心)
+    void multiSelect_sizePartialCommon();       // ★ size 分支同样按分量(图2)
 };
 
 // ===== 1. reflect_findsAllWritableProperties =====
@@ -356,6 +359,116 @@ void TestPropertySheet::multiSelect_editPushesToAllTargets() {
     QCOMPARE(a->maximum(), 100.0);
     QCOMPARE(b->maximum(), 100.0);
     QCOMPARE(c->maximum(), 100.0);
+}
+
+// ===== 17. multiSelect_positionNotAllZero —— B 组 4 张的根因回归 =====
+//
+//   ★ 这条测试是为 docs/bug图/README.md B 组(图2/图3/图6/图7)写的。
+//   那 4 张图的共同症状:多选时属性面板 x/y 全灰 + 显示 "(异值) 0.00"。
+//   2026-09-30 复现成功,根因在 PropertySheet::rebuildForm ——
+//   判断"多选是否同值"时拿【整个 QPointF】比,只要一个分量不同就整块置灰。
+//   而多选时 position 几乎必然不同值,等于"多选后永远看不了位置"。
+//
+//   修法:改成按分量分别判定(见 18 号用例)。
+//
+//   本条锁的是"两个分量【都】不同值"的场景 —— 修复后仍然两格都灰,
+//   因为这时确实该灰。**别把这条读成"两格同值也能编辑"**,
+//   那是 18 号用例干的事。
+void TestPropertySheet::multiSelect_positionNotAllZero() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+
+    auto* a = new BarControl; a->setPosition(QPointF(10, 20));
+    auto* b = new BarControl; b->setPosition(QPointF(80, 90));
+    QList<ControlBase*> targets = {a, b};
+    sheet.setTargets(targets);
+
+    // ★ position 是 QPointF → createEditorForProperty 返回【PositionEditor 复合控件】,
+    //   它的 objectName 是 "position",x/y 两个 spin 是它的【子控件】且没设 objectName。
+    //   所以 findChild("x") 拿不到东西,得从 position 编辑器里按顺序取子 spin。
+    auto* posEditor = sheet.findChild<PositionEditor*>("position");
+    QVERIFY2(posEditor != nullptr, "多选时表单里应有 position 复合编辑器");
+    const auto spins = posEditor->findChildren<QDoubleSpinBox*>();
+    QVERIFY2(spins.size() == 2, "PositionEditor 应含 2 个 QDoubleSpinBox(x/y)");
+
+    // ★ a(10,20) / b(80,90):x 和 y 都不同 → 两格都应禁用
+    //   这正是 bug图 B 组的症状。按新逻辑,两个分量分别判定,两格都异值 → 都灰。
+    QVERIFY2(!spins[0]->isEnabled(), "x 不同值,应变灰");
+    QVERIFY2(!spins[1]->isEnabled(), "y 不同值,应变灰");
+
+    delete a;
+    delete b;
+}
+
+// ===== 18. multiSelect_positionPartialCommon —— x 相同则 x 仍可编辑 =====
+//
+//   ★ B 组修复的核心断言:两个控件【x 相同、y 不同】时,
+//     x 这一格必须照常显示真值且可编辑,只有 y 变灰。
+//   修复前是拿整个 QPointF 比,只要有一个分量不同就整块置灰 ——
+//   多选时 position 几乎必然不同值,于是位置框永远灰着,用户看不到任何信息。
+void TestPropertySheet::multiSelect_positionPartialCommon() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+
+    // ★ x 都是 10(典型场景:同一列对齐),y 不同
+    auto* a = new BarControl; a->setPosition(QPointF(10, 20));
+    auto* b = new BarControl; b->setPosition(QPointF(10, 90));
+    QList<ControlBase*> targets = {a, b};
+    sheet.setTargets(targets);
+
+    auto* posEditor = sheet.findChild<PositionEditor*>("position");
+    QVERIFY(posEditor != nullptr);
+    const auto spins = posEditor->findChildren<QDoubleSpinBox*>();
+    QVERIFY(spins.size() == 2);
+
+    // ★ x 同值 → 可编辑 + 显示真值 10
+    QVERIFY2(spins[0]->isEnabled(), "x 是共同值,不该被连坐置灰");
+    QCOMPARE(spins[0]->value(), 10.0);
+
+    // ★ y 异值 → 置灰 + 置空
+    QVERIFY2(!spins[1]->isEnabled(), "y 是异值,应变灰");
+
+    // ★ 关键:改 x 不能把 y 刷成 0(这是 NaN 标记机制存在的原因)
+    spins[0]->setValue(55.0);
+    QCOMPARE(a->position(), QPointF(55, 20));
+    QCOMPARE(b->position(), QPointF(55, 90));   // ★ y 各归各,没被冲成 0
+
+    delete a;
+    delete b;
+}
+
+// ===== 19. multiSelect_sizePartialCommon —— size 同样按分量(图2 的 width/height 0.00)=====
+//
+//   ★ 图2 记的现象是"Group 选中时 width/height 都是 0.00"。
+//   size 是 QSizeF,走的是和 position 完全平行的另一条分支 ——
+//   两条分支是分开写的,只测 position 等于放 size 那条不测,所以补这一条。
+void TestPropertySheet::multiSelect_sizePartialCommon() {
+    QUndoStack stack;
+    PropertySheet sheet(&stack);
+
+    // ★ 高度相同(等高是常用操作),宽度不同
+    auto* a = new BarControl; a->setSize(QSizeF(30, 100));
+    auto* b = new BarControl; b->setSize(QSizeF(80, 100));
+    QList<ControlBase*> targets = {a, b};
+    sheet.setTargets(targets);
+
+    auto* sizeEditor = sheet.findChild<SizeEditor*>("size");
+    QVERIFY(sizeEditor != nullptr);
+    const auto spins = sizeEditor->findChildren<QDoubleSpinBox*>();
+    QVERIFY(spins.size() == 2);
+
+    // ★ w 不同 → 灰;h 相同 → 亮且显示真值 100
+    QVERIFY2(!spins[0]->isEnabled(), "w 不同值,应变灰");
+    QVERIFY2(spins[1]->isEnabled(),  "h 是共同值,不该被连坐置灰");
+    QCOMPARE(spins[1]->value(), 100.0);
+
+    // ★ 改 h 不能把 w 刷成 0
+    spins[1]->setValue(250.0);
+    QCOMPARE(a->size(), QSizeF(30, 250));
+    QCOMPARE(b->size(), QSizeF(80, 250));
+
+    delete a;
+    delete b;
 }
 
 QTEST_MAIN(TestPropertySheet)
