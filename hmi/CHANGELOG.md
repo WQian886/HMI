@@ -1,6 +1,65 @@
 # CHANGELOG
 
-> 最后核对：**2026-09-29 晚**（基于代码核对：`3f63ddf` = E.4d-follow-10 旋转收尾是当前稳定基线，`ctest` **55/55 全绿**，`hmi.exe` 构建通过）
+> 最后核对：**2026-09-30**（基于代码核对：`35fc787` = E.7 复制/粘贴/删除是当前稳定基线，`ctest` **57 个目标 56 通过**，`hmi.exe` 构建通过）
+
+## [Unreleased] - 2026-09-30
+
+> ⚠ **本节编号说明**:`阶段E.0_从这里继续.md` 的计划表里 **E.5 = 主题(亮/暗)**,
+> 而 `1946fc7` 的 commit message 把「运行时画布」也写成了 E.5 —— **编号撞车**。
+> 本节一律写全称。**建议**:运行时画布改称 E.7a、复制粘贴改称 E.7b(E.7 计划表里空着)。
+> 改编号要动已有 commit message,先记下,等 Wqian 拍板。
+
+### 阶段 E · 收口后补的两件用户路径缺口
+
+这两件**是在 E 阶段标"全部完工"之后才发现的**。原因值得记:
+`ctest` 全绿 ≠ 用户路径通了 —— 老测试只断言"控件在不在 `controls_` 列表里",
+**从没断言过"主画面能不能把它显示出来"**,也没断言过"能不能复制/删除"。
+
+#### 1. 运行时画布 RuntimeCanvas（`1946fc7`）
+
+编辑器摆好的画面,存进工程文件后**在主画面显示不出来**。新增 `RuntimeCanvas`,
+让 `hmi.exe` 按工程文件里的控件清单把画面画出来,并按 `variableName` 绑变量。
+
+#### 2. E.7 复制 / 粘贴 / 删除（`35fc787`）
+
+编辑器此前**只能加控件** —— 选中一个元件按 Delete 没有任何反应,也不能复制粘贴。
+
+**为什么命令存 JSON 快照而不是 `ControlBase*`**：
+`GeometryChangeCommand.h` 早就写明"QUndoCommand 被 delete 时控件可能已经没了"。
+删除类命令更狠 —— 撤销一次删除,`undo()` 造的是一个**新对象**,
+所有旧指针当场变悬空指针。所以 `ControlListCommand` 只存 `QList<QJsonObject>`,
+把命令和控件的生命周期彻底解开。
+
+**快照必须用 `propertiesToJson()` + `registryKeyFor()`,不能用 `toJson()`**：
+后者写的 `type` 是类名 `"RectangleControl"`,而 `create()` 查的是注册表短名 `"Rectangle"`。
+对不上就**静默返回 nullptr**,画面凭空少一块且零报错 —— 这正是 E.5 踩过的坑,
+`tst_ControlClipboard::copy_snapshotType_isRegistryShortName_notClassName` 专门守它。
+
+**增删合一**:`forPaste` / `forDelete` 两个工厂,内部同一个 `Kind` 枚举。
+两者 undo/redo 逻辑完全一样,只有"首次 redo 是不是空操作"不同,
+拆成两个类等于把快照/销毁/选中逻辑写两遍。
+
+**顺带修掉 3 个真 bug**：
+1. **粘贴首贴不偏移** —— offset 乘的是 `pasteCount_`(首次为 0),第一份会严丝合缝压在原件上,
+   用户看着像没生效。改成乘 `pasteCount_ + 1`。
+2. **撤销删除后控件层级整个翻转** —— `targets_` 来自 `selectedItems()`,Qt 给的是**按叠放序倒序**。
+   照抄这个顺序重建,画面上的前后关系跟删之前不一样。改成按 `controls_` 原始顺序重排。
+3. **`destroyControl` 缺 `setSelected(false)`** —— `QGraphicsScene` 内部拿**裸指针**记着选中项,
+   直接 `removeItem` + `delete` 会留一个指向已释放内存的指针在 scene 里。
+
+**测试** `tst_ControlClipboard` 25 用例,重点是「删→撤→删→撤」连环 5 轮 ——
+命令存快照,撤销造新对象,旧指针当场失效,残留一处在第二轮就出事。
+
+### 已知遗留
+- **🔴 `ctest` 是 56/57 不是全绿** —— `tst_ProjectSchema` 2 个用例失败,原因是
+  把输出路径硬编码成 `hmi/tests/build/`,而 `build_tests.ps1` 建的是
+  `hmi/tests/build_ninja/`,目录不存在 → `saveToFile` 返回 false。
+  **既有问题**:已 `git stash` 到干净 HEAD(`3f63ddf` 之前)复跑,同样失败,与本次改动无关。
+- ⬜ 等比缩放一个**已旋转**的控件时同步旋转（保持形状）—— E 阶段只保证"不出离谱值"
+- ⬜ 旋转只按 90° 整数倍换光标；45° 一档要补表（算法不用改，加表即可）
+- ⬜ 主题 / Lua —— 已拍板推 v0.3.0
+
+---
 
 ## [Unreleased] - 2026-09-28 ~ 09-29
 
@@ -119,11 +178,13 @@ EditorMainWindow 的 6 个对齐 + 3 个等尺寸原来直接调 `setPosition`/`
 旋转没有重新打开 E.4d 修好的任何 bug。`ctest` **55/55 全绿**。
 
 ### 已知遗留
+> 本节是 **2026-09-28~29 的历史快照**,当时的 55/55 是真的。更晚的进展见上面 `[Unreleased] - 2026-09-30`。
+
 - ✅ ~~`SelectionFrameItem::paint()` 视觉（`bug图/图1.png`）~~ —— 见上 #6，本来就是好的
 - ✅ ~~`ControlBase::rotation` + handle 跟随~~ —— 见上 #7，E 阶段闭合
 - ⬜ 等比缩放一个**已旋转**的控件时同步旋转（保持形状）—— 本阶段只保证"不出离谱值"
 - ⬜ 旋转只按 90° 整数倍换光标；45° 一档要补表（算法不用改，加表即可）
-- ⬜ E.5 主题 / E.6 Lua —— 已拍板推 v0.3.0
+- ⬜ 主题(亮/暗)/ Lua(sol2) —— 已拍板推 v0.3.0
 
 ---
 

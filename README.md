@@ -3,18 +3,20 @@
 > 个人学习项目:用 Qt 6 / C++17 从零实现工业 HMI(Human-Machine Interface)。
 > 不调现成控件库,**手写通信层、协议层、变量层、绑定层、业务层**,目标是理解工业 HMI 的底层原理。
 
-> **2026-09-28 状态(基于代码核对)**:
+> **2026-09-30 状态(基于代码核对)**:
 > - A 工程化基线 ✅ 通过验证(2026-09-11,后补 A2-5/A3 验证)
 > - B 用户/权限/审计 ✅ 代码落地
 > - C 多协议 ✅ ModbusDriver 落地,S7/EIP 仍 stub(Snap7/libplctag 未真接)
 > - D 历史库/曲线/报表/Tag ✅ 代码落地
-> - E 画面框架 **🟢 全部完工(2026-09-29)** — 22 控件 + WYSIWYG 编辑器 + Undo 全覆盖 + 旋转,`ctest` 55/55 全绿
+> - E 画面框架 **🟢 全部完工** — 22 控件 + WYSIWYG 编辑器 + Undo 全覆盖 + 旋转
+>   + **复制/粘贴/删除** + **运行时画布**(编辑器存的画面在主画面显示),`ctest` 57 个目标 56 通过
 > - F/G/H/I ⬜ 未启动
 > - 详见 `docs/现状.md` / `docs/路线图.md` / `hmi/CHANGELOG.md`
 
 已实现:Modbus TCP 通信 · PLC 寄存器轮询 · 变量订阅发布 · 控件双向绑定 ·
 阈值报警(4 档 + 确认/恢复)· 报警联动动作 · 工程配置 JSON 存读 ·
-**用户权限 + 操作审计)** · **历史曲线 + CSV 导出)** · **WYSIWYG 编辑器(多选/对齐/缩放)**
+**用户权限 + 操作审计)** · **历史曲线 + CSV 导出)** ·
+**WYSIWYG 编辑器(多选/对齐/缩放/复制粘贴删除)**
 
 ---
 
@@ -24,7 +26,7 @@
 
 | 我想…… | 看这个 |
 |---|---|
-| 知道**项目现在做到哪了** | **[`docs/现状.md`](docs/现状.md)** ← 唯一权威(2026-09-29 已对齐到 E 完工 + 收尾复核) |
+| 知道**项目现在做到哪了** | **[`docs/现状.md`](docs/现状.md)** ← 唯一权威(2026-09-30 已对齐到 `35fc787`) |
 | 知道**接下来要做什么** | **[`docs/路线图.md`](docs/路线图.md)** ← 唯一权威(v0.2.0 A-I,E 已完工 → 复现 B 组遗留 → F 启动) |
 | 知道**有哪些代码待修** | [`docs/改善清单.md`](docs/改善清单.md)(30 条 / 255xp,**8 ✅ / 1 🟡 / 21 ⬜**) |
 | 知道**最近 19 个 commit 干了啥** | [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md)(含 v0.2.0-rc1) |
@@ -74,8 +76,10 @@
 | 7 | 整合 demo(真 PLC + 24h 长跑 + 截图视频) | ↪️ 见 v0.2.0 阶段 A |
 | 8+ | 可选扩展(S7 / 曲线 / 串口 / 多 PLC / 权限) | ↪️ 见 v0.2.0 阶段 B–I |
 
-**下一步该做什么**(2026-09-29 晚现状):
-- ✅ **E 阶段已全部完工** —— 22 控件 + WYSIWYG 编辑器 + 写回 PLC + Undo 全覆盖 + 旋转,`ctest` **55/55** 全绿。E.5 主题 / E.6 Lua 已拍板推 v0.3.0。
+**下一步该做什么**(2026-09-30 现状):
+- ✅ **E 阶段已全部完工** —— 22 控件 + WYSIWYG 编辑器 + 写回 PLC + Undo 全覆盖 + 旋转
+  + 复制/粘贴/删除 + 运行时画布,`ctest` **57 个目标 56 通过**(1 个既有失败:测试硬编码路径)。
+  主题 / Lua 已拍板推 v0.3.0。
 - **Wqian 一句话"阶段 F 启动"**:展开 F 阶段工单(商业级报警,2-3 周 P1)。
 - 详见 [`docs/现状.md`](docs/现状.md)(唯一权威)/ [`docs/路线图.md`](docs/路线图.md) 和 [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md)。
 
@@ -151,13 +155,16 @@ HMI/                              ← 仓库根(2026-09-08 从更上层下移至
     │   │   └── 22 控件(Label/Number/Bar/Gauge/Led/Button/Pipe/Valve/Pump/Motor/Tank/...)
     │   └── editor/                               E 阶段编辑器(✅ 完工)
     │       ├── PropertySheet · PropertyChangeCommand  E.2 反射驱动 + undo
+    │       ├── GeometryChangeCommand                   对齐/等尺寸的 undo(9 动作)
+    │       ├── ControlListCommand                      复制/粘贴/删除的 undo(存 JSON 快照)
+    │       ├── RuntimeCanvas                           运行时画布(主画面显示工程里的控件)
     │       ├── SizeEditor · PositionEditor             E.4c 复合编辑器
     │       ├── PaletteWidget                          E.4a 调色板
     │       ├── ResizeHandleItem · GroupHandleItem     E.4b 多选 handle
-    │       ├── SelectionFrameItem                    E.4d 选中框(视觉 deferred)
+    │       ├── SelectionFrameItem                    E.4d 选中框
     │       └── EditorMainWindow                      E.2/E.4d 主窗口
     ├── installer/hmi.iss                       A/I 阶段:Inno Setup 安装包
-    ├── tests/                                  A–E 阶段:单元测试(~25 个 tst_* + 自带 CMakeLists)
+    ├── tests/                                  A–E 阶段:单元测试(57 个 ctest target + 自带 CMakeLists)
     ├── docs/阶段A_工程化基线.md                A 阶段:验证步骤
     ├── .clang-tidy / .clang-format             A 阶段:静态分析
     ├── .github/workflows/build.yml             A 阶段:CI
