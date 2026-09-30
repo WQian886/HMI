@@ -16,8 +16,13 @@ public:
     ~VariableManager() override;
 
     // 添加变量(VariableManager 接管生命周期:内部 setParent(this))
-    // 返回 false:参数为空 / name 为空 / name 重复
-	bool addVariable(Variable* v); // v 不能为 nullptr,且 name 不能重复
+    // 返回 false:参数为空 / name 为空 / alias 跟别的变量冲突
+    //
+    // ★ 2026-09-30 更正:本函数【同名不拒绝,直接替换】(旧注释写的"name 重复返回 false"是错的)。
+    //   6.3 有意为之 —— 替换前后要 emit variableReplaced,让报警/绑定更新 Variable* 指针。
+    //   加这条注释是因为 F3 写测试时按旧注释写"重名应失败",结果发现是静默替换,
+    //   当成 bug 差点"修"掉。同名替换是有意行为,不是缺陷。
+	bool addVariable(Variable* v);
 
     // 按 name 移除并 delete
     // 返回 false:name 不存在

@@ -248,5 +248,9 @@ add_hmi_test(tst_AlarmListShrinkE2E)
 #   底图下沉到 ControlBase,图走下层(矢量层的液位/动画/状态色仍在上层),
 #   相对路径按工程目录解析,加载失败回退手绘矢量而不是画灰底。
 add_hmi_test(tst_ControlBackgroundImage)
+# ★ F3(2026-09-30):手工改 JSON 加变量 —— 加载诊断能力。
+#   F3 卖点是"加新变量 = 改 JSON 一行",实测发现报错不含变量名/字段、
+#   未知字段静默丢弃、失败留半个工程三件事。见 tst_JsonLoadDiagnostics.cpp 头注释。
+add_hmi_test(tst_JsonLoadDiagnostics)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

@@ -5,7 +5,9 @@
 #include "Alarm.h"
 #include "ActionManager.h"   // 需要 Mapping 完整定义
 
+#include <QDebug>
 #include <QMetaEnum>
+#include <QStringList>
 
 // ===== Variable → QJsonObject =====
 //   【背景】Variable 有 Q_ENUM(DataType / Access),走 QMetaEnum 反射拿到名字
@@ -95,21 +97,66 @@ QString JsonSerializer::directionToString(int direction) {
 //   【改法】读 JSON 字段 → 用 QMetaEnum::keyToValue 反向解析 enum → 构造 Variable → 设 deadband/poll/range
 //   【取舍】失败返回 nullptr(QMetaEnum 找不到 enum value);caller 决定怎么处理
 //   【参照】Wqian 2026-08-07 阶段 6.3 开干
-Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj, VariableManager* parent) {
+// ★ F3(2026-09-30)实测发现并修掉的 3 个问题都在这个函数里。
+//   实测方式:手工改 JSON 加变量,再调生产 Project::loadFromFile(不是重写解析)。
+//
+// 【问题 1】失败只 return nullptr,调用方拿不到任何原因
+//   改前:data_type 写成 "int16"(小写)、漏写 access —— 两种完全不同的错,
+//        报出来是同一句 "variable 字段缺失或类型错误",且不含变量名。
+//        200 个变量的工程里等于让人一个一个试。
+//   改后:错误信息带上【变量名】+【哪个字段】+【合法值是什么】。
+//
+// 【问题 2】未知字段静默丢弃
+//   用户手打 "dead_band"(少个下划线)→ 死区没生效,但他以为配了。
+//   配错和没配长得一模一样 —— 静默失败。
+//   改后:qWarning 点名变量和字段。不报错是为了留前向兼容余地
+//        (新版本加的字段被老版本读到时不该直接拒绝加载)。
+Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj,
+                                           VariableManager* parent,
+                                           QString* outError) {
+    const auto fail = [outError](const QString& msg) -> Variable* {
+        if (outError) *outError = msg;
+        return nullptr;
+    };
+
     QString name = obj["name"].toString();
-    quint16 address = static_cast<quint16>(obj["address"].toInt());
-    if (name.isEmpty()) return nullptr;
+    if (name.isEmpty()) {
+        return fail(QStringLiteral("缺少 \"name\" 字段(变量名不能为空)"));
+    }
+    quint16 address = static_cast<quint16>(obj["address"].toInt(-1));
+    if (address == 0xFFFF) {   // toInt(-1) 的默认值 = 字段缺失或不是数字
+        return fail(QStringLiteral("变量 \"%1\": \"address\" 缺失或不是数字"
+                                   "(PLC 寄存器号,0 起)").arg(name));
+    }
+
+    // ★ QMetaEnum 没有 keys() 成员(只有 keyCount/valueToKey),自己拼一遍合法值。
+    //   报错里必须带这个 —— 用户知道自己填错了,却不知道该填什么的话,还是只能挨个试。
+    const auto keysOf = [](const QMetaEnum& e) {
+        QStringList ks;
+        for (int i = 0; i < e.keyCount(); ++i) ks << QString::fromLatin1(e.valueToKey(i));
+        return ks.join(QStringLiteral(", "));
+    };
 
     // DataType 反向:QMetaEnum::keyToValue("Int16") → Variable::DataType::Int16
     QMetaEnum dataTypeEnum = QMetaEnum::fromType<Variable::DataType>();
-    int dataTypeVal = dataTypeEnum.keyToValue(obj["data_type"].toString().toLatin1().data());
-    if (dataTypeVal < 0) return nullptr;
+    const QString dataTypeStr = obj["data_type"].toString();
+    int dataTypeVal = dataTypeEnum.keyToValue(dataTypeStr.toLatin1().data());
+    if (dataTypeVal < 0) {
+        return fail(QStringLiteral("变量 \"%1\": \"data_type\" = \"%2\" 不合法\n"
+                                   "  合法值:%3(注意大小写,小写 int16 无效)")
+                        .arg(name, dataTypeStr, keysOf(dataTypeEnum)));
+    }
     auto dataType = static_cast<Variable::DataType>(dataTypeVal);
 
     // Access 反向:同上
     QMetaEnum accessEnum = QMetaEnum::fromType<Variable::Access>();
-    int accessVal = accessEnum.keyToValue(obj["access"].toString().toLatin1().data());
-    if (accessVal < 0) return nullptr;
+    const QString accessStr = obj["access"].toString();
+    int accessVal = accessEnum.keyToValue(accessStr.toLatin1().data());
+    if (accessVal < 0) {
+        return fail(QStringLiteral("变量 \"%1\": \"access\" = \"%2\" 不合法\n"
+                                   "  合法值:%3(ReadOnly=传感器,ReadWrite=可写控制量)")
+                        .arg(name, accessStr, keysOf(accessEnum)));
+    }
     auto access = static_cast<Variable::Access>(accessVal);
 
     // ★ 6.3 修正:Variable 构造第 5 参数是 QObject*,VariableManager* 要 static_cast
@@ -125,6 +172,29 @@ Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj, VariableManag
     if (obj.contains("range")) {
         QJsonObject range = obj["range"].toObject();
         v->setRange(range["min"].toVariant(), range["max"].toVariant());
+    }
+
+    // ★ F3(2026-09-30)问题 2:未知字段静默丢弃 → 改成点名警告。
+    //   实测:塞一个 "myCustomJunk" 进去,加载完全成功、零警告,count 照样 8。
+    //   用户手打 "dead_band"(少个下划线)就是这个下场 —— 死区没生效,
+    //   但他以为配了。**配错和没配长得一模一样,这就是静默失败。**
+    //   【为什么只警告不报错】要留前向兼容:新版本加的字段被老版本读到时
+    //   不该直接拒绝加载整个工程。那属于"该字段当前版本用不上",
+    //   和"用户拼错了"是两回事,不该同等对待。
+    //   白名单 = toJson() 会写的字段(见本文件上方 toJson)+ range 内层。
+    static const QStringList kKnown = {
+        QStringLiteral("name"), QStringLiteral("address"),
+        QStringLiteral("data_type"), QStringLiteral("access"),
+        QStringLiteral("deadband"), QStringLiteral("poll_interval_ms"),
+        QStringLiteral("alwaysPoll"), QStringLiteral("range"),
+    };
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        if (!kKnown.contains(it.key())) {
+            qWarning().noquote()
+                << QStringLiteral("[JsonSerializer] 变量 \"%1\" 含有未知字段 \"%2\",已忽略。"
+                                   "拼错字段名是这个现象的常见原因(比如 dead_band ≠ deadband)。")
+                       .arg(name, it.key());
+        }
     }
     return v;
 }

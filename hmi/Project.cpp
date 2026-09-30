@@ -163,19 +163,39 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
     if (alarmMgr_) alarmMgr_->clearAll();
     if (actionMgr_) actionMgr_->clear();
 
+    // ★ F3(2026-09-30)问题 3:失败路径统一收口。
+    //   原来第 4 步的 clear() 只在【函数开头】调一次,而下面 5 个解析循环各有
+    //   return false —— 走到那里时前 N 个变量/报警已经建出来了,
+    //   留在内存里就是"半个工程"。调用方若不检查返回值直接继续用就拿到了残缺状态。
+    //   抽成 lambda 是为了【不再有第 6 处 return false 忘了清】——
+    //   这正是"每处各写一遍"必然漏的形状。
+    const auto failWith = [this](const QString& msg) {
+        if (varMgr_)     varMgr_->clear();
+        if (alarmMgr_)   alarmMgr_->clearAll();
+        if (actionMgr_)  actionMgr_->clear();
+        emit loadError(msg);
+        return false;
+    };
+
     // 5. 解析 variables
     if (varMgr_) {
         QJsonArray variablesArr = root["variables"].toArray();
-        for (const QJsonValue& v : variablesArr) {
-            Variable* var = JsonSerializer::fromJsonVariable(v.toObject(), varMgr_);
+        for (int i = 0; i < variablesArr.size(); ++i) {
+            // ★ F3:把 fromJsonVariable 的具体错误信息带出来。
+            //   原来只有一句 "variable 字段缺失或类型错误" —— data_type 拼错、
+            //   漏写 access、缺 name 全都报这一句,且不含变量名。
+            QString varErr;
+            Variable* var = JsonSerializer::fromJsonVariable(variablesArr[i].toObject(),
+                                                             varMgr_, &varErr);
             if (!var) {
-                emit loadError("variable 字段缺失或类型错误");
-                return false;
+                return failWith(QString("第 %1 个 variable 解析失败:\n%2")
+                                    .arg(i + 1)
+                                    .arg(varErr));
             }
             if (!varMgr_->addVariable(var)) {
+                const QString dupName = var->name();
                 delete var;
-                emit loadError(QString("variable \"%1\" 重复或非法").arg(var->name()));
-                return false;
+                return failWith(QString("variable \"%1\" 重复或非法").arg(dupName));
             }
         }
     }
@@ -190,15 +210,14 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
 
             Variable* var = varMgr_->findVariable(varName);
             if (!var) {
-                emit loadError(QString("alarm \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
-                return false;
+                return failWith(QString("alarm \"%1\" 引用了不存在的 variable \"%2\"")
+                                    .arg(alarmName, varName));
             }
             CheckerConfig cfg = JsonSerializer::checkerConfigFromJson(aObj);
             auto* checker = new ThresholdAlarmChecker(alarmName, var, pollScheduler_, cfg, alarmMgr_);
             if (!alarmMgr_->addChecker(checker)) {
                 delete checker;
-                emit loadError(QString("alarm \"%1\" 重复或 addChecker 失败").arg(alarmName));
-                return false;
+                return failWith(QString("alarm \"%1\" 重复或 addChecker 失败").arg(alarmName));
             }
         }
     }
@@ -214,8 +233,8 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
 
             Variable* var = varMgr_->findVariable(varName);
             if (!var) {
-                emit loadError(QString("action \"%1\" 引用了不存在的 variable \"%2\"").arg(alarmName).arg(varName));
-                return false;
+                return failWith(QString("action \"%1\" 引用了不存在的 variable \"%2\"")
+                                    .arg(alarmName, varName));
             }
             actionMgr_->addMapping(alarmName, varName, writeValue);
         }

@@ -45,7 +45,15 @@ public:
 
     // Variable:构造 new Variable*(caller 用 varMgr_->addVariable 接管)
     //   【设计】不调 varMgr_->addVariable,留给 caller 决定(成功才加)
-    static Variable* fromJsonVariable(const QJsonObject& obj, VariableManager* parent);
+    //
+    // ★ F3(2026-09-30)加了 outError 参数,原因见 .cpp 里的详细说明:
+    //   原来失败只 return nullptr,信息全丢,Project 只能报一句
+    //   "variable 字段缺失或类型错误" —— 200 个变量的工程里,
+    //   第 137 个写错一个字母,用户完全不知道该改哪一行,只能一个一个试。
+    //   传 nullptr 表示不关心错误信息(旧调用方兼容)。
+    static Variable* fromJsonVariable(const QJsonObject& obj,
+                                      VariableManager* parent,
+                                      QString* outError = nullptr);
 
     // CheckerConfig:纯数据,无父对象
     static CheckerConfig checkerConfigFromJson(const QJsonObject& obj);

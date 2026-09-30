@@ -11,7 +11,7 @@
 > - E 画面框架 **🟢 全部完工** — 22 控件 + WYSIWYG 编辑器 + Undo 全覆盖 + 旋转
 >   + **复制/粘贴/删除** + **运行时画布**(编辑器存的画面在主画面显示)
 >   + **控件自定义底图**(每个控件可配自己的图,矢量层保留在上层),
->   `ctest` 58 个目标 58 通过
+>   `ctest` 59 个目标 59 通过
 > - F/G/H/I ⬜ 未启动
 > - 详见 `docs/现状.md` / `docs/路线图.md` / `hmi/CHANGELOG.md`
 
@@ -80,7 +80,8 @@
 
 **下一步该做什么**(2026-09-30 现状):
 - ✅ **E 阶段已全部完工** —— 22 控件 + WYSIWYG 编辑器 + 写回 PLC + Undo 全覆盖 + 旋转
-  + 复制/粘贴/删除 + 运行时画布 + 控件自定义底图,`ctest` **58 个目标 58 通过**(全绿)。
+  + 复制/粘贴/删除 + 运行时画布 + 控件自定义底图,`ctest` **59 个目标 59 通过**(全绿)。
+  **F3"改 JSON 加变量"已实测通过**,顺带修掉 3 个加载诊断缺陷(详见 `docs/现状.md` 第七节)。
   主题 / Lua 已拍板推 v0.3.0。
 - **Wqian 一句话"阶段 F 启动"**:展开 F 阶段工单(商业级报警,2-3 周 P1)。
 - 详见 [`docs/现状.md`](docs/现状.md)(唯一权威)/ [`docs/路线图.md`](docs/路线图.md) 和 [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md)。
@@ -166,7 +167,7 @@ HMI/                              ← 仓库根(2026-09-08 从更上层下移至
     │       ├── SelectionFrameItem                    E.4d 选中框
     │       └── EditorMainWindow                      E.2/E.4d 主窗口
     ├── installer/hmi.iss                       A/I 阶段:Inno Setup 安装包
-    ├── tests/                                  A–E 阶段:单元测试(58 个 ctest target + 自带 CMakeLists)
+    ├── tests/                                  A–E 阶段:单元测试(59 个 ctest target + 自带 CMakeLists)
     ├── docs/阶段A_工程化基线.md                A 阶段:验证步骤
     ├── .clang-tidy / .clang-format             A 阶段:静态分析
     ├── .github/workflows/build.yml             A 阶段:CI
