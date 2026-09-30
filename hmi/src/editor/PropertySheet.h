@@ -64,6 +64,21 @@ private:
     void     syncFormFromTarget();                // 不重建,只把 target 当前值刷回表单
     QMetaProperty findProp(const QString& propName) const;
 
+    // ★ E.8:imagePath 的"浏览…/清除"按钮组。
+    //   返回的 widget 是个容器(QLineEdit + 两个 QPushButton),
+    //   但 editorByName["imagePath"] 存的仍是【内部的 QLineEdit】——
+    //   setEditorValueFromProperty / connectEditorToProperty 走的都是那一套通用路径,
+    //   换成容器就全断了。同步/回写因此不需要为它开特例。
+    QWidget* createImagePathEditor(const QMetaProperty& prop);
+    //   容器 → 内部 QLineEdit。非容器原样返回。
+    QWidget* unwrapEditor(QWidget* editor) const;
+    //   绝对路径 → 相对工程目录;无基准时原样返回
+    QString toRelativeImagePath(const QString& abs) const;
+    //   加载失败时给输入框描红边 + tooltip,别让"设了没生效"变成无反馈
+    void     markImagePathStatus();
+    //   从多选里挑一个控件当"当前上下文"(按钮操作总是作用在全部 targets 上)
+    qwhmi::widgets::ControlBase* firstTarget() const { return targets_.isEmpty() ? nullptr : targets_.first(); }
+
     QFormLayout* form_ = nullptr;
     QList<qwhmi::widgets::ControlBase*> targets_;   // ★ E.4d-续-2:取代 target_,支持 0/1/N 个
     QUndoStack*  undoStack_ = nullptr;

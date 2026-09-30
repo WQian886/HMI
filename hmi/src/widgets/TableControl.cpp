@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // TableControl 实现
 // ============================================================================
 
@@ -70,7 +70,7 @@ QRectF TableControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void TableControl::paint(QPainter* p,
+void TableControl::paintContent(QPainter* p,
                          const QStyleOptionGraphicsItem* option,
                          QWidget* widget) {
     Q_UNUSED(p); Q_UNUSED(option); Q_UNUSED(widget);

@@ -8,6 +8,7 @@
 #include "Project.h"
 #include "../../VariableManager.h"
 
+#include <QFileInfo>
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QVBoxLayout>
@@ -63,6 +64,12 @@ int RuntimeCanvas::load(const QString& path) {
     lastError_.clear();
     clearCanvas();
 
+    // ★ E.8:先记住工程文件所在目录,loadControls 里给每个控件设相对路径基准。
+    //   放在 load 开头而不是 loadControls 里,是因为 loadControls 也被
+    //   "从内存灌控件"的测试路径直接调 —— 那条路径的 basePath_ 是上次 load
+    //   留下的,会串味(在测试里尤其明显:上一个用例的工程目录泄漏到下一个)。
+    basePath_ = QFileInfo(path).absolutePath();
+
     // ★★ 【为什么不直接用主画面的 project_】—— 这是本类最关键的一个决定
     //   Project::loadFromFile → loadRootFromFile 第 4 步是:
     //       varMgr_->clear();  alarmMgr_->clearAll();  actionMgr_->clear();
@@ -108,6 +115,10 @@ void RuntimeCanvas::loadControls(const QList<qwhmi::widgets::ControlBase*>& cont
 
     for (auto* c : controls) {
         if (!c) continue;   // loadControlsFromJson 理论上不返 null,防一手
+        // ★ E.8:底图存的是【相对工程文件目录】的路径(见 ControlBase::setBasePath),
+        //   不给基准的话相对路径解析不出来 —— 主画面上每个带图控件都变成手绘,
+        //   而且只在日志里留一行 qWarning,画面上完全看不出"图丢了"。
+        if (!basePath_.isEmpty()) c->setBasePath(basePath_);
         controls_.append(c);
         scene_->addItem(c);
     }

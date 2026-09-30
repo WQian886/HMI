@@ -87,6 +87,8 @@ private:
     //   是因为"文件打不开"和"变量名对不上"是两类完全不同的毛病,
     //   UI 上要给两种完全不同的提示。
     QString lastError_;
+    // ★ E.8:工程文件所在目录 —— 底图相对路径的解析基准
+    QString basePath_;
 
     void bindAllControls();
 };

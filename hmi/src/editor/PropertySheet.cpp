@@ -12,8 +12,11 @@
 #include <QColor>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMetaEnum>
@@ -206,12 +209,24 @@ void PropertySheet::rebuildForm() {
         form_->addRow(label + ":", editor);
         metaProps_.append(pair.first);
     }
+
+    // ★ E.8:打开工程时底图可能是坏的(路径失效),当场给红边提示,
+    //   别等用户自己发现"设了图但没变化"
+    markImagePathStatus();
 }
 
 QWidget* PropertySheet::createEditorForProperty(const QMetaProperty& prop) {
     const int type = prop.userType();
 
-    // ★ QString:可能是普通文本、文件路径(imagePath)、或枚举字符串
+    // ★ E.8:imagePath 特殊 —— 需要"浏览…"和"清除"两个按钮,
+    //   放在 QString 分支【之前】判断,否则会被当普通文本框吃掉。
+    //   判据是属性名而不是类型:目前只有 ControlBase::imagePath 用这个形态,
+    //   日后有别的路径属性会自动一起受益(命名一致即可)。
+    if (QString::fromUtf8(prop.name()) == QStringLiteral("imagePath")) {
+        return createImagePathEditor(prop);
+    }
+
+    // ★ QString:可能是普通文本或枚举字符串
     if (type == QMetaType::QString) {
         auto* edit = new QLineEdit;
         edit->setObjectName(QString::fromUtf8(prop.name()));
@@ -302,6 +317,9 @@ QWidget* PropertySheet::createEditorForProperty(const QMetaProperty& prop) {
 void PropertySheet::setEditorValueFromProperty(QWidget* editor,
                                                const QMetaProperty& prop,
                                                const QVariant& value) {
+    // ★ E.8:容器拆成内部 QLineEdit,后面的 qobject_cast 链才认得出来
+    editor = unwrapEditor(editor);
+    if (!editor) return;
     const int type = prop.userType();
 
     if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
@@ -341,7 +359,109 @@ void PropertySheet::setEditorValueFromProperty(QWidget* editor,
     }
 }
 
+// ★ E.8:imagePath 编辑行 = QLineEdit + [浏览…] + [清除]
+//
+//   【为什么用"容器包输入框"而不是给输入框旁边塞按钮】
+//   属性面板的通用路径(setEditorValueFromProperty / connectEditorToProperty /
+//   editorValueAsVariant)全靠 qobject_cast 成具体类型。塞按钮会破坏这些 cast,
+//   等于给 imagePath 开三条特例分支 —— 以后每改一处同步逻辑都得记得照顾它。
+//   现在的做法:容器挂进表单,内部 QLineEdit 用动态属性 "_lineEdit" 指出来,
+//   三个通用函数开头统一 unwrap 一次(见 unwrapEditor)。特例只有一处。
+QWidget* PropertySheet::createImagePathEditor(const QMetaProperty& prop) {
+    const QString propName = QString::fromUtf8(prop.name());
+
+    auto* row = new QWidget;
+    row->setObjectName(propName);
+    auto* lay = new QHBoxLayout(row);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(4);
+
+    auto* edit = new QLineEdit;
+    edit->setObjectName(propName + "_edit");
+    edit->setPlaceholderText(tr("(未设置底图,用手绘矢量)"));
+    lay->addWidget(edit, 1);
+
+    auto* browse = new QPushButton(tr("浏览…"));
+    browse->setObjectName(propName + "_browse");
+    lay->addWidget(browse);
+
+    auto* clear = new QPushButton(tr("清除"));
+    clear->setObjectName(propName + "_clear");
+    clear->setToolTip(tr("清空底图,恢复手绘矢量外观"));
+    lay->addWidget(clear);
+
+    // ★ 让通用函数能 qobject_cast 到内部的 QLineEdit
+    edit->setProperty("_lineEdit", QVariant::fromValue(static_cast<QObject*>(edit)));
+
+    // 浏览:选完写【相对工程目录】的路径(见 ControlBase::setBasePath 的理由)
+    connect(browse, &QPushButton::clicked, this, [this, propName, edit]() {
+        auto* t = firstTarget();
+        const QString start = t ? t->resolvedImagePath() : QString();
+        const QString chosen = QFileDialog::getOpenFileName(
+            this, tr("选择底图"), start,
+            tr("图片文件 (*.png *.jpg *.jpeg *.bmp *.svg);;所有文件 (*.*)"));
+        if (chosen.isEmpty()) return;   // 取消 = 不改
+        const QString rel = toRelativeImagePath(chosen);
+        edit->setText(rel);
+        applyEditorChange(propName, rel);
+        markImagePathStatus();
+    });
+
+    // 清除:一键回手绘。空字符串不是"路径为空",是"明确用默认外观"
+    connect(clear, &QPushButton::clicked, this, [this, propName, edit]() {
+        edit->clear();
+        applyEditorChange(propName, QString());
+        markImagePathStatus();
+    });
+
+    return row;
+}
+
+QWidget* PropertySheet::unwrapEditor(QWidget* editor) const {
+    // ★ 容器 → 内部 QLineEdit。非容器原样返回,通用路径照旧。
+    if (!editor) return nullptr;
+    if (auto* inner = editor->property("_lineEdit").value<QObject*>()) {
+        return qobject_cast<QWidget*>(inner);
+    }
+    return editor;
+}
+
+QString PropertySheet::toRelativeImagePath(const QString& abs) const {
+    // 存相对路径,工程文件拷走/发给同事后图片还能找到
+    // (和 tst_ProjectSchema 那个硬编码绝对路径是同一类错误的反面教材)
+    auto* t = firstTarget();
+    const QString base = t ? t->basePath() : QString();
+    if (base.isEmpty()) return abs;   // 没基准(工程还没存)→ 只能存绝对
+    const QDir baseDir(base);
+    if (!baseDir.exists()) return abs;
+    return baseDir.relativeFilePath(abs);   // 跨盘符时它自己会返回绝对路径
+}
+
+void PropertySheet::markImagePathStatus() {
+    // ★ 加载失败要有【看得见】的反馈。原 ImageControl 的问题是两种情况
+    //   (没配图 / 配了但坏了)都画同一个 [Image] 灰底,用户以为"设了没生效"。
+    auto* t = firstTarget();
+    if (!t) return;
+    auto* row = form_->findChild<QWidget*>(QStringLiteral("imagePath"));
+    if (!row) return;
+    auto* edit = row->findChild<QLineEdit*>(QStringLiteral("imagePath_edit"));
+    if (!edit) return;
+
+    if (t->imagePath().isEmpty()) {
+        edit->setStyleSheet(QString());
+        edit->setToolTip(QString());
+    } else if (t->imageLoaded()) {
+        edit->setStyleSheet(QString());
+        edit->setToolTip(t->resolvedImagePath());
+    } else {
+        edit->setStyleSheet(QStringLiteral("border: 1px solid #C83C3C;"));
+        edit->setToolTip(tr("底图加载失败,已回退手绘矢量。\n路径:%1").arg(t->resolvedImagePath()));
+    }
+}
+
 QVariant PropertySheet::editorValueAsVariant(QWidget* editor, const QMetaProperty& prop) {
+    editor = unwrapEditor(editor);   // ★ E.8
+    if (!editor) return {};
     const int type = prop.userType();
 
     if (auto* edit = qobject_cast<QLineEdit*>(editor)) {
@@ -372,6 +492,9 @@ QVariant PropertySheet::editorValueAsVariant(QWidget* editor, const QMetaPropert
 
 void PropertySheet::connectEditorToProperty(QWidget* editor,
                                             const QMetaProperty& prop) {
+    // ★ E.8:容器拆成内部 QLineEdit,下面的 cast 链才认得出来
+    editor = unwrapEditor(editor);
+    if (!editor) return;
     // ★ 各种 editor 的 valueChanged → applyEditorChange
     QString propName = QString::fromUtf8(prop.name());
     if (auto* edit = qobject_cast<QLineEdit*>(editor)) {

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · PumpControl(操作类 — 泵)
 //
 // 文件职责:离心泵标准符号(圆壳 + 出口管嘴) + 三叶转子。点击启停,
@@ -54,7 +54,7 @@ public:
     const SpinAnimator& spinAnimator() const { return spin_; }
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
     void   mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;

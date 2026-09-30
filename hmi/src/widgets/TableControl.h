@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · TableControl(数据 — 表格)
 //
 // 文件职责:用 QGraphicsProxyWidget 包 QTableWidget — 多列历史数据展示
@@ -31,7 +31,7 @@ public:
     void setCell(int row, int col, const QString& value);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

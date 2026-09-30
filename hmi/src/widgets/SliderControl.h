@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · SliderControl(控制 — 滑动条)
 //
 // 文件职责:水平滑动条(min/max + value),拖动改 value。
@@ -35,7 +35,7 @@ public:
     void   setOrientation(Qt::Orientation o);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
     void   mousePressEvent(QGraphicsSceneMouseEvent* event) override;

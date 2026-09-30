@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // RectangleControl 实现
 // ============================================================================
 
@@ -41,7 +41,7 @@ QRectF RectangleControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void RectangleControl::paint(QPainter* p,
+void RectangleControl::paintContent(QPainter* p,
                              const QStyleOptionGraphicsItem* /*option*/,
                              QWidget* /*widget*/) {
     // 填充

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · ToggleControl(控制 — 开关 2 态)
 //
 // 文件职责:2 态开关(on/off),点击翻转 value(0↔1)。
@@ -32,7 +32,7 @@ public:
     void    setOnColor(const QColor& c);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

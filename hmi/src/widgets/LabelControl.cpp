@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · LabelControl 实现
 // 对应 LabelControl.h
 // ============================================================================
@@ -25,7 +25,7 @@ QRectF LabelControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void LabelControl::paint(QPainter* p,
+void LabelControl::paintContent(QPainter* p,
                          const QStyleOptionGraphicsItem* /*option*/,
                          QWidget* /*widget*/) {
     // ★ 边框(选中加深蓝)

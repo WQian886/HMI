@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // InputEditControl 实现
 // ============================================================================
 
@@ -69,7 +69,7 @@ QRectF InputEditControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void InputEditControl::paint(QPainter* p,
+void InputEditControl::paintContent(QPainter* p,
                              const QStyleOptionGraphicsItem* option,
                              QWidget* widget) {
     Q_UNUSED(p); Q_UNUSED(option); Q_UNUSED(widget);

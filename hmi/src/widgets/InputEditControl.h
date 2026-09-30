@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · InputEditControl(控制 — 文本输入)
 //
 // 文件职责:用 QGraphicsProxyWidget 包 QLineEdit — 编辑文本
@@ -38,7 +38,7 @@ public:
     void    setReadOnly(bool r);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · LedControl(显示类 — 圆点 LED)
 //
 // 文件职责:布尔指示灯(绿/红/灰)— value>0 亮绿,=0 暗灰,可单独切色。
@@ -31,7 +31,7 @@ public:
     bool isLit() const { return value().toDouble() > 0.0; }
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

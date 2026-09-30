@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // TrendControl 实现
 // ============================================================================
 
@@ -74,7 +74,7 @@ QRectF TrendControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void TrendControl::paint(QPainter* p,
+void TrendControl::paintContent(QPainter* p,
                          const QStyleOptionGraphicsItem* option,
                          QWidget* widget) {
     Q_UNUSED(p); Q_UNUSED(option); Q_UNUSED(widget);

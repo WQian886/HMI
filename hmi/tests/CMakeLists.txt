@@ -1,4 +1,4 @@
-﻿# 阶段 A · A5 单元测试
+# 阶段 A · A5 单元测试
 # 用 Qt Test,跟主程序共用 core 源码
 
 cmake_minimum_required(VERSION 3.21)
@@ -244,5 +244,9 @@ add_hmi_test(tst_Trend)
 add_hmi_test(tst_GraphicsObjectProperty)
 # 端到端 AlarmList 缩小失效调试
 add_hmi_test(tst_AlarmListShrinkE2E)
+# ★ E.8(2026-09-30):控件自定义底图 —— 22 个控件手绘太丑,用户要能换自己的图。
+#   底图下沉到 ControlBase,图走下层(矢量层的液位/动画/状态色仍在上层),
+#   相对路径按工程目录解析,加载失败回退手绘矢量而不是画灰底。
+add_hmi_test(tst_ControlBackgroundImage)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

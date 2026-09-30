@@ -9,14 +9,16 @@
 > - C 多协议 ✅ ModbusDriver 落地,S7/EIP 仍 stub(Snap7/libplctag 未真接)
 > - D 历史库/曲线/报表/Tag ✅ 代码落地
 > - E 画面框架 **🟢 全部完工** — 22 控件 + WYSIWYG 编辑器 + Undo 全覆盖 + 旋转
->   + **复制/粘贴/删除** + **运行时画布**(编辑器存的画面在主画面显示),`ctest` 57 个目标 57 通过
+>   + **复制/粘贴/删除** + **运行时画布**(编辑器存的画面在主画面显示)
+>   + **控件自定义底图**(每个控件可配自己的图,矢量层保留在上层),
+>   `ctest` 58 个目标 58 通过
 > - F/G/H/I ⬜ 未启动
 > - 详见 `docs/现状.md` / `docs/路线图.md` / `hmi/CHANGELOG.md`
 
 已实现:Modbus TCP 通信 · PLC 寄存器轮询 · 变量订阅发布 · 控件双向绑定 ·
 阈值报警(4 档 + 确认/恢复)· 报警联动动作 · 工程配置 JSON 存读 ·
 **用户权限 + 操作审计)** · **历史曲线 + CSV 导出)** ·
-**WYSIWYG 编辑器(多选/对齐/缩放/复制粘贴删除)**
+**WYSIWYG 编辑器(多选/对齐/缩放/复制粘贴删除)** · **控件自定义底图**
 
 ---
 
@@ -78,7 +80,7 @@
 
 **下一步该做什么**(2026-09-30 现状):
 - ✅ **E 阶段已全部完工** —— 22 控件 + WYSIWYG 编辑器 + 写回 PLC + Undo 全覆盖 + 旋转
-  + 复制/粘贴/删除 + 运行时画布,`ctest` **57 个目标 57 通过**(全绿)。
+  + 复制/粘贴/删除 + 运行时画布 + 控件自定义底图,`ctest` **58 个目标 58 通过**(全绿)。
   主题 / Lua 已拍板推 v0.3.0。
 - **Wqian 一句话"阶段 F 启动"**:展开 F 阶段工单(商业级报警,2-3 周 P1)。
 - 详见 [`docs/现状.md`](docs/现状.md)(唯一权威)/ [`docs/路线图.md`](docs/路线图.md) 和 [`hmi/CHANGELOG.md`](hmi/CHANGELOG.md)。
@@ -164,7 +166,7 @@ HMI/                              ← 仓库根(2026-09-08 从更上层下移至
     │       ├── SelectionFrameItem                    E.4d 选中框
     │       └── EditorMainWindow                      E.2/E.4d 主窗口
     ├── installer/hmi.iss                       A/I 阶段:Inno Setup 安装包
-    ├── tests/                                  A–E 阶段:单元测试(57 个 ctest target + 自带 CMakeLists)
+    ├── tests/                                  A–E 阶段:单元测试(58 个 ctest target + 自带 CMakeLists)
     ├── docs/阶段A_工程化基线.md                A 阶段:验证步骤
     ├── .clang-tidy / .clang-format             A 阶段:静态分析
     ├── .github/workflows/build.yml             A 阶段:CI

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · LineControl(元件 — 直线)
 //
 // 文件职责:分隔线/箭头。width 取 size.width,起点 (0, size.height/2)。
@@ -26,7 +26,7 @@ public:
     void   setStrokeWidth(int w);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

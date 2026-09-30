@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · TrendControl(数据 — 实时曲线)
 //
 // 文件职责:包 QCustomPlot(QCustomPlot 实例嵌在 ControlBase 里)— 复用 D.2 TrendWidget 设计
@@ -31,7 +31,7 @@ public:
     void   refresh(const QString& variableName);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

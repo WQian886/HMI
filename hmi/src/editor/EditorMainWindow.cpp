@@ -98,6 +98,8 @@ EditorMainWindow::EditorMainWindow(Project* project, VariableManager* varMgr, QW
             this, [this](const QList<qwhmi::widgets::ControlBase*>& loaded) {
         clearControls();
         for (auto* c : loaded) {
+            // ★ E.8:底图存的是相对工程目录的路径,不给基准就解析不出来
+            if (!basePath_.isEmpty()) c->setBasePath(basePath_);
             addControl(c);
         }
     });
@@ -257,6 +259,8 @@ void EditorMainWindow::addControl(qwhmi::widgets::ControlBase* c) {
     if (!c) return;
     if (controls_.contains(c)) return;
     controls_.append(c);
+    // ★ E.8:从调色板拖进来的新控件也要有基准(用户接着就设底图)
+    if (!basePath_.isEmpty()) c->setBasePath(basePath_);
     scene_->addItem(c);
     // 注:不在这里 setSelected(true) — 避免循环触发 onSceneSelectionChanged → setTarget
     //     → setSelected 的递归。选中由 setTarget() 或用户点击触发。
@@ -959,6 +963,9 @@ void EditorMainWindow::onFileSaveAs() {
         path += QStringLiteral(".hmi.json");
     }
     currentPath_ = path;
+    // ★ E.8:另存为后基准目录变了,已有控件的缓存要作废
+    basePath_ = QFileInfo(path).absolutePath();
+    for (auto* c : controls_) c->setBasePath(basePath_);
     onFileSave();
 }
 
@@ -968,6 +975,9 @@ void EditorMainWindow::onFileOpen() {
         tr("HMI 工程 (*.hmi.json);;JSON (*.json);;所有文件 (*)"));
     if (path.isEmpty()) return;
     currentPath_ = path;
+    // ★ E.8:必须在 loadFromFile 【之前】设基准 —— controlsLoaded 是同步 emit 的,
+    //   回调里就给控件调 setBasePath。晚一步就来不及,底图全解析不出来。
+    basePath_ = QFileInfo(path).absolutePath();
     if (!project_->loadFromFile(currentPath_)) {
         QMessageBox::warning(this, tr("打开失败"),
                              tr("加载 %1 失败,详情看 qDebug。").arg(currentPath_));

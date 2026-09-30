@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // GroupControl 实现
 // ============================================================================
 
@@ -43,7 +43,7 @@ QRectF GroupControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void GroupControl::paint(QPainter* p,
+void GroupControl::paintContent(QPainter* p,
                          const QStyleOptionGraphicsItem* /*option*/,
                          QWidget* /*widget*/) {
     // 浅灰半透明填充

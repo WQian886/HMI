@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · BarControl 实现
 // 对应 BarControl.h
 // ============================================================================
@@ -48,7 +48,7 @@ QRectF BarControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void BarControl::paint(QPainter* p,
+void BarControl::paintContent(QPainter* p,
                        const QStyleOptionGraphicsItem* /*option*/,
                        QWidget* /*widget*/) {
     const QRectF br = boundingRect();

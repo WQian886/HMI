@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · PipeControl 实现
 // 对应 PipeControl.h
 // ============================================================================
@@ -66,7 +66,7 @@ QRectF PipeControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void PipeControl::paint(QPainter* p,
+void PipeControl::paintContent(QPainter* p,
                         const QStyleOptionGraphicsItem* /*option*/,
                         QWidget* /*widget*/) {
     p->setRenderHint(QPainter::Antialiasing);

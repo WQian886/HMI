@@ -12,9 +12,11 @@
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
 
+#include <QDir>
 #include <QHash>
 #include <QJsonObject>
 #include <QMetaType>
+#include <QPainter>
 #include <algorithm>
 #include <limits>
 
@@ -242,6 +244,94 @@ QVariant ControlBase::itemChange(QGraphicsItem::GraphicsItemChange change,
 
 QString ControlBase::displayText() const {
     return value_.toString();
+}
+
+// ===== E.8 底图 =====
+
+QString ControlBase::resolvedImagePath() const {
+    if (imagePath_.isEmpty()) return {};
+    // 绝对路径直接用(QDir::isAbsolutePath 认 Windows 盘符和 UNC)
+    if (QDir::isAbsolutePath(imagePath_)) return imagePath_;
+    if (basePath_.isEmpty()) return imagePath_;   // 无基准 = 相对进程当前目录
+    return QDir(basePath_).filePath(imagePath_);
+}
+
+void ControlBase::setImagePath(const QString& path) {
+    if (path == imagePath_) return;
+    imagePath_ = path;
+    // ★ 路径一变缓存立刻作废。下次 paint 才重新读盘 —— 不在这里读,
+    //   因为 setImagePath 可能被 JSON 批量回填调用(22 个控件一次 load),
+    //   在这里读等于每个控件都同步读一次盘,编辑器打开会明显卡。
+    cachedPixmap_ = QPixmap();
+    cachedForPath_.clear();
+    imageLoadFailed_ = false;
+    update();
+    emit imagePathChanged();
+}
+
+void ControlBase::setBasePathInternal(const QString& dir) {
+    if (dir == basePath_) return;
+    basePath_ = dir;
+    // ★ 基准目录变了,同一个相对路径现在指向【另一个文件】。
+    //   不清缓存的话,打开 B 工程时画面上还挂着 A 工程的图 —— 而且
+    //   cachedForPath_ 存的是上次解析出的绝对路径,重新解析后不同,
+    //   本来会自然失效……但 basePath_ 设成空再设回同一个值时不会。
+    //   显式清一次,把这个时序坑彻底堵死。
+    cachedPixmap_ = QPixmap();
+    cachedForPath_.clear();
+    imageLoadFailed_ = false;
+}
+
+void ControlBase::setScaleToFit(bool s) {
+    if (s == scaleToFit_) return;
+    scaleToFit_ = s;
+    update();
+    emit scaleToFitChanged();
+}
+
+// ★ 读盘 + 缓存。paint() 和 imageLoaded() 都走这一条,保证
+//   "面板说加载成功了"和"画面上真的画出来了"是同一个判据。
+//   返回 true = 现在有可用图像(或者压根没设路径)。
+bool ControlBase::ensureImageLoaded() {
+    if (imagePath_.isEmpty()) return true;      // 没配图 = 用手绘,不算失败
+    const QString abs = resolvedImagePath();
+    // ★ 缓存判据是【绝对路径】而不是 imagePath_:
+    //   basePath_ 变了(打开另一个工程)但 imagePath_ 没变时,
+    //   按 imagePath_ 判会命中旧缓存 —— 画面上还是上一个工程的图。
+    if (cachedForPath_ == abs) return !imageLoadFailed_;
+
+    cachedPixmap_.load(abs);
+    cachedForPath_ = abs;
+    imageLoadFailed_ = cachedPixmap_.isNull();
+    if (imageLoadFailed_) {
+        // ★ 加载失败只 qWarning 不 qCritical:路径失效是用户会遇到的常态
+        //   (工程拷走了、图片被删了、相对路径基准变了),不是程序错误。
+        //   矢量层照画 —— 画面上是个手绘控件 + 一行日志,
+        //   好过一片空白或者崩溃。
+        qWarning("ControlBase: 底图加载失败,回退手绘矢量 —— %s", qPrintable(abs));
+    }
+    return !imageLoadFailed_;
+}
+
+bool ControlBase::imageLoaded() {
+    return ensureImageLoaded();
+}
+
+void ControlBase::paint(QPainter* painter,
+                        const QStyleOptionGraphicsItem* option,
+                        QWidget* widget) {
+    // ① 底图(下层)—— 用户换的图
+    if (ensureImageLoaded() && !cachedPixmap_.isNull()) {
+        const QRectF br = boundingRect();
+        if (scaleToFit_) {
+            painter->drawPixmap(br.toRect(), cachedPixmap_);
+        } else {
+            painter->drawPixmap(QPointF(0, 0), cachedPixmap_);
+        }
+    }
+
+    // ② 矢量层(上层)—— 液位 / 旋转动画 / 状态色,一律照旧
+    paintContent(painter, option, widget);
 }
 
 // ===== E.3 JSON 存读基类默认实现 =====

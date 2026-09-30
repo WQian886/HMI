@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // SliderControl 实现
 // ============================================================================
 
@@ -64,7 +64,7 @@ void SliderControl::updateValueFromPos(const QPointF& pos) {
     setValue(minimum_ + range * r);
 }
 
-void SliderControl::paint(QPainter* p,
+void SliderControl::paintContent(QPainter* p,
                           const QStyleOptionGraphicsItem* option,
                           QWidget* widget) {
     Q_UNUSED(option); Q_UNUSED(widget);

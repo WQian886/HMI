@@ -18,6 +18,7 @@
 
 #include <QGraphicsObject>
 #include <QJsonObject>
+#include <QPixmap>
 #include <QPointF>
 #include <QPointer>
 #include <QSizeF>
@@ -48,6 +49,13 @@ class ControlBase : public QGraphicsObject {
     // ★ 重定义 QGraphicsObject 内建的 width/height 让它们跟 size_ 同步
     Q_PROPERTY(qreal width  READ width  WRITE setWidth  NOTIFY sizeChanged)
     Q_PROPERTY(qreal height READ height WRITE setHeight NOTIFY sizeChanged)
+    // ★ E.8(2026-09-30)底图:22 个控件手绘的矢量外观太"程序味",用户要能换自己的图。
+    //   下沉到基类而不是每控件各写一份 —— 22 个控件各写一遍就是 22 份几乎相同的
+    //   加载/缓存/降级逻辑,漏一个就是一个"别的控件不认图"的怪现象。
+    //   scaleToFit=true 拉伸铺满(工业元件背景图一般按控件尺寸配);
+    //   false 则原图尺寸画在左上角。
+    Q_PROPERTY(QString imagePath READ imagePath WRITE setImagePath NOTIFY imagePathChanged)
+    Q_PROPERTY(bool    scaleToFit READ scaleToFit WRITE setScaleToFit NOTIFY scaleToFitChanged)
 
 public:
     explicit ControlBase(QGraphicsItem* parent = nullptr);
@@ -77,11 +85,45 @@ public:
     // ★ E.2 属性面板:显示文字(默认是 value 转字符串)
     virtual QString displayText() const;
 
+    // ===== 底图(E.8)=====
+    QString imagePath() const { return imagePath_; }
+    void    setImagePath(const QString& path);
+    bool    scaleToFit() const { return scaleToFit_; }
+    void    setScaleToFit(bool s);
+
+    // ★ 相对路径基准目录(通常是工程文件所在目录)。
+    //   为什么必须存:工程文件会被人拷走、发给别人、图片也可能单独放到 assets/ 下,
+    //   存绝对路径 = 换个机器全丢(跟 tst_ProjectSchema 那个硬编码路径同一类错误,
+    //   只不过这次是我们自己埋的)。空 = 相对进程当前目录(编辑器未保存工程时)。
+    void    setBasePath(const QString& dir) { setBasePathInternal(dir); }
+    QString basePath() const { return basePath_; }
+    //   实际读盘用的绝对路径(imagePath 为相对时拼 basePath_)
+    QString resolvedImagePath() const;
+
+    // ★ 加载是否成功。false = 设了路径但没画出来(文件不存在/不是图片/解码失败)。
+    //   属性面板据此给红色提示 —— 静默画灰底会让人以为"设了没生效"。
+    //   会触发一次读盘(非 const),因为"打开工程时"和"首次绘制前"是两个时刻:
+    //   属性面板可能在控件被画过一次之前就来问,那时缓存还是空的,
+    //   不主动读就只能返回"不知道",红边提示就永远不出现。
+    bool    imageLoaded();
+
     // ===== 通用接口 — 派生类必须实现 =====
     QRectF boundingRect() const override = 0;
+
+    // ★ E.8 改造:原来是纯虚 paint(),现改为基类模板方法 ——
+    //   基类 paint() 先画底图,再调子类的 paintContent() 画矢量层。
+    //   【为什么不留在子类里画底图】那样每个控件的 paint() 都要开头写一句
+    //   drawBackgroundImage(),漏一个就是一个"这个控件不认图"的怪现象。
+    //   【为什么图在下层】用户嫌丑的是【外观】,不是【状态】——
+    //   泵转不转、罐里多少液位、阀门开没开是功能,被一张图盖掉就是废品。
     void   paint(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
-                 QWidget* widget = nullptr) override = 0;
+                 QWidget* widget = nullptr) override final;
+
+    // 派生类改实现这个,不用再管底图
+    virtual void paintContent(QPainter* painter,
+                              const QStyleOptionGraphicsItem* option,
+                              QWidget* widget = nullptr) = 0;
 
     // ★ E.4d 续-6:override itemChange → 在 Qt 内部 setPos 触发的
     //   ItemPositionHasChanged 上 emit positionChanged,这样 ItemIsMovable 拖动
@@ -141,6 +183,8 @@ signals:
     void sizeChanged();
     void variableChanged();
     void valueChanged();
+    void imagePathChanged();
+    void scaleToFitChanged();
 
 private slots:
     // ★ Variable::valueChanged → 控件更新显示
@@ -164,6 +208,22 @@ private:
     //   它是 hmi 构造时 new 出来的实例,生命周期跟主窗口绑定。用全局单例会
     //   引入一个现在不存在的概念,且测试里每个用例都得清全局状态。
     VariableManager* varMgr_ = nullptr;     // 查变量用(★ E.5 接真实实例)
+
+    // ★ E.8 底图成员
+    QString imagePath_;
+    QString basePath_;                       // 相对路径基准(工程文件所在目录)
+    QPixmap cachedPixmap_;
+    QString cachedForPath_;                  // ★ 防重复读盘:paint 每帧都调,
+                                             //   不缓存就是每帧读一次文件。
+                                             //   存"上次读的是哪条路径"来判失效。
+    bool    scaleToFit_ = true;
+    bool    imageLoadFailed_ = false;        // 设了路径但没加载出来(给属性面板提示)
+    //   读盘 + 缓存的唯一入口。paint() 和 imageLoaded() 共用它,
+    //   免得"面板说成功"和"画面上真画出来了"是两套判据。
+    bool    ensureImageLoaded();
+    //   ★ 换工程目录必须让缓存作废:basePath_ 变了之后同一个相对路径
+    //   指向的是另一个文件,不失效就是"打开 B 工程,画面上还挂着 A 工程的图"。
+    void    setBasePathInternal(const QString& dir);
 
 public:
     // ★ 静态注册表(E.4 编辑器拖拽用)— 每个派生类构造时 register 一次

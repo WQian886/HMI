@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · MotorControl 实现
 // 对应 MotorControl.h
 // ============================================================================
@@ -66,7 +66,7 @@ QRectF MotorControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void MotorControl::paint(QPainter* p,
+void MotorControl::paintContent(QPainter* p,
                          const QStyleOptionGraphicsItem* /*option*/,
                          QWidget* /*widget*/) {
     p->setRenderHint(QPainter::Antialiasing);

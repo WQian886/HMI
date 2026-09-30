@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // ButtonControl 实现
 // ============================================================================
 
@@ -38,7 +38,7 @@ QRectF ButtonControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void ButtonControl::paint(QPainter* p,
+void ButtonControl::paintContent(QPainter* p,
                           const QStyleOptionGraphicsItem* option,
                           QWidget* widget) {
     Q_UNUSED(option); Q_UNUSED(widget);

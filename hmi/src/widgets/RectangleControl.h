@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · RectangleControl(元件 — 矩形)
 //
 // 文件职责:装饰性矩形,可调 fill/stroke。
@@ -29,7 +29,7 @@ public:
     void   setStrokeWidth(int w);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

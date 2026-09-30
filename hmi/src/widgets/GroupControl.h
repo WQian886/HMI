@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · GroupControl(元件 — 容器)
 //
 // 文件职责:组合多个 ControlBase(简化:只画半透明矩形 + 子控件列表保存,不算 QGraphicsItemGroup)。
@@ -33,7 +33,7 @@ public:
     int  childCount() const { return children_.size(); }
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

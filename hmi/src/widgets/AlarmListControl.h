@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · AlarmListControl(数据 — 报警列表)
 //
 // 文件职责:用 QGraphicsProxyWidget 包 QTableWidget 显示 AlarmManager activeAlarms_
@@ -40,7 +40,7 @@ public:
     void refreshNow();
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

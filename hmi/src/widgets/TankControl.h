@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · TankControl(显示类 — 储罐 / 液位)
 //
 // 文件职责:竖立罐体 + 底部液位填充 + 刻度线。value 按 [minimum, maximum]
@@ -52,7 +52,7 @@ public:
     double fillRatio() const;
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

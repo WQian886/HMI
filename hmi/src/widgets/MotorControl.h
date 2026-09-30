@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · MotorControl(操作类 — 电机)
 //
 // 文件职责:电机标准符号(圆 + M 字) + 旋转的通电符号。点击启停,
@@ -51,7 +51,7 @@ public:
     const SpinAnimator& spinAnimator() const { return spin_; }
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
     void   mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · TextDisplay 实现
 // 对应 TextDisplay.h
 // ============================================================================
@@ -43,7 +43,7 @@ QRectF TextDisplay::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void TextDisplay::paint(QPainter* p,
+void TextDisplay::paintContent(QPainter* p,
                         const QStyleOptionGraphicsItem* /*option*/,
                         QWidget* /*widget*/) {
     QPen pen(isSelected() ? QColor(0, 120, 215) : QColor(160, 160, 160));

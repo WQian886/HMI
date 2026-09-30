@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · GaugeControl(显示类 — 仪表盘)
 //
 // 文件职责:圆弧 + 指针仪表盘。value 在 [min, max] 间按比例画指针角度。
@@ -31,7 +31,7 @@ public:
     void   setNeedleColor(const QColor& c);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

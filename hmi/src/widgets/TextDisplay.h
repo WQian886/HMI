@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · TextDisplay(显示类 — 多行文字/前缀后缀)
 //
 // 文件职责:与 Label 区别是支持 prefix(标签)+ value + suffix(单位/状态)。
@@ -31,7 +31,7 @@ public:
     QString displayText() const override;
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

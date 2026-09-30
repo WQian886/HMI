@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · PumpControl 实现
 // 对应 PumpControl.h
 // ============================================================================
@@ -71,7 +71,7 @@ QRectF PumpControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void PumpControl::paint(QPainter* p,
+void PumpControl::paintContent(QPainter* p,
                         const QStyleOptionGraphicsItem* /*option*/,
                         QWidget* /*widget*/) {
     p->setRenderHint(QPainter::Antialiasing);

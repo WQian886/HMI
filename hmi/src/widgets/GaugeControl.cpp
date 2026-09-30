@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · GaugeControl 实现
 // 对应 GaugeControl.h
 // ============================================================================
@@ -44,7 +44,7 @@ QRectF GaugeControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void GaugeControl::paint(QPainter* p,
+void GaugeControl::paintContent(QPainter* p,
                          const QStyleOptionGraphicsItem* /*option*/,
                          QWidget* /*widget*/) {
     p->setRenderHint(QPainter::Antialiasing);

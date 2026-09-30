@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · NumberDisplay 实现
 // 对应 NumberDisplay.h
 // ============================================================================
@@ -47,7 +47,7 @@ QRectF NumberDisplay::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void NumberDisplay::paint(QPainter* p,
+void NumberDisplay::paintContent(QPainter* p,
                           const QStyleOptionGraphicsItem* /*option*/,
                           QWidget* /*widget*/) {
     // 边框(选中加深蓝)

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // ToggleControl 实现
 // ============================================================================
 
@@ -42,7 +42,7 @@ QRectF ToggleControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void ToggleControl::paint(QPainter* p,
+void ToggleControl::paintContent(QPainter* p,
                           const QStyleOptionGraphicsItem* option,
                           QWidget* widget) {
     Q_UNUSED(option); Q_UNUSED(widget);

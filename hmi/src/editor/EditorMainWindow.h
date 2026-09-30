@@ -186,6 +186,9 @@ private:
     VariableManager* varMgr_       = nullptr;     // ★ E.5:绑定变量用
     QToolBar*       alignToolbar_  = nullptr;     // ★ E.4d:对齐工具栏
     QString         currentPath_;                // ★ E.3:当前打开的 .hmi.json 路径
+    // ★ E.8:工程文件所在目录 —— 控件底图相对路径的解析基准。
+    //   必须在 loadFromFile 之前设(controlsLoaded 是同步 emit 的)。
+    QString         basePath_;
 
     // ★ E.4b:8 handle 管理(target → 8 ResizeHandleItem 实例)
     void installHandlesFor(qwhmi::widgets::ControlBase* target);

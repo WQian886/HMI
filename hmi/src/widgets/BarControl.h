@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · BarControl(显示类 — 进度条)
 //
 // 文件职责:水平进度条。value 在 [min, max] 间按比例填充。
@@ -33,7 +33,7 @@ public:
     void   setOrientation(Qt::Orientation o);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

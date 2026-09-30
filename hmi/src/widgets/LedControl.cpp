@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · LedControl 实现
 // 对应 LedControl.h
 // ============================================================================
@@ -36,7 +36,7 @@ QRectF LedControl::boundingRect() const {
     return QRectF(0, 0, size().width(), size().height());
 }
 
-void LedControl::paint(QPainter* p,
+void LedControl::paintContent(QPainter* p,
                        const QStyleOptionGraphicsItem* /*option*/,
                        QWidget* /*widget*/) {
     p->setRenderHint(QPainter::Antialiasing);

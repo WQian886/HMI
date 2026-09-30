@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // LineControl 实现
 // ============================================================================
 
@@ -37,7 +37,7 @@ QRectF LineControl::boundingRect() const {
     return QRectF(-pad, -pad, size().width() + 2*pad, size().height() + 2*pad);
 }
 
-void LineControl::paint(QPainter* p,
+void LineControl::paintContent(QPainter* p,
                         const QStyleOptionGraphicsItem* /*option*/,
                         QWidget* /*widget*/) {
     // ★ 选中时 strokeColor 变深蓝

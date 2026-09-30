@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · LabelControl(显示类 — 静态文字)
 //
 // 文件职责:E.1a 6 个显示控件第 1 个。最简单:画一行文字(可绑 Variable)。
@@ -19,7 +19,7 @@ public:
     ~LabelControl() override;
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 };

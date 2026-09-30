@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · PipeControl(显示类 — 管道)
 //
 // 文件职责:管身 + 流向箭头。value 表示流量,非 0 时管内画流动箭头。
@@ -47,7 +47,7 @@ public:
     bool   isReversed() const { return value().toDouble() < 0.0; }
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

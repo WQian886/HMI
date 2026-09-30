@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · ButtonControl(控制 — 按钮)
 //
 // 文件职责:可点击按钮,点击 emit clicked(信号)。
@@ -29,7 +29,7 @@ public:
     void    setBackground(const QColor& c);
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1c · ValveControl(操作类 — 阀门)
 //
 // 文件职责:标准阀门符号(两个对顶三角) + 开关状态色。点击切换开/关,
@@ -44,7 +44,7 @@ public:
     bool isOpen() const;
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 

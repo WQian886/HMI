@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // 阶段 E · E.1 · NumberDisplay(显示类 — 数字格式化)
 //
 // 文件职责:数字格式化显示,可绑 Variable,可选 format 字符串("%.2f" 等)。
@@ -30,7 +30,7 @@ public:
     QString displayText() const override;
 
     QRectF boundingRect() const override;
-    void   paint(QPainter* painter,
+    void paintContent(QPainter* painter,
                  const QStyleOptionGraphicsItem* option,
                  QWidget* widget = nullptr) override;
 
