@@ -4,7 +4,7 @@
 > 维护人:Wqian + AI 助手  ｜  创建:2026-09-20
 > 配套:`docs/路线图.md` 第 25-50 行(9 阶段总览+E 战略) / `docs/UI规划调研与方案.md` v1.3 / `docs/进度存档_2026-09-20.md` / `docs/阶段D.2_从这里继续.md` 第 6 节(D.4 节) / `docs/阶段D.1_从这里继续.md`
 > ✅ **状态(2026-09-30 基于代码核对)**:🟢 **E 阶段全部完工** — E.0(本文件)决策锁定 ✅ + E.1 控件库 **22 个全落地**(`src/widgets/*`,E.1c 的储罐/管道/阀门/泵/电机 2026-09-28 补齐)+ E.1c 写回 PLC 通道 `ControlBase::writeToPlc` ✅ + E.2 PropertySheet 反射 + E.4a 调色板/拖拽 + E.4b 8 handle 缩放 + E.4c QSizeF/QPointF 复合编辑器 + E.4d 多选/对齐/等尺寸 + E.4d-follow-1~8 收尾链 + E.4d-follow-9 选中框渲染测试 + E.4d-follow-10 旋转(见节 10、11)+ **运行时画布 `1946fc7`** + **复制/粘贴/删除 `35fc787`**。
-> **测试基线:`ctest` 57 个目标 56 通过**(1 个既有失败:`tst_ProjectSchema` 硬编码 `tests/build/` 路径,
+> **测试基线:`ctest` 57 个目标 57 通过**(全绿;此前长期 56/57,`7ef3fce` 修掉了 `tst_ProjectSchema` 的硬编码 `tests/build/` 路径,
 > 而构建目录是 `build_ninja/`;已 stash 到干净 HEAD 复跑确认与新改动无关)。
 > **推 v0.3.0 的两项**:主题(亮/暗)、Lua(sol2)—— Wqian 已拍板,不在 0.2.0 范围。
 > ⚠ **编号提醒**:本文件计划表里 **E.5 = 主题**,但 `1946fc7` 的 commit message
