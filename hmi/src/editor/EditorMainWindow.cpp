@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "editor/EditorMainWindow.h"
+#include "editor/ControlListCommand.h"      // ★ E.7:复制/粘贴/删除的 Undo
 #include "editor/GeometryChangeCommand.h"   // ★ E.4d-follow-8:9 个对齐/等尺寸动作的 Undo
 #include "editor/PaletteWidget.h"
 #include "editor/PropertySheet.h"
@@ -58,6 +59,8 @@
 #include <QStatusBar>
 #include <QToolBar>
 #include <QUndoStack>
+#include <QKeyEvent>
+#include <algorithm>   // ★ E.7:onDelete 用 std::sort 按原始顺序重排快照
 
 namespace qwhmi::editor {
 
@@ -219,6 +222,20 @@ void EditorMainWindow::setupMenuBar() {
     redoAct->setShortcut(QKeySequence::Redo);
     editMenu->addAction(redoAct);
 
+    // ★ E.7:复制 / 粘贴 / 删除
+    //   【为什么不 setShortcut】快捷键走 keyPressEvent,不在这里设。
+    //   QAction 的快捷键是窗口级的:属性面板的 QLineEdit 正在输入时按 Ctrl+C,
+    //   窗口级 QAction 会把"复制控件"抢走,文字反而复制不上。keyPressEvent
+    //   里有 hasFocus() 判断,只在画布聚焦时才接管。
+    //   菜单项仍然列出来 —— 用户要能看见这三个动作存在。
+    editMenu->addSeparator();
+    auto* copyAct = editMenu->addAction(tr("复制"), this, &EditorMainWindow::onCopy);
+    copyAct->setObjectName("actionCopy");
+    auto* pasteAct = editMenu->addAction(tr("粘贴"), this, &EditorMainWindow::onPaste);
+    pasteAct->setObjectName("actionPaste");
+    auto* deleteAct = editMenu->addAction(tr("删除"), this, &EditorMainWindow::onDelete);
+    deleteAct->setObjectName("actionDelete");
+
     // ★ 模式切换
     auto* viewMenu = menuBar()->addMenu(tr("视图"));
     auto* modeAct = new QAction(tr("运行时模式"), this);
@@ -256,6 +273,173 @@ void EditorMainWindow::removeControl(qwhmi::widgets::ControlBase* c) {
     controls_.removeAll(c);
     if (target_ == c) setTarget(nullptr);
     scene_->removeItem(c);
+}
+
+// ===== ★ E.7 复制 / 粘贴 / 删除 =====
+void EditorMainWindow::destroyControl(qwhmi::widgets::ControlBase* c) {
+    if (!c) return;
+
+    // ★ 删除比 removeControl 多四件事,少一件就是"删了但画面上还留着残影":
+    //   ⓪ 选中态 —— QGraphicsScene 内部拿【裸指针】记着哪些 item 被选中。
+    //      直接 removeItem + delete 的话,scene 里就留着一个指向已释放内存的
+    //      指针;下一次 selectedItems() 会把它当活对象处理(悬空指针)。
+    //      删除路径千变万(撤销粘贴、撤销删除…),不能指望每个调用方都记得
+    //      先 clearSelection —— 防御性地在这里把这一项自己摘掉。
+    //   ① 8 个 ResizeHandleItem —— controlsToJson 不含它们,但它们是 scene item,
+    //      控件没了 handle 还在,下次点别的控件会跟着一堆野 handle 晃。
+    //   ② targets_ —— 多选时 target_ 是 nullptr,但 targets_ 里存着这批指针。
+    //      不清的话 onSceneSelectionChanged 下一轮会拿悬空指针去算 boundingRect。
+    //   ③ 变量绑定 —— ControlBase 析构里会 unbind(),但那要求 bound_ 不是野指针。
+    //      QPointer 保证了这点(E.1c 已把它从裸指针换掉)。
+    if (c->isSelected()) c->setSelected(false);
+    removeHandlesFor(c);
+    targets_.removeAll(c);
+    if (target_ == c) setTarget(nullptr);
+    // ★ 当前正在显示的选中框画的是这批控件的 union —— 直接清掉,
+    //   剩下的选中由下面的 selectionChanged 重新触发安装。
+    if (!targets_.isEmpty()) updateSelectionFrame();
+
+    controls_.removeAll(c);
+    scene_->removeItem(c);
+    delete c;
+}
+
+void EditorMainWindow::selectControls(const QList<qwhmi::widgets::ControlBase*>& controls) {
+    if (!scene_) return;
+    // 走 scene 的选中通道而不是直接改 targets_ —— onSceneSelectionChanged
+    // 会把 targets_ / target_ / handle / 选中框 / 属性面板全套对齐。
+    // 在这里手写那套同步就是 E.4d 最容易漏的地方(漏一处就是一个查不出的 bug)。
+    scene_->clearSelection();
+    for (auto* c : controls) {
+        if (c) c->setSelected(true);
+    }
+}
+
+void EditorMainWindow::onCopy() {
+    // ★ 无选中时静默返回,不弹窗不提示 —— 复制键按了没反应是很正常的,
+    //   弹个"请先选择控件"反而打断排版节奏。
+    if (targets_.isEmpty()) return;
+
+    // 存 JSON 快照,不是指针。理由同 ControlListCommand 的头注释:
+    // 剪贴板的寿命比控件长(复制完再删掉原控件,粘贴仍必须能用)。
+    clipboard_.clear();
+    clipboard_.reserve(targets_.size());
+    for (auto* t : targets_) {
+        if (!t) continue;
+        QJsonObject snap = t->propertiesToJson();
+        // ★ type 必须用【注册表短名】,不能用 toJson() 里的 className ——
+        //   create() 查的是注册表 key("Bar"),className 是 "BarControl",对不上
+        //   会静默返回 nullptr,粘贴时控件凭空消失且不报错。
+        snap["type"] = qwhmi::widgets::ControlBase::registryKeyFor(t->metaObject());
+        clipboard_.append(snap);
+    }
+    // ★ 换了内容,偏移计数归零 —— 否则复制新一批之后第一次粘贴就跳 30px,
+    //   用户看着像"莫名其妙飘出去一块"。
+    pasteCount_ = 0;
+    statusBar()->showMessage(
+        tr("已复制 %1 个控件").arg(clipboard_.size()), 2000);
+}
+
+void EditorMainWindow::onPaste() {
+    if (clipboard_.isEmpty()) return;
+
+    // ★ 偏移量:每次粘贴往下挪一点,否则连按两次 Ctrl+V 两份会完全重叠,
+    //   后贴的盖住先贴的,用户以为只贴了一份(然后撤销一次只撤掉一层)。
+    //   10px 是【画布逻辑坐标】单位,不是屏幕像素 —— 缩放下偏移量会跟着缩放,
+    //   这跟"画布上挪一点"的直觉一致。
+    //   ★ 乘的是 pasteCount_ + 1 而不是 pasteCount_ —— pasteCount_ 记的是
+    //   "已经贴过几次",首次粘贴时它还是 0,直接乘 0 偏移量就没了,第一份
+    //   会【严丝合缝地压在被复制的原件上】,用户看着像没生效。+1 之后是
+    //   10 / 20 / 30……,第一份也看得出是"新贴的"。
+    static const QPointF kPasteOffset(10.0, 10.0);
+    QPointF offset;
+    offset += kPasteOffset * (pasteCount_ + 1);
+
+    QList<qwhmi::widgets::ControlBase*> created;
+    created.reserve(clipboard_.size());
+    for (const QJsonObject& snap : clipboard_) {
+        const QString type = snap.value("type").toString();
+        auto* c = qwhmi::widgets::ControlBase::create(type);
+        if (!c) {
+            // ★ 不静默跳过。E.5 那个坑就是"跳过且不报错",画面凭空少一块。
+            qWarning() << "[EditorMainWindow] 粘贴失败:未知控件类型" << type;
+            continue;
+        }
+        c->propertiesFromJson(snap);
+        // 偏移叠加在【快照里的原始位置】上,不是累加到当前位置 ——
+        // 累加到当前位置的话,连贴 3 次会 10/20/30,用户预期是每次都一样。
+        c->setPosition(c->position() + offset);
+        addControl(c);
+        created.append(c);
+    }
+    if (created.isEmpty()) return;
+
+    // 让新贴的成为当前选中:用户接着就能拖它们摆位置,不用再点一遍。
+    selectControls(created);
+    ++pasteCount_;
+    // ★ 撤销包装成一条命令:一次 Ctrl+Z 撤掉整批,而不是撤掉一个。
+    undoStack_->push(qwhmi::editor::ControlListCommand::forPaste(
+        created, this, tr("粘贴 %1 个控件").arg(created.size())));
+    statusBar()->showMessage(tr("已粘贴 %1 个控件").arg(created.size()), 2000);
+}
+
+void EditorMainWindow::onDelete() {
+    if (targets_.isEmpty()) return;
+
+    // ★ 快照一份都不改。删除命令靠 JSON 快照在 undo 时重建 ——
+    //   如果这里顺手改了快照(比如清掉 variableName),撤销回来的控件就跟
+    //   删除前不是一个东西了,而用户对"撤销删除"的预期是"原样回来"。
+    QList<qwhmi::widgets::ControlBase*> doomed = targets_;
+    doomed.removeAll(nullptr);
+    if (doomed.isEmpty()) return;
+
+    // ★ 按 controls_ 的原始顺序重排,再交给命令。
+    //   targets_ 是从 scene_->selectedItems() 收集来的,而 Qt 给的 selectedItems()
+    //   是【按叠放(z)序倒序】—— 最后画的排最前。照这个顺序存快照,
+    //   撤销时 createLive() 就按倒序重新 addItem,控件的层级整个翻过来了:
+    //   撤销一次删除,画面上的前后关系跟删之前不一样。
+    //   controls_ 是"用户添加的顺序",跟层级一致,拿它当基准排序。
+    std::sort(doomed.begin(), doomed.end(),
+              [this](qwhmi::widgets::ControlBase* a, qwhmi::widgets::ControlBase* b) {
+                  return controls_.indexOf(a) < controls_.indexOf(b);
+              });
+
+    // 先清选中再销毁 —— destroyControl 里的 updateSelectionFrame 依赖 targets_,
+    // 反过来 onSceneSelectionChanged 又会在最后一批控件销毁后把 targets_ 清空。
+    // 让 scene 自己把选中态收敛,避免中途 frame 按已销毁控件算 union。
+    scene_->clearSelection();
+
+    // ★ 先 push 再销毁,顺序不能反:
+    //   QUndoStack::push 会立刻调 redo(),Remove 的 redo 就是"销毁" ——
+    //   如果我们先自己销毁,redo 里的 live_ 还是那批野指针,会二次 delete。
+    //   交给命令去做,这是 QUndoCommand 的标准用法。
+    undoStack_->push(qwhmi::editor::ControlListCommand::forDelete(
+        doomed, this, tr("删除 %1 个控件").arg(doomed.size())));
+    statusBar()->showMessage(tr("已删除 %1 个控件").arg(doomed.size()), 2000);
+}
+
+void EditorMainWindow::keyPressEvent(QKeyEvent* event) {
+    // ★ 只在画布有焦点时才接管。
+    //   PropertySheet 的 QLineEdit 正在输入时按 Ctrl+C,期望是"复制这段文字";
+    //   无条件吞掉就是"在属性框里按复制,画布也复制了,文字反而没复制上"。
+    if (view_ && view_->viewport()->hasFocus()) {
+        switch (event->key()) {
+        case Qt::Key_Delete:
+        case Qt::Key_Backspace:
+            onDelete();
+            event->accept();
+            return;
+        case Qt::Key_C:
+            if (event->matches(QKeySequence::Copy)) { onCopy(); event->accept(); return; }
+            break;
+        case Qt::Key_V:
+            if (event->matches(QKeySequence::Paste)) { onPaste(); event->accept(); return; }
+            break;
+        default:
+            break;
+        }
+    }
+    QMainWindow::keyPressEvent(event);
 }
 
 void EditorMainWindow::setTarget(qwhmi::widgets::ControlBase* target) {

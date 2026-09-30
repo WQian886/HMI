@@ -125,6 +125,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/editor/GroupHandleItem.cpp
     # ★ E.5(2026-09-29):运行时画布(主画面显示编辑器存的画面)
     ${HMI_SRC_DIR}/src/editor/RuntimeCanvas.cpp
+    # ★ E.7(2026-09-30):复制/粘贴/删除的 Undo
+    ${HMI_SRC_DIR}/src/editor/ControlListCommand.cpp
 )
 
 function(add_hmi_test test_name)
@@ -218,6 +220,10 @@ add_hmi_test(tst_EditorMainWindow)
 # ★ E.5(2026-09-29):运行时画布 —— 编辑器存的画面能不能在主画面显示、变量绑不绑得上。
 #   重点测两件以前【零覆盖】的事:JSON 字符串 → Variable* 绑定,以及绑不上时能被看见。
 add_hmi_test(tst_RuntimeCanvas)
+# ★ E.7(2026-09-30):复制 / 粘贴 / 删除 + 它们的 Undo(原为零覆盖)。
+#   重点是"删→撤→删→撤"连环 —— 命令存 JSON 快照,撤销造的是新对象,
+#   旧指针当场失效,残留一处在第二轮就会出事。
+add_hmi_test(tst_ControlClipboard)
 # ★ E.4d-follow-8(2026-09-29):对齐/等尺寸的 Undo(9 个动作,原为零覆盖)
 add_hmi_test(tst_GeometryUndo)
 # ★ E.4d-follow-9(2026-09-29):选中框【真的画出来了吗】—— 渲染到 QImage 数像素,

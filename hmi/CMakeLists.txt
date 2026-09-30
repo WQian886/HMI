@@ -71,6 +71,8 @@ set(SOURCES
     src/editor/PropertyChangeCommand.cpp
     # ★ E.4d-follow-8(2026-09-29):多控件几何 Undo(9 个对齐/等尺寸动作)
     src/editor/GeometryChangeCommand.cpp
+    # ★ E.7(2026-09-30):复制/粘贴/删除的 Undo(增删合一,存 JSON 快照)
+    src/editor/ControlListCommand.cpp
     # ★ E.2 周 11:EditorMainWindow 骨架
     src/editor/EditorMainWindow.cpp
     # ★ E.4a:控件调色板 PaletteWidget
@@ -141,6 +143,8 @@ set(HEADERS
     src/editor/PropertyChangeCommand.h
     # ★ E.4d-follow-8:多控件几何 Undo
     src/editor/GeometryChangeCommand.h
+    # ★ E.7:复制/粘贴/删除的 Undo
+    src/editor/ControlListCommand.h
     # ★ E.2 周 11:EditorMainWindow
     src/editor/EditorMainWindow.h
     # ★ E.4a:PaletteWidget

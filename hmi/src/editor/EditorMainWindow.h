@@ -17,6 +17,7 @@
 
 #include <QMainWindow>
 #include <QHash>
+#include <QJsonObject>     // ★ E.7:剪贴板存 JSON 快照(按值成员,要完整类型)
 #include <QList>
 #include <QRectF>
 #include "editor/SelectionFrameItem.h"   // ★ E.4d 续:public 访问器要返回完整类型
@@ -29,6 +30,7 @@ class QToolBar;
 class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
+class QKeyEvent;         // ★ E.7:keyPressEvent 覆写
 class Project;            // ★ E.3:文件菜单保存/加载用
 class VariableManager;    // ★ E.5:查变量做绑定
 
@@ -97,6 +99,21 @@ public:
     // ★ E.4a:从 PaletteWidget 拖入时调(测试也可直接调,绕过 QDropEvent 复杂度)
     void handlePaletteDrop(const QString& typeName, const QPointF& scenePos);
 
+    // ===== ★ E.7 复制 / 粘贴 / 删除 =====
+    //
+    // 【为什么 destroyControl 要单独一个 public 接口】removeControl 是"从画布
+    //   摘下来但不销毁" —— 它只服务 clearControls 那条"先全摘再逐个 delete"
+    //   的路径,中途不能 delete(还得遍历 controls_)。删除功能需要的是
+    //   "摘下来 + 立刻销毁 + 清干净所有指向它的状态",两者的收尾动作不同,
+    //   硬复用 removeControl 就会漏掉 handles / targets_ / 变量绑定三处。
+    //   ControlListCommand 只认这一个入口。
+    void destroyControl(qwhmi::widgets::ControlBase* c);
+
+    // ★ 把一批控件设为当前选中(多选用)。走 scene 的选中通道,
+    //   借 selectionChanged 把 targets_ / target_ / 选中框 / handle 全套对齐,
+    //   避免这里再手写一遍同步逻辑(那是 E.4d 最容易漏的地方)。
+    void selectControls(const QList<qwhmi::widgets::ControlBase*>& controls);
+
     // ★ E.5(2026-09-29):把 22 个控件类型全部实例化一次,填满 ControlBase 注册表。
     //   【为什么抽成 public static】原来这段"delete new XControl × 22"写在构造函数里,
     //   只有 new 过 EditorMainWindow 的人才跑过。E.5 加了 RuntimeCanvas —— 它也
@@ -119,6 +136,16 @@ public slots:
     void onSameWidth();
     void onSameHeight();
     void onSameSize();
+
+    // ★ E.7 复制 / 粘贴 / 删除(Ctrl+C / Ctrl+V / Delete)
+    //   public slots 让测试能直接调,跟 9 个对齐动作一个待遇。
+    //   三个都是幂等友好的:无选中 / 空剪贴板时静默返回,不弹窗不报错。
+    void onCopy();
+    void onPaste();
+    void onDelete();
+
+    // ★ E.7 测试/调试用:当前剪贴板里的控件快照
+    QList<QJsonObject> clipboard() const { return clipboard_; }
 
 private slots:
     void onSceneSelectionChanged();
@@ -173,6 +200,12 @@ private:
     void installSelectionFrame();   // 按当前 targets_ 安装
     void removeSelectionFrame();
     void updateSelectionFrame();    // 选中变化或 target 缩放/移动后重摆
+    // ★ E.7:键盘事件钩子 —— Delete / Ctrl+C / Ctrl+V 走这里而不是 QAction。
+    //   原因:焦点在画布时 QAction 的快捷键也能触发,但 PropertySheet 的
+    //   QLineEdit 正在输入时按 Ctrl+C 应该是"复制文字",而 QAction 是窗口级的,
+    //   会把画布复制一起抢走。eventFilter 能判"焦点在不在 view_ 的 viewport 上"。
+    void keyPressEvent(QKeyEvent* event) override;
+
     // ★ E.4d-follow-10(2026-09-29):旋转后要刷两样东西 ——
     //   ① 选中框(rect 尺寸随 sceneBoundingRect 变)
     //   ② handle 光标(原来在左边的点转 90° 后到了上边,光标要跟着换)
@@ -184,6 +217,14 @@ private:
     GroupHandleItem*   groupHandle_  = nullptr;   // ★ E.4d 续-3:多选组 handle 容器
 
     QList<qwhmi::widgets::ControlBase*> controls_;
+    // ★ E.7:剪贴板内容 —— 存 JSON 快照而不是 ControlBase*(同 ControlListCommand
+    //   的理由:剪贴板可能活得比控件久,存指针就是等着悬空)。
+    //   为什么不走 QApplication::clipboard():系统剪贴板是进程全局的,
+    //   离屏测试里读不到也不该读;编辑器内这份私有的够用,且不会跟别的程序串味。
+    QList<QJsonObject> clipboard_;
+    // ★ E.7:连续粘贴计数 —— 让第 N 次粘贴偏移 N×10px,否则多份完全重叠。
+    //   复制时归零(换了内容就该从头偏移),撤销时也归零(撤销后剪贴板语义重置)。
+    int              pasteCount_ = 0;
     qwhmi::widgets::ControlBase* target_ = nullptr;       // 单选 target(多选时为 nullptr)
     QList<qwhmi::widgets::ControlBase*> targets_;         // ★ E.4d 多选列表(包含单选)
     QPointF          multiMoveAnchor_ = QPointF();         // ★ E.4d:多选移动的上一帧 scene 坐标

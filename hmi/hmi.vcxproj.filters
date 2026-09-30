@@ -585,6 +585,13 @@
     <ClCompile Include="src\editor\GeometryChangeCommand.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ E.7(2026-09-30):复制/粘贴/删除的 Undo(无 Q_OBJECT,故无 QtMoc 条目) -->
+    <ClInclude Include="src\editor\ControlListCommand.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\editor\ControlListCommand.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器 -->
     <QtMoc Include="src\editor\SizeEditor.h">
       <Filter>Header Files</Filter>

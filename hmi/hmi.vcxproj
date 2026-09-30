@@ -338,6 +338,11 @@
           加了 QtMoc 反而会生成一个空的 moc 文件。 -->
     <ClInclude Include="src\editor\GeometryChangeCommand.h" />
     <ClCompile Include="src\editor\GeometryChangeCommand.cpp" />
+    <!-- ★ E.7(2026-09-30):复制/粘贴/删除的 Undo。
+         【不需要 QtMoc 条目】ControlListCommand 没有 Q_OBJECT ——
+          跟 GeometryChangeCommand 同理,只继承 QUndoCommand。 -->
+    <ClInclude Include="src\editor\ControlListCommand.h" />
+    <ClCompile Include="src\editor\ControlListCommand.cpp" />
     <!-- ★ E.4c(2026-09-22):QSizeF/QPointF 复合编辑器 -->
     <QtMoc Include="src\editor\SizeEditor.h" />
     <ClInclude Include="src\editor\SizeEditor.h" />
