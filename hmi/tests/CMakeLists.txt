@@ -180,6 +180,8 @@ add_hmi_test(tst_AlarmRecorder)
 #   【为什么单独建】ThresholdAlarmChecker 是"报警该不该触发"的决策点,
 #   全仓没有任何测试碰过它 —— minDurationMs 防抖从来没被一条用例守过。
 add_hmi_test(tst_ThresholdAlarmChecker)
+# ★ F2-c(2026-09-30):报警屏蔽(shelve)—— 必须可查、可撤销、可见
+add_hmi_test(tst_AlarmShelve)
 # 阶段 D · D.4 CSV 导出
 add_hmi_test(tst_CsvExporter)
 # 阶段 D · D.6 派生表达式解析

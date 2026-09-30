@@ -4,6 +4,7 @@
 #include "auth/AuditLog.h"      // ★ B5(2026-09-17):确认报警留痕
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
+#include "logging/Logging.h"    // ★ F2-c:屏蔽事件走 hmiAlarm 分类
 
 AlarmManager::AlarmManager(QObject* parent) : QObject(parent) {}
 AlarmManager::~AlarmManager() = default;
@@ -86,6 +87,17 @@ void AlarmManager::clearAll() {
         }
         checkers_.clear();
     }
+    // ★ F2-c:屏蔽名单必须一起清。
+    //   换工程(Project::loadFromFile 开头就调 clearAll)时若留着上个工程的屏蔽名单,
+    //   新工程一开局就可能有报警处于静默状态 —— 而且新工程里同名 checker
+    //   很可能压根不是被屏蔽的那条,属于最典型的"藏起来"。
+    //   逐个发 shelveChanged(false) 而不是静默 clear,
+    //   好让界面上"N 条被屏蔽"的数字归零。
+    if (!shelved_.isEmpty()) {
+        const QStringList names = shelvedNames();
+        shelved_.clear();
+        for (const QString& n : names) emit shelveChanged(n, false);
+    }
     emit allCleared();
 }
 
@@ -107,6 +119,17 @@ int AlarmManager::acknowledgeAll() {
 //   【取舍】保留首次触发时间,事故分析更准;重复触发只更新 triggerValue
 //   ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):改用 ID 匹配,避免同名报警错配
 void AlarmManager::onCheckerTriggered(const Alarm& alarm) {
+    // ★ F2-c:屏蔽拦截 —— 所有 checker 报警都从这里过,是唯一的收口点。
+    //   【为什么不能放在各 Checker 里】那样只有 ThresholdAlarmChecker 受管,
+    //   写失败报警(WriteFailChecker)等类别照样会响 —— 屏蔽就漏了。
+    //   【注意】检测器照常在算、传感器照常在越线,这里只是不让它进系统。
+    //   【必须可见】这次拦截【不】发任何"我藏了一条"的通知 ——
+    //   那样每 100ms 一次 rawRead 会刷屏。改为在 shelve() 时就固定可见:
+    //   shelveCount() + shelveChanged 信号,界面常显"N 条报警被屏蔽"。
+    if (shelved_.contains(alarm.name)) {
+        qCDebug(hmiAlarm) << "[alarm] 报警已被屏蔽,本次触发不进入系统 name=" << alarm.name;
+        return;
+    }
     auto it = activeAlarms_.find(alarm.id_);
     if (it != activeAlarms_.end()) {
         it->triggerValue = alarm.triggerValue;  // 更新当前值
@@ -114,6 +137,39 @@ void AlarmManager::onCheckerTriggered(const Alarm& alarm) {
     }
     activeAlarms_.insert(alarm.id_, alarm);
     emit alarmTriggered(alarm);
+}
+
+// ★ F2-c:屏蔽 / 取消屏蔽
+//
+// 【为什么这里要查 checkers_】shelve 一个没注册过的名字必须失败。
+//   否则工程师以为自己屏蔽了"压力高",实际那条报警根本没配,
+//   或者配的名字拼错了 —— 界面显示"已屏蔽",实际什么都没发生。
+//   这跟"静默失败"是同一类,只是方向相反:静默没发生 vs 静默发生。
+bool AlarmManager::shelve(const QString& name) {
+    if (name.isEmpty() || !checkers_.contains(name)) return false;
+    // 幂等:已经屏蔽了就不重复计数、不重复发信号
+    if (shelved_.contains(name)) return true;
+    shelved_.insert(name);
+    qCInfo(hmiAlarm) << "[alarm] 报警被屏蔽 name=" << name;
+    emit shelveChanged(name, true);
+    return true;
+}
+
+bool AlarmManager::unshelve(const QString& name) {
+    // ★ 语义分层,两种"没成功"要分开:
+    //   ① 名字没注册过 → false(和 shelve 同理,不能让操作员以为撤了)
+    //   ② 已注册但当前没被屏蔽 → true(幂等 no-op,调用方不必先查 isShelved)
+    //   混成一种返回的话,UI 就分不清"报警名写错了"和"本来就没屏蔽"。
+    if (name.isEmpty() || !checkers_.contains(name)) return false;
+    if (!shelved_.contains(name)) return true;
+    shelved_.remove(name);
+    qCInfo(hmiAlarm) << "[alarm] 取消屏蔽 name=" << name;
+    emit shelveChanged(name, false);
+    return true;
+}
+
+bool AlarmManager::isShelved(const QString& name) const {
+    return shelved_.contains(name);
 }
 
 // ★ F1(2026-09-30)重写:恢复时【先发信号再 erase】

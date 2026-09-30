@@ -7,6 +7,8 @@
 #include <QObject>
 #include <QHash>
 #include <QList>
+#include <QSet>
+#include <QStringList>
 #include "Alarm.h"
 
 class AlarmManager : public QObject {
@@ -81,6 +83,54 @@ public:
     // 5.5 阶段接:复位按钮 → 清所有 acknowledged 的报警(留作工程师手动清,5.5 不调用)
     void clearAll();
 
+    // ============================================================
+    // ★ F2-c(2026-09-30):报警屏蔽(shelve / inhibit)
+    //
+    // 【解决什么】滞回压的是"报太多";屏蔽解决的是另一类 ——
+    //   "这条报警现在没意义,别烦我"。典型场景:传感器检修中、
+    //   某台泵本来就不投用,它的报警纯属噪声。
+    //
+    // 【为什么放在 AlarmManager 而不是 Checker】
+    //   Checker 只知道"我检测到了",它不知道"这条现在该不该报"。
+    //   放 Manager 层有三个好处:
+    //     ① 对所有 Checker 类别一致(写失败报警 WriteFailChecker 等同样受管,
+    //        放 ThresholdAlarmChecker 里就只有阈值报警能被屏蔽)
+    //     ② 状态可查/可撤销/可枚举 —— 界面能显示"N 条被屏蔽"
+    //     ③ 换工程时 clearAll 一次清干净
+    //
+    // 【本项目反复吃的那类静默失败,在屏蔽上尤其致命】
+    //   如果"被屏蔽的 checker 不触发"是唯一表现,那就是:
+    //     屏幕上没有行、没有计数、没有日志 —— 操作员会以为"这次真没报警",
+    //     而实际是【被我们藏起来了】。
+    //   更糟:检修结束忘了取消屏蔽 → 传感器真的坏了 → 依然没有报警。
+    //   设备坏了而界面一片安静,这是能出人命的。
+    //   所以硬约束三条:
+    //     ① shelveCount() 随时可查(界面据此显示"N 条报警被屏蔽")
+    //     ② shelveChanged 信号让界面跟着变,不会永远显示 0
+    //     ③ 屏蔽必须能撤销(unshelve),不是单向门
+    //
+    // 【为什么不做"自动到期"】
+    //   工业上常见"屏蔽 8 小时自动恢复"。本次【不做】——
+    //   它需要一台常驻定时器 + 到期语义 + 跨重启策略,而当前项目连
+    //   报警编辑 UI 都还没有(配置只能手改 JSON),先落"手动可撤销"这一半,
+    //   免得做出一个"以为会自己恢复、实际不会"的半成品。
+    //   风险由"界面常显屏蔽数 + 审计留痕"兜住,而不是靠一个不会到来的自动恢复。
+    //
+    // 返回 false:名字为空 / 没注册过这个 checker
+    // 重复 shelve 同一名字返回 true 但不重复计数、不重复发信号(幂等)。
+    bool shelve(const QString& name);
+    bool unshelve(const QString& name);
+    bool isShelved(const QString& name) const;
+    int  shelveCount() const { return shelved_.size(); }
+    // ★ QSet 没有 keys() —— 返回 values() 并逐个转 QString。
+    //   (QHash 才是 keys();这个错是我写的时候顺手带过来的,编译器当场抓住。)
+    QStringList shelvedNames() const {
+        QStringList out;
+        out.reserve(shelved_.size());
+        for (const QString& n : shelved_) out << n;
+        return out;
+    }
+
 signals:
     // 报警触发 → 5.3 接 tryTransition + 5.4 接 UI
     void alarmTriggered(const Alarm& alarm);
@@ -95,6 +145,14 @@ signals:
     void alarmRecovered(qint64 id, const Alarm& recovered);
     // 全部清除 → 5.5 UI(清空列表)
     void allCleared();
+
+    // ★ F2-c:某条报警的屏蔽状态变了。
+    //   【为什么不靠轮询 shelveCount()】界面不轮询这个数 ——
+    //   屏蔽动作发生在工程师那边,操作员的屏幕上必须自己跳出来。
+    //   没有这个信号的话,界面会一直显示"N 条被屏蔽:0",
+    //   而实际有人已经屏蔽了两条 —— 那就正是本设计要防的"藏起来"。
+    //   shelved=true 表示现在处于屏蔽态。
+    void shelveChanged(const QString& name, bool shelved);
 
 private slots:
     void onCheckerTriggered(const Alarm& alarm);
@@ -112,4 +170,10 @@ private:
     //   【现在为什么需要】不是 UI 需要,是【数据落库需要】——
     //   AlarmRecorder 要在恢复的那一刻拿到完整记录,否则历史查询结果是残缺的。
     QList<Alarm>                  archived_;
+
+    // ★ F2-c:被屏蔽的 checker 名字集合。
+    //   【为什么用名字而不是 AlarmChecker*】clearAll() 会 delete 所有 checker,
+    //   存指针就得先清理这些悬空项;存名字则 clearAll 清空 set 即可,
+    //   而且和 checkers_ 的 key 是同一套命名,排查时好对照。
+    QSet<QString>                 shelved_;
 };
