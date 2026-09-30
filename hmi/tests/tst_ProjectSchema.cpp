@@ -17,6 +17,7 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QDir>
+#include <QTemporaryDir>
 #include "Project.h"
 #include "VariableManager.h"
 #include "AlarmManager.h"
@@ -224,9 +225,15 @@ void TestProjectSchema::saveToFile_writesSchemaVersion2() {
     PollScheduler ps(&vm, nullptr);
     Project p(&vm, &am, &acm, &ps, nullptr);
 
-    // 用固定路径(避免 QTemporaryFile 和 QSaveFile 冲突)
-    const QString path = "E:/qianwie/hmi/hmi/tests/build/tst_saveToFile_writesSchemaVersion2.json";
-    QFile::remove(path);  // 清掉旧文件
+    // ★ 原来这里写死 "E:/qianwie/hmi/hmi/tests/build/xxx.json",而 build_tests.ps1
+    //   实际用的构建目录是 build_ninja/ —— build/ 根本不存在,saveToFile 落不了盘,
+    //   这条用例【在任何机器上都是红的】(换台电脑连路径都对不上)。
+    //   改用 QTemporaryDir:它是【目录】,不是已存在的文件,所以不跟 QSaveFile
+    //   抢同一个文件名(原先的注释担心 QTemporaryFile 冲突,QTemporaryDir 没这问题);
+    //   析构时自动连目录一起删,不用自己收尾。
+    QTemporaryDir dir;
+    QVERIFY2(dir.isValid(), qPrintable(dir.errorString()));
+    const QString path = dir.filePath("tst_saveToFile_writesSchemaVersion2.json");
 
     QVERIFY(p.saveToFile(path));
 
@@ -240,8 +247,6 @@ void TestProjectSchema::saveToFile_writesSchemaVersion2() {
     QCOMPARE(root["schema_version"].toInt(), 3);          // ★ E.3 bump:2 → 3
     QVERIFY(root.contains("plcs"));
     QVERIFY(!root.contains("communications"));             // ← 不再写老字段
-
-    QFile::remove(path);  // 清理
 }
 
 void TestProjectSchema::saveToFile_writesPlcsArrayNotCommunications() {
@@ -251,8 +256,10 @@ void TestProjectSchema::saveToFile_writesPlcsArrayNotCommunications() {
     PollScheduler ps(&vm, nullptr);
     Project p(&vm, &am, &acm, &ps, nullptr);
 
-    const QString path = "E:/qianwie/hmi/hmi/tests/build/tst_saveToFile_writesPlcsArrayNotCommunications.json";
-    QFile::remove(path);
+    // 同上:临时目录,不写死盘符
+    QTemporaryDir dir;
+    QVERIFY2(dir.isValid(), qPrintable(dir.errorString()));
+    const QString path = dir.filePath("tst_saveToFile_writesPlcsArrayNotCommunications.json");
 
     QVERIFY(p.saveToFile(path));
 
@@ -267,8 +274,6 @@ void TestProjectSchema::saveToFile_writesPlcsArrayNotCommunications() {
     QJsonObject plc0 = plcsArr[0].toObject();
     QCOMPARE(plc0["id"].toString(), QStringLiteral("plc1"));
     QCOMPARE(plc0["protocol"].toString(), QStringLiteral("modbus_tcp"));
-
-    QFile::remove(path);
 }
 
 // ============================================================================
