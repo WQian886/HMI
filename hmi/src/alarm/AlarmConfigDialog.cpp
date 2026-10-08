@@ -14,6 +14,7 @@
 
 #include "../../AlarmManager.h"
 #include "../../JsonSerializer.h"
+#include "../../Project.h"
 #include "../../ThresholdAlarmChecker.h"
 #include "../../VariableManager.h"
 #include "../auth/CurrentUser.h"
@@ -23,6 +24,7 @@
 #include <QClipboard>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -32,6 +34,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSet>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTextEdit>
@@ -134,6 +137,7 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     btnRow->addWidget(addBtn_);
     btnRow->addWidget(removeBtn_);
     btnRow->addWidget(exportBtn_);
+    btnRow->addWidget(saveBtn_);
     btnRow->addWidget(infoLabel_);
     btnRow->addStretch();
     btnRow->addWidget(closeBtn_);
@@ -148,6 +152,7 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     // ---- 信号 ----
     connect(closeBtn_,  &QPushButton::clicked, this, &QDialog::reject);
     connect(exportBtn_, &QPushButton::clicked, this, &AlarmConfigDialog::onExport);
+    connect(saveBtn_,   &QPushButton::clicked, this, &AlarmConfigDialog::onSaveToProject);
     connect(addBtn_,    &QPushButton::clicked, this, &AlarmConfigDialog::onAdd);
     connect(removeBtn_, &QPushButton::clicked, this, &AlarmConfigDialog::onRemove);
 
@@ -172,6 +177,28 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
         onApplyFieldEdits();
     });
 
+    // 名字改了要回写草稿,否则导出时还是占位名。
+    //
+    // ★ QTableWidgetItem 不是 QObject,【没有 changed 信号】——
+    //   (这是本文件第一版的编译错误,写的时候想当然以为有。)
+    //   正确做法是连 QTableWidget::itemChanged(QTableWidgetItem*),
+    //   它给的是 item 指针,要自己反查行号。
+    //
+    // ★ 为什么必须连在这里、而不是 onAdd() 里:
+    //   上一版把它写在 onAdd() 里,于是每点一次"新增"就多挂一个 lambda。
+    //   点 N 次 = N 个处理器,每次改名字都跑 N 遍 —— 越用越慢,
+    //   而且这 N 个 lambda 全部捕获 this,dialog 活着的期间一直挂着。
+    //   连一次就够。
+    connect(table_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
+        // 程序性填表也会发这个信号 —— 那时不该回写,否则 fillFormFromRow
+        // 里的 blockSignals 只挡住了表单,挡不住表格。
+        if (suppressItemChanged_) return;
+        if (!item || item->column() != kColName) return;
+        const int row = table_->row(item);
+        if (row < 0 || row >= rows_.size()) return;
+        rows_[row].name = item->text();
+    });
+
     reloadFromManager();
     setFormEnabled(false);   // 还没选中行
 }
@@ -183,14 +210,29 @@ AlarmConfigDialog::~AlarmConfigDialog() = default;
 // ============================================================================
 
 void AlarmConfigDialog::setupTable() {
+    // ★ objectName 不是给用户看的,是给测试找控件用的。
+    //   没有它,测试只能靠 findChildren 按顺序猜哪个是哪个 ——
+    //   猜错就断言到别的行上,而测试还是绿的(同 tst_AlarmConfigDialog.h 头注释
+    //   里"不反射 private 成员"同一个坑的另一面)。
+    table_->setObjectName(QStringLiteral("alarmConfigTable"));
     table_->setColumnCount(8);
     table_->setHorizontalHeaderLabels(QStringList()
         << tr("报警名") << tr("关联变量") << tr("等级") << tr("方向")
         << tr("阈值") << tr("最短持续(ms)") << tr("滞回") << tr("已屏蔽"));
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setStretchLastSection(true);
-    // 只读:所有修改走下面的表单,避免半截的单元格编辑改坏草稿
-    table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    // ★ 名字必须能双击改。
+    //   【上一版的真实缺陷】这里设的是 NoEditTriggers,只在 onAdd 里给
+    //   新增行的 nameItem 单独补了个 Qt::ItemIsEditable 标志 ——
+    //   于是【从工程文件读进来的所有报警,名字都改不了】,
+    //   只有本次会话新加的那条能改。界面上没有任何提示,
+    //   用户只能看着自己的编辑不生效(2026-10-08 用户实测反馈)。
+    //
+    //   现在改成"视图允许编辑 + 只给名字列留 ItemIsEditable",
+    //   其余列在填表时显式清掉该标志(见 reloadFromManager 的 put())。
+    table_->setEditTriggers(QAbstractItemView::DoubleClicked
+                            | QAbstractItemView::EditKeyPressed
+                            | QAbstractItemView::AnyKeyPressed);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
 }
@@ -199,6 +241,9 @@ void AlarmConfigDialog::setupForm() {
     varCombo_ = new QComboBox(this);
     levelCombo_ = new QComboBox(this);
     dirCombo_  = new QComboBox(this);
+    varCombo_->setObjectName(QStringLiteral("alarmConfigVarCombo"));
+    levelCombo_->setObjectName(QStringLiteral("alarmConfigLevelCombo"));
+    dirCombo_->setObjectName(QStringLiteral("alarmConfigDirCombo"));
 
     for (const LevelItem& lv : kLevels) levelCombo_->addItem(tr(lv.text), QString::fromLatin1(lv.key));
     for (const DirItem& d : kDirections) dirCombo_->addItem(tr(d.text), QString::fromLatin1(d.key));
@@ -210,17 +255,20 @@ void AlarmConfigDialog::setupForm() {
     thresholdSpin_ = new QDoubleSpinBox(this);
     thresholdSpin_->setRange(-kMaxMagnitude, kMaxMagnitude);
     thresholdSpin_->setDecimals(3);
+    thresholdSpin_->setObjectName(QStringLiteral("alarmConfigThresholdSpin"));
     thresholdSpin_->setToolTip(tr("Above 方向:值 > 阈值触发。Below 方向:值 < 阈值触发。"));
 
     minDurSpin_ = new QSpinBox(this);
     minDurSpin_->setRange(0, 600000);
     minDurSpin_->setSingleStep(100);
     minDurSpin_->setValue(500);
+    minDurSpin_->setObjectName(QStringLiteral("alarmConfigMinDurSpin"));
     minDurSpin_->setToolTip(tr("越线持续超过这个毫秒数才报,用来滤掉快速抖动。0 = 不防抖。"));
 
     hysteresisSpin_ = new QDoubleSpinBox(this);
     hysteresisSpin_->setRange(0.0, kMaxMagnitude);
     hysteresisSpin_->setDecimals(3);
+    hysteresisSpin_->setObjectName(QStringLiteral("alarmConfigHysteresisSpin"));
     // 【tooltip 为什么写这么长】
     //   hysteresis 和 threshold 量纲相同但语义相反:threshold 是"越界点",
     //   hysteresis 是"死区宽度"。用户很容易以为把 hysteresis 填成 80
@@ -250,7 +298,12 @@ void AlarmConfigDialog::setupButtons() {
     addBtn_    = new QPushButton(tr("新增报警"), this);
     removeBtn_ = new QPushButton(tr("删除选中"), this);
     exportBtn_ = new QPushButton(tr("导出草稿 JSON"), this);
+    saveBtn_   = new QPushButton(tr("保存到工程文件"), this);
     closeBtn_  = new QPushButton(tr("关闭"), this);
+    addBtn_->setObjectName(QStringLiteral("alarmConfigAddBtn"));
+    removeBtn_->setObjectName(QStringLiteral("alarmConfigRemoveBtn"));
+    exportBtn_->setObjectName(QStringLiteral("alarmConfigExportBtn"));
+    closeBtn_->setObjectName(QStringLiteral("alarmConfigCloseBtn"));
 
     addBtn_->setToolTip(tr("在草稿里加一条新报警。\n"
                             "本对话框不改动运行中的报警 —— 应用是 F4-b 的活。"));
@@ -258,6 +311,11 @@ void AlarmConfigDialog::setupButtons() {
                               "同样不改动运行中的报警。"));
     exportBtn_->setToolTip(tr("把当前草稿导出成 JSON。\n"
                               "字段与 Project::saveToFile 写入工程文件时完全一致。"));
+    // ★ 这是真正把草稿落地的按钮 —— 导出只是"看一眼 + 复制到剪贴板"。
+    saveBtn_->setObjectName(QStringLiteral("alarmConfigSaveBtn"));
+    saveBtn_->setToolTip(tr("把当前草稿写进已有工程文件的 alarms 段。\n"
+                            "只改报警,变量/画面/联动一律不动。\n"
+                            "运行中的报警不受影响 —— 要生效需重新载入工程。"));
 }
 
 // ============================================================================
@@ -310,8 +368,15 @@ void AlarmConfigDialog::reloadFromManager() {
     table_->setRowCount(rows_.size());
     for (int i = 0; i < rows_.size(); ++i) {
         const AlarmConfigRow& r = rows_.at(i);
+        // ★ 只有名字列可编辑,其余列一律清掉 ItemIsEditable。
+        //   表格是"允许编辑"的了(见 setupTable),所以标志必须逐格收紧 ——
+        //   否则用户能直接把"阈值"那一格改成乱码,而那个值不会进草稿。
         auto put = [&](int col, const QString& text) {
             auto* item = new QTableWidgetItem(text);
+            Qt::ItemFlags f = item->flags();
+            f &= ~Qt::ItemIsEditable;                 // 默认全部只读
+            if (col == kColName && r.editable) f |= Qt::ItemIsEditable;
+            item->setFlags(f);
             if (!r.editable) item->setForeground(Qt::gray);
             table_->setItem(i, col, item);
         };
@@ -448,48 +513,76 @@ void AlarmConfigDialog::onApplyFieldEdits() {
 // 增 / 删 / 导出
 // ============================================================================
 
+// 找一个没被占用的草稿名:"新报警"、"新报警 2"、"新报警 3"……
+// 【为什么要唯一】名字是 checkers_ 的 key。三条同名报警导进工程文件后,
+//   后者会覆盖前者,而【不会报任何错】—— 存的时候三条,读回来一条。
+//   静默丢失比报错难查得多,所以宁可名字丑一点也不能重名。
+QString AlarmConfigDialog::nextFreeDraftName() const {
+    const QString base = tr("新报警");
+    QSet<QString> used;
+    for (const AlarmConfigRow& r : rows_) used.insert(r.name);
+
+    if (!used.contains(base)) return base;
+    for (int i = 2; i < 10000; ++i) {
+        const QString candidate = QStringLiteral("%1 %2").arg(base).arg(i);
+        if (!used.contains(candidate)) return candidate;
+    }
+    // 理论上到不了这里(要有一万个同名草稿)。返回一个一定没被用过的,
+    // 宁可名字难看也不能重名。
+    return QStringLiteral("%1 %2").arg(base).arg(rows_.size());
+}
+
 void AlarmConfigDialog::onAdd() {
     AlarmConfigRow row;
-    // 默认名给一个明确的占位,而不是 "NewAlarm" —— 用户看到
-    // "新报警" 就知道这是待填的,看到 "NewAlarm" 可能以为已经是正式的了。
-    row.name = tr("新报警");
-    if (varCombo_->count() > 0 && varCombo_->isEnabled()) {
-        row.variableName = varCombo_->currentText();
+    // ★ 名字必须【唯一】,不能每条都叫"新报警"。
+    //   名字是 AlarmManager 里 checkers_ 的 key(见 AlarmManager.h 的 shelve/find),
+    //   草稿导出后 Project::loadFromFile 也按它建 checker。
+    //   三条同名 → 加载时后者覆盖前者 → 存的时候看着三条,读回来只剩一条,
+    //   而且【不报错】。这是最该避免的一类静默丢失。
+    //   所以这里取第一个没被占用的编号,用户看到 "新报警 2" 就知道是待填的第二条。
+    row.name = nextFreeDraftName();
+    // ★ 新行必须带上一个【真实的】变量名。
+    //   【为什么不能靠 isEnabled()】varCombo_ 的 enabled 状态跟着"有没有选中行"走
+    //   (setFormEnabled)。点新增时恰好没有选中行 → 组合框是灰的 → isEnabled() 为假
+    //   → 新行的 variableName 永远是空的。
+    //   而空变量名的报警一旦存进工程文件,Project.cpp:211 会让【整个工程打不开】。
+    //   所以这里看的是"有没有变量可选"(count),不是"现在能不能操作"。
+    //
+    //   【为什么不能留空让用户自己填】其实可以,但新增的行立刻就处于
+    //   "存不下去"的状态,用户会以为功能坏了。给个默认值,
+    //   至少新增这条路是通的;真要换,选中行后在表单里改。
+    if (varCombo_->count() > 0) {
+        const QString candidate = varCombo_->currentText();
+        if (!candidate.isEmpty() && !candidate.startsWith('(')) {
+            row.variableName = candidate;
+        }
     }
     rows_.append(row);
 
     const int r = rows_.size() - 1;
-    auto* nameItem = new QTableWidgetItem(row.name);
-    // 名字必须双击改 —— 它是 CheckerConfig 之外的部分,表单里没有它的位置
-    nameItem->setFlags(nameItem->flags() | Qt::ItemIsEditable);
 
     suppressItemChanged_ = true;   // 下面的 setItem 全是程序性的
     table_->insertRow(r);
-    table_->setItem(r, kColName,       nameItem);
-    table_->setItem(r, kColVariable,   new QTableWidgetItem(row.variableName));
-    table_->setItem(r, kColLevel,      new QTableWidgetItem(levelDisplayName(row.level)));
-    table_->setItem(r, kColDir,        new QTableWidgetItem(dirDisplayName(row.direction)));
-    table_->setItem(r, kColThreshold,  new QTableWidgetItem(QString::number(row.threshold, 'g', 6)));
-    table_->setItem(r, kColMinDur,     new QTableWidgetItem(QString::number(row.minDurationMs)));
-    table_->setItem(r, kColHysteresis, new QTableWidgetItem(QString::number(row.hysteresis, 'g', 6)));
-    table_->setItem(r, kColShelved,    new QTableWidgetItem(QString()));
+    // ★ 只有名字可编辑 —— 与 reloadFromManager 的 put() 保持同一套规则。
+    //   表格是"允许编辑"的,标志必须逐格收紧,否则用户能把阈值那格改成乱码,
+    //   而那个值【不会】进草稿 —— 看着改了,导出还是老值。
+    auto put = [&](int col, const QString& text) {
+        auto* item = new QTableWidgetItem(text);
+        Qt::ItemFlags f = item->flags();
+        f &= ~Qt::ItemIsEditable;
+        if (col == kColName) f |= Qt::ItemIsEditable;
+        item->setFlags(f);
+        table_->setItem(r, col, item);
+    };
+    put(kColName,       row.name);
+    put(kColVariable,   row.variableName);
+    put(kColLevel,      levelDisplayName(row.level));
+    put(kColDir,        dirDisplayName(row.direction));
+    put(kColThreshold,  QString::number(row.threshold, 'g', 6));
+    put(kColMinDur,     QString::number(row.minDurationMs));
+    put(kColHysteresis, QString::number(row.hysteresis, 'g', 6));
+    put(kColShelved,    QString());
     suppressItemChanged_ = false;
-
-    // 名字改了要回写草稿,否则导出时还是占位名。
-    //
-    // ★ QTableWidgetItem 不是 QObject,【没有 changed 信号】——
-    //   (这是本文件第一版的编译错误,写的时候想当然以为有。)
-    //   正确做法是连 QTableWidget::itemChanged(QTableWidgetItem*),
-    //   它给的是 item 指针,要自己反查行号。
-    connect(table_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
-        // 程序性填表也会发这个信号 —— 那时不该回写,否则 fillFormFromRow
-        // 里的 blockSignals 只挡住了表单,挡不住表格。
-        if (suppressItemChanged_) return;
-        if (!item || item->column() != kColName) return;
-        const int row = table_->row(item);
-        if (row < 0 || row >= rows_.size()) return;
-        rows_[row].name = item->text();
-    });
 
     table_->selectRow(r);
     fillFormFromRow(r);
@@ -538,6 +631,92 @@ void AlarmConfigDialog::onExport() {
         clip->setText(json);
     }
     qCDebug(hmiAlarm) << "[F4-a] 导出草稿 JSON,共" << rows_.size() << "条,已复制到剪贴板";
+}
+
+// ============================================================================
+// ★ F4-c:落地
+// ============================================================================
+
+bool AlarmConfigDialog::validateDraft(QString* errorOut) const {
+    // 先让 Project 查名字(空 / 重名)。它是 static,纯 JSON 层面就能查。
+    const QJsonArray arr = QJsonDocument::fromJson(exportDraftToJson().toUtf8())
+                               .object()["alarms"].toArray();
+    QString nameErr;
+    if (!Project::validateAlarmsArray(arr, &nameErr)) {
+        if (errorOut) *errorOut = nameErr;
+        return false;
+    }
+
+    // 再查变量存在性 —— 这一条 static 方法查不了(要 VariableManager)。
+    // ★ 为什么这条最要紧:Project.cpp:211 加载时遇到不存在的 variable 会
+    //   return false,整个工程文件【打不开】。不是"这一条报警有问题",
+    //   是用户的画面、变量、联动全部一起打不开。
+    if (varMgr_) {
+        for (int i = 0; i < rows_.size(); ++i) {
+            const AlarmConfigRow& r = rows_.at(i);
+            if (!r.editable) continue;
+            if (r.variableName.isEmpty() || !varMgr_->findVariable(r.variableName)) {
+                if (errorOut) {
+                    *errorOut = tr("报警 \"%1\" 没有关联到有效变量 —— %2\n\n"
+                                   "工程文件里报警引用了不存在的变量会导致【整个工程打不开】,"
+                                   "所以这里必须先拦下来。")
+                                    .arg(r.name,
+                                         r.variableName.isEmpty()
+                                             ? tr("关联变量是空的")
+                                             : tr("变量 \"%1\" 在工程里不存在").arg(r.variableName));
+                }
+                return false;
+            }
+        }
+    }
+
+    if (errorOut) errorOut->clear();
+    return true;
+}
+
+bool AlarmConfigDialog::saveDraftToProjectFile(const QString& path, QString* errorOut) {
+    if (path.isEmpty()) {
+        if (errorOut) *errorOut = tr("没有指定工程文件路径");
+        return false;
+    }
+
+    // 存之前先校验。坏草稿绝不能落盘 ——
+    // 落下去的不是"报警配错了",而是"工程打不开了"。
+    QString err;
+    if (!validateDraft(&err)) {
+        if (errorOut) *errorOut = err;
+        return false;
+    }
+
+    const QJsonArray arr = QJsonDocument::fromJson(exportDraftToJson().toUtf8())
+                               .object()["alarms"].toArray();
+    return Project::replaceAlarmsInFile(path, arr, errorOut);
+}
+
+void AlarmConfigDialog::onSaveToProject() {
+    // QFileDialog 在 offscreen 下没法交互,所以真正的落盘走
+    // saveDraftToProjectFile(路径),它才是被测的那一层。
+    // ★ 注意这里【不】调 reloadFromManager():草稿已经落盘,
+    //   而重读会把【运行中】的旧状态灌回来,等于自己把刚存的东西抹掉。
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("把报警配置存进工程文件"), QString(),
+        tr("HMI 工程文件 (*.json);;所有文件 (*.*)"));
+    if (path.isEmpty()) return;   // 用户按取消
+
+    QString err;
+    if (saveDraftToProjectFile(path, &err)) {
+        QMessageBox::information(
+            this, tr("已保存"),
+            tr("报警配置已写入:\n%1\n\n"
+               "只替换了 alarms 段,变量/画面/联动都没动。\n\n"
+               "注意:运行中的报警【不受影响】。要让新配置生效,"
+               "请在主界面重新载入这个工程文件。").arg(path));
+        qCDebug(hmiAlarm) << "[F4-c] 报警草稿已写入工程文件:" << path
+                          << "共" << rows_.size() << "条";
+    } else {
+        QMessageBox::warning(this, tr("保存失败"), err);
+        qCWarning(hmiAlarm) << "[F4-c] 保存失败:" << err;
+    }
 }
 
 QString AlarmConfigDialog::exportDraftToJson() const {

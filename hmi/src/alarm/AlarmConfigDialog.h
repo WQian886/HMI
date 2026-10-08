@@ -113,11 +113,33 @@ public:
     //   所以能顺手验证"编辑器里配的,存进工程文件会不会丢字段"。
     QString exportDraftToJson() const;
 
+    // ★ F4-c(2026-10-08):把草稿写进已有工程文件的 alarms 段。
+    //
+    //   【为什么导出 JSON 不够】exportDraftToJson 只把 JSON 放进一个文本框 +
+    //   剪贴板。用户得自己找工程文件、找到 alarms 段、粘贴 —— 而这一步
+    //   几乎没人会做。F4-a 的"导出"实际等于"没有落地能力"。
+    //   这个方法是【草稿唯一的落地出口】。
+    //
+    //   【边界:不碰运行中的报警】写完文件后,运行中的 AlarmManager 一概不变。
+    //   要让新配置生效仍需重载工程 —— 这是 F4-b 的事(运行中改阈值怎么生效,
+    //   是必须先看见界面才能拍板的设计问题)。
+    //
+    //   path 必须指向【已存在的合法工程文件】。失败原因写进 errorOut。
+    bool saveDraftToProjectFile(const QString& path, QString* errorOut);
+
+    // ★ F4-c:存盘前的校验,把 Project::validateAlarmsArray 查不到的那一条补上 ——
+    //   报警引用的变量必须真实存在。理由见 Project.cpp:211:加载时引用不存在的
+    //   variable 会让【整个工程文件打不开】,而不只是这一条报警有问题。
+    //   【为什么要单独一个函数】onSave 里要把"变量不存在"和"名字重复/为空"
+    //   两种原因分开报给用户 —— 前者要他去修变量,后者要他改名字。
+    bool validateDraft(QString* errorOut) const;
+
 private slots:
     void onAdd();
     void onRemove();
     void onApplyFieldEdits();   // 表单改动 → 回写草稿行
     void onExport();            // 导出草稿 JSON(显示 + 复制到剪贴板)
+    void onSaveToProject();     // ★ F4-c:草稿 → 工程文件 alarms[]
 
 private:
     void setupTable();
@@ -128,6 +150,9 @@ private:
     void writeFormToRow(int row);
     void setFormEnabled(bool on);
     void updateInfo();
+    // ★ 新增报警时取一个未被占用的占位名("新报警" / "新报警 2" / …)。
+    //   名字是 checkers_ 的 key,重名会导致加载工程文件时静默覆盖。
+    QString nextFreeDraftName() const;
 
     AlarmManager*   alarmMgr_ = nullptr;
     VariableManager* varMgr_   = nullptr;
@@ -156,6 +181,9 @@ private:
     QPushButton*    addBtn_     = nullptr;
     QPushButton*    removeBtn_  = nullptr;
     QPushButton*    exportBtn_  = nullptr;
+    // ★ F4-c:真正落地的按钮。exportBtn_ 只是"看一眼 + 复制到剪贴板",
+    //   几乎等于没有落地能力;这个才是把草稿写进工程文件的。
+    QPushButton*    saveBtn_    = nullptr;
     QPushButton*    closeBtn_   = nullptr;
     QTextEdit*      jsonView_   = nullptr;
 };

@@ -59,6 +59,41 @@ public:
     // 6.3 阶段用,本阶段只写空壳(返回 false)
     bool loadFromFile(const QString& path);
 
+    // ★ F4-c(2026-10-08):只替换工程文件里的 alarms 段,其余原样保留。
+    //
+    //   【为什么需要它,为什么不能用 saveToFile】
+    //   saveToFile 是"把当前【运行中】的管理器状态整个重新序列化"。
+    //   而 F4-c 的草稿【故意不】回写 AlarmManager(见 AlarmConfigDialog.h 的不变量),
+    //   所以走 saveToFile 会把草稿原封不动丢掉、覆盖成运行中的旧值 ——
+    //   存了等于没存。这个方法是唯一能把草稿真正落地的出口。
+    //
+    //   【为什么必须"只改一段"而不是重写整个文件】
+    //   工程文件里还有 variables / actions / plcs / screens[].controls 等段。
+    //   若用一份残缺的 root 覆盖,这些段会被静默清空 —— 而对话框里根本没碰过它们,
+    //   用户不会知道自己把画面和变量弄丢了。所以这里读原文件、只替换 alarms、
+    //   写回。其它键一律原样保留。
+    //
+    //   【前置条件】path 必须已存在且是合法 JSON object —— 不负责创建新工程。
+    //   理由:凭空造一个只有 alarms 的文件,加载时必然缺 variables 而失败
+    //   (见 loadRootFromFile 第 5 步)。宁可报错也不要写出一个打不开的文件。
+    //
+    //   成功返回 true;失败时 errorOut 填人类可读的原因(调用方直接弹窗)。
+    static bool replaceAlarmsInFile(const QString& path,
+                                    const QJsonArray& alarms,
+                                    QString* errorOut);
+
+    // ★ F4-c:校验草稿能不能安全落进工程文件。
+    //   【为什么必须先校验】loadRootFromFile 里有两条硬失败(Project.cpp:211-221):
+    //     - 报警引用了不存在的 variable → 整个文件加载失败
+    //     - 报警重名 → addChecker 返回 false → 整个文件加载失败
+    //   也就是说,一条没填完的草稿存进去,产出的工程文件是【打不开】的。
+    //   与其存完让用户下次开工程时才发现,不如存之前就说清楚。
+    //   【为什么不在这里查 variable 存不存在】因为要访问 VariableManager,
+    //   而这是个 static 方法。查变量存在性的是 validateDraftAgainstManager。
+    //
+    //   校验内容:报警名非空、报警名唯一。返回 false 时 errorOut 说明原因。
+    static bool validateAlarmsArray(const QJsonArray& alarms, QString* errorOut);
+
     // ★ C.0(2026-09-17):schema 迁移公开 API(单测和外部工具可直接用)
     //   - migrateTo:从 fromVersion 链式迁移到 toVersion(内部按需调 migrateVxToVxPlus1)
     //   - migrateV1ToV2:v1 → v2 单步迁移(单独暴露给单测)

@@ -24,6 +24,7 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QSaveFile>
+#include <QSet>   // ★ F4-c:validateAlarmsArray 查重名
 #include <QDebug>
 
 namespace qwhmi::widgets { class ControlBase; }
@@ -100,6 +101,103 @@ bool Project::saveRootToFile(const QString& path, const QJsonObject& root) {
         emit loadError(QString("写入文件失败: %1").arg(f.errorString()));
         return false;
     }
+    return true;
+}
+
+// ============================================================================
+// ★ F4-c(2026-10-08):只替换工程文件里的 alarms 段
+//
+// 【这个函数存在的唯一理由】
+//   草稿要落地,但 saveToFile 会把运行中的 AlarmManager 重新序列化一遍,
+//   覆盖掉草稿。所以只能"读原文件 → 只换 alarms → 写回"。
+//
+// 【为什么不顺手校验 variable 存在性】
+//   loadRootFromFile:211 会在 variable 找不到时让【整个文件】加载失败。
+//   这一层的检查需要 VariableManager,而这里是 static。
+//   所以拆成两层:validateAlarmsArray(纯 JSON,能单测)
+//   + 调用方在有 varMgr 的地方补一次存在性检查。
+// ============================================================================
+
+bool Project::validateAlarmsArray(const QJsonArray& alarms, QString* errorOut) {
+    auto fail = [&](const QString& msg) {
+        if (errorOut) *errorOut = msg;
+        return false;
+    };
+
+    QSet<QString> seen;
+    for (int i = 0; i < alarms.size(); ++i) {
+        const QJsonObject a = alarms.at(i).toObject();
+        const QString name = a["name"].toString();
+
+        // ① 名字不能空 —— AlarmManager::addChecker 拒收空名(AlarmManager.cpp:13),
+        //    加载时会整体失败。
+        if (name.trimmed().isEmpty()) {
+            return fail(QString("第 %1 条报警没有名字 —— 名字不能为空").arg(i + 1));
+        }
+        // ② 名字不能重 —— addChecker 用 name 作 key,重名会 return false,
+        //    加载时同样整体失败。存进去之前必须拦住。
+        if (seen.contains(name)) {
+            return fail(QString("报警名 \"%1\" 重复 —— 名字必须唯一(第 %2 条)")
+                            .arg(name).arg(i + 1));
+        }
+        seen.insert(name);
+    }
+    if (errorOut) errorOut->clear();
+    return true;
+}
+
+bool Project::replaceAlarmsInFile(const QString& path,
+                                  const QJsonArray& alarms,
+                                  QString* errorOut) {
+    auto fail = [&](const QString& msg) {
+        if (errorOut) *errorOut = msg;
+        return false;
+    };
+
+    // ---- ① 先校验,坏草稿绝不落盘 ----
+    QString verr;
+    if (!validateAlarmsArray(alarms, &verr)) return fail(verr);
+
+    // ---- ② 读原文件 ----
+    //   不存在就报错,不凭空造。只有 alarms 的文件加载时必然缺 variables 而失败,
+    //   写出一个打不开的工程比不写更糟。
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        return fail(QString("打不开工程文件: %1\n(请先在主界面用“打开工程”载入它,"
+                            "F4-c 只改已有工程,不新建)").arg(f.errorString()));
+    }
+    const QByteArray data = f.readAll();
+    f.close();
+
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+    if (err.error != QJsonParseError::NoError) {
+        return fail(QString("原工程文件不是合法 JSON(%1,offset %2),拒绝覆盖")
+                        .arg(err.errorString()).arg(err.offset));
+    }
+    if (!doc.isObject()) {
+        return fail("原工程文件顶层不是 object,拒绝覆盖");
+    }
+
+    // ---- ③ 只换 alarms,其余键原样保留 ----
+    //   variables / actions / plcs / screens[].controls 一个都不动。
+    //   ★ 这一步是本函数的核心约束:对话框只管报警,
+    //   绝不能顺手把用户的画面和变量清空。
+    QJsonObject root = doc.object();
+    root["alarms"]    = alarms;
+
+    // ---- ④ 原子写回 ----
+    //   QSaveFile:写临时文件再 rename,中途失败不会把原工程写成半截。
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        return fail(QString("打开文件准备写入失败: %1").arg(out.errorString()));
+    }
+    out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!out.commit()) {
+        return fail(QString("写入失败: %1").arg(out.errorString()));
+    }
+
+    if (errorOut) errorOut->clear();
     return true;
 }
 
