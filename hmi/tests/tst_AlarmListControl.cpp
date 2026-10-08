@@ -13,6 +13,7 @@
 // ============================================================================
 
 #include <QtTest>
+#include <cmath>
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QGraphicsProxyWidget>
@@ -80,6 +81,19 @@ private slots:
     void editMode_keepsE4bBehaviour();
     void runtimeCanvas_suppliesAlarmManager();
     void refreshNow_preservesAcknowledgedState();
+
+    // ===== ★ F3-b(2026-10-08):闪烁 =====
+    //   原来只有 hmi.cpp 的 ui.alarmTable 会闪,运行时画布上的这个控件不会闪 ——
+    //   而 E.5 之后操作员实际盯的是运行时画布。
+    void blink_onlyUnacknowledgedCriticalAndEmergency();
+    void blink_togglesColorSoItIsActuallyVisible();
+    void blink_stopsWhenNothingLeftToBlink();
+    void blink_stopsWhenAllCleared();
+    void blink_emergencyAndCriticalKeepDistinctColors();
+    // ★ 这条是从一次真实错误里长出来的:我曾把"保证对比度不降"写进注释,
+    //   拿 WCAG 公式一算,那句话是假的(亮红配白字只有 3.33:1)。
+    //   注释留不住 —— 得让测试拦住下一次调色。
+    void blink_textStaysReadableInBothPhases();
 };
 
 // ===== 公共 fixture =====
@@ -119,6 +133,33 @@ QTableWidget* tableOf(AlarmListControl& c) {
     }
     return nullptr;
 }
+
+// ★ WCAG 2.x 相对亮度 + 对比度。
+//
+//   【为什么测试里要写一遍而不是直接调 Qt】Qt 有 QColor::luminance(),
+//   但它用的是另一套(而且不区分 sRGB 的 gamma 校正),
+//   算出来的数跟 WCAG 不一样,拿它断言等于用一把自己削的尺子量东西。
+//   这里照 WCAG 的定义实现,阈值 4.5:1 才有意义。
+//
+//   【为什么值得单独写 20 行】因为"颜色好不好看"没法定,必须先定一个
+//   能量化的底线,而这条底线正是配色真正该守住的那一半 ——
+//   另一半"够不够显眼"靠人眼看,而人会看走眼,公式不会。
+namespace {
+double relativeLuminance(const QColor& c) {
+    auto f = [](int v) {
+        const double x = v / 255.0;
+        return x <= 0.03928 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * f(c.red()) + 0.7152 * f(c.green()) + 0.0722 * f(c.blue());
+}
+double contrastRatio(const QColor& a, const QColor& b) {
+    const double la = relativeLuminance(a);
+    const double lb = relativeLuminance(b);
+    const double hi = std::max(la, lb);
+    const double lo = std::min(la, lb);
+    return (hi + 0.05) / (lo + 0.05);
+}
+} // namespace
 
 } // namespace
 
@@ -479,6 +520,199 @@ void TestAlarmListControl::refreshNow_preservesAcknowledgedState() {
     QCOMPARE(table->item(0, 4)->text(), QStringLiteral("已确认"));
     QVERIFY2(f.ctl.unacknowledgedCount() == 0,
              "刷新不能凭空多出未确认数");
+}
+
+// ============================================================================
+// ★ F3-b(2026-10-08):闪烁
+//
+// 【背景】文档里挂了很久的那条 🟡:主画面 ui.alarmTable 会闪,
+//   运行时画布上的 AlarmListControl 不会。E.5 之后操作员实际盯的是
+//   运行时画布,所以"会闪的那套"根本不在他眼前。
+//
+// 【这组用例测的是"该不该闪"和"闪了看得见吗",不是"定时器有没有在跑"】
+//   定时器在不在跑是可以断言的,但那不重要 ——
+//   定时器在跑而颜色没变,和没定时器,在用户眼里是同一件事:不闪。
+// ============================================================================
+
+// 只有【未确认 + 严重/危急】该闪。
+// 其余三种情况各自有理由,不是一个判据能概括的:
+//   信息/警告 —— 现场最吵的往往就是它,全都闪等于真出事时淹没
+//   已确认     —— 操作员已经处理过了,还在闪是在骗他去处理第二次
+void TestAlarmListControl::blink_onlyUnacknowledgedCriticalAndEmergency() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(8001, AlarmLevel::Info,      "模式切换"));
+    f.checker->fireTrigger(Fx::makeAlarm(8002, AlarmLevel::Warning,   "压力低"));
+    f.checker->fireTrigger(Fx::makeAlarm(8003, AlarmLevel::Critical,  "温度高"));
+    f.checker->fireTrigger(Fx::makeAlarm(8004, AlarmLevel::Emergency, "电机过载"));
+    QTest::qWait(30);
+
+    QCOMPARE(f.ctl.rowCount(), 4);
+    // 四行里只有两行该闪 —— 断言的是【数目】,不是某一行的身份,
+    // 因为行的顺序由 alarmManager 决定,写死行号就是埋雷(见 tst 里同一条纪律)。
+    QCOMPARE(f.ctl.blinkingRowCount(), 2);
+    QVERIFY2(f.ctl.blinkEnabled(),
+             "有两条未确认的严重/危急就必须开表 —— 不闪等于没这个功能");
+
+    // 确认掉一条"该闪"的,数目必须跟着减
+    f.mgr.acknowledge(8003);
+    QTest::qWait(30);
+    QCOMPARE(f.ctl.blinkingRowCount(), 1);
+    QCOMPARE(f.ctl.countText(), QStringLiteral("未确认:3"));
+}
+
+// 闪 = 颜色真的在两相之间变。
+// 断言"走过一相之后颜色不同"—— 若颜色没变,用户看到的就是"不闪",
+// 哪怕定时器每秒都在空转两次。
+void TestAlarmListControl::blink_togglesColorSoItIsActuallyVisible() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(8101, AlarmLevel::Critical, "温度高"));
+    QTest::qWait(30);
+    QCOMPARE(f.ctl.rowCount(), 1);
+
+    const QColor dark = f.ctl.levelColorAt(0);
+    QVERIFY(!f.ctl.blinkOn());          // 刚进来是暗相
+    f.ctl.advanceBlinkForTest();
+    QVERIFY(f.ctl.blinkOn());           // 走一相 → 亮相
+    const QColor lit = f.ctl.levelColorAt(0);
+    QVERIFY2(dark != lit,
+             qPrintable(QStringLiteral("走过一相颜色必须变。实色 %1 / %2 —— "
+                                       "颜色不变 = 用户看着就是不闪")
+                            .arg(dark.name()).arg(lit.name())));
+
+    // 再走一相必须回到原来的颜色:闪烁是往复,不是单程变色。
+    f.ctl.advanceBlinkForTest();
+    QVERIFY(!f.ctl.blinkOn());
+    QCOMPARE(f.ctl.levelColorAt(0), dark);
+}
+
+// 没有该闪的行时,定时器必须停。
+// 这不是省电优化,这是 7×24 工控机:没报警时让事件循环一直醒着是纯浪费。
+void TestAlarmListControl::blink_stopsWhenNothingLeftToBlink() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    // 先确认一条是"从闪到不闪"这条路径
+    f.checker->fireTrigger(Fx::makeAlarm(8201, AlarmLevel::Emergency, "电机过载"));
+    QTest::qWait(30);
+    QVERIFY(f.ctl.blinkEnabled());
+
+    f.mgr.acknowledge(8201);
+    QTest::qWait(30);
+    QVERIFY2(!f.ctl.blinkEnabled(),
+             "全部处理完后定时器必须停 —— 否则它在后台空转,"
+             "而屏幕上什么都没有");
+
+    // 相位必须复位:停下时不能停在亮相。
+    // 不复位的话,下一次启动的第一帧会是深色而该行本档色是浅色,
+    // 用户看到"新报警颜色不对,过一会儿才对"。
+    QVERIFY2(!f.ctl.blinkOn(),
+             "停表时相位必须复位到暗相,否则下一轮第一帧的颜色是错的");
+}
+
+// 全清之后也必须停表 —— onAllCleared 是另一条独立路径,
+// 漏掉它的表现是"表格空了但定时器还在转"。
+void TestAlarmListControl::blink_stopsWhenAllCleared() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(8301, AlarmLevel::Critical, "温度高"));
+    QTest::qWait(30);
+    QVERIFY(f.ctl.blinkEnabled());
+
+    f.mgr.clearAll();
+    QTest::qWait(30);
+    QCOMPARE(f.ctl.rowCount(), 0);
+    QVERIFY2(!f.ctl.blinkEnabled(),
+             "全清之后定时器必须停(表格都空了,没有什么可闪的)");
+}
+
+// ★ 闪烁不能把字变得看不清 —— 这条是从一次真实的错误里长出来的。
+//
+// 【我怎么发现它错了】最初 repaintRow 里写的是"亮红 + 白字",
+//   注释还特意写了"保证对比度不降"。后来拿 WCAG 的相对亮度公式
+//   把每个配色算了一遍,才发现那句话是假的:
+//     危急暗相 #cd2828 + 白字 = 5.34:1
+//     危急亮相 #f05a5a + 白字 = 3.33:1   ← 掉了一截
+//   闪烁最亮的那半拍,恰恰是字最难读的那半拍 ——
+//   而那正是操作员最想看清"哪条报警、多严重"的时候。
+//
+// 【为什么这条必须变成测试,而不是继续留一句注释】
+//   注释是我自己写给自己看的,下一次调色的人未必会重算一遍。
+//   而"字看得清"在屏幕上和"底色够亮"长得完全不一样,
+//   没人会靠肉眼对着一个色块数字去比 —— 测出来才拦得住。
+// ★ 阈值取 4.5:1(WCAG AA 对正文的最低要求)。没敢取 7:1(A 或大字号加强),
+//   因为工业屏常年亮着、报警区不是长文,4.5 是"看得清"这条线里最保守的一个。
+void TestAlarmListControl::blink_textStaysReadableInBothPhases() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(8501, AlarmLevel::Critical,  "温度高"));
+    f.checker->fireTrigger(Fx::makeAlarm(8502, AlarmLevel::Emergency, "电机过载"));
+    QTest::qWait(30);
+
+    for (int row = 0; row < f.ctl.rowCount(); ++row) {
+        const QString lvl = f.ctl.levelTextAt(row);
+        // 暗相
+        const double dark = contrastRatio(f.ctl.levelColorAt(row),
+                                          f.ctl.levelTextColorAt(row));
+        QVERIFY2(dark >= 4.5,
+                 qPrintable(QStringLiteral("%1 暗相对比度只有 %.2f:1 —— 字看不清")
+                                .arg(lvl).arg(dark, 0, 'f', 2)));
+        // 亮相
+        f.ctl.advanceBlinkForTest();
+        const double lit = contrastRatio(f.ctl.levelColorAt(row),
+                                         f.ctl.levelTextColorAt(row));
+        QVERIFY2(lit >= 4.5,
+                 qPrintable(QStringLiteral("%1 亮相对比度只有 %.2f:1"
+                                           " —— 闪烁最亮的那一瞬正是最难读的一瞬。"
+                                           "底色 #%3 字色 #%4")
+                                .arg(lvl).arg(lit, 0, 'f', 2)
+                                .arg(f.ctl.levelColorAt(row).name(),
+                                     f.ctl.levelTextColorAt(row).name())));
+        // 亮相必须比暗相更显眼,而不是"反正达标就行"
+        QVERIFY2(f.ctl.levelColorAt(row) != QColor(),
+                 "对照用:底色读不出来就是没上色");
+        f.ctl.advanceBlinkForTest();   // 回到暗相,测下一行
+    }
+}
+
+// 危急和严重都在闪,如果亮相时它们变成同一个颜色,
+// 闪烁就把 F3 辛苦建立的四档配色给毁了 —— 操作员靠颜色分轻重。
+void TestAlarmListControl::blink_emergencyAndCriticalKeepDistinctColors() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(8401, AlarmLevel::Critical,  "温度高"));
+    f.checker->fireTrigger(Fx::makeAlarm(8402, AlarmLevel::Emergency, "电机过载"));
+    QTest::qWait(30);
+    QCOMPARE(f.ctl.rowCount(), 2);
+    QCOMPARE(f.ctl.blinkingRowCount(), 2);
+
+    const QColor critDark = f.ctl.levelColorAt(0);
+    const QColor emgDark  = f.ctl.levelColorAt(1);
+    QVERIFY(critDark != emgDark);
+
+    // 两行同处亮相 —— 此时仍然必须分得出来
+    f.ctl.advanceBlinkForTest();
+    const QColor critLit = f.ctl.levelColorAt(0);
+    const QColor emgLit  = f.ctl.levelColorAt(1);
+    QVERIFY2(critLit != emgLit,
+             qPrintable(QStringLiteral("亮相时两档同色了。实色 %1 / %2 —— "
+                                       "闪烁把'哪一档更重'这个信息盖掉了")
+                            .arg(critLit.name()).arg(emgLit.name())));
+    // 亮相也要和暗相不同,否则根本没在闪
+    QVERIFY(critLit != critDark);
+    QVERIFY(emgLit  != emgDark);
 }
 
 QTEST_MAIN(TestAlarmListControl)

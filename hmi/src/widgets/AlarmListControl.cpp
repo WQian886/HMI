@@ -9,6 +9,7 @@
 #include "auth/Permission.h"
 
 #include <QColor>
+#include <QTimer>
 #include <QGraphicsProxyWidget>
 #include <QHeaderView>
 #include <QLabel>
@@ -42,7 +43,9 @@ LevelStyle styleFor(AlarmLevel level) {
         case AlarmLevel::Warning:  return {"Warning",  QColor(255, 240, 190), QColor(120,  80,   0)};
         // 严重 —— 橙红
         case AlarmLevel::Critical: return {"Critical", QColor(255, 205, 195), QColor(150,  20,  10)};
-        // 危急 —— 深红 + 白字,唯一用白字的档(最深 = 最重)
+        // 危急 —— 深红 + 白字(最深 = 最重)。对比度 5.34:1。
+        //   ★ 静止时它是唯一用白字的档;F3-b 闪烁的【亮相半拍】会换成深字,
+        //     原因见 repaintRow 里那段 —— 亮底配白字只有 3.33:1,字会看不清。
         case AlarmLevel::Emergency:return {"Emergency",QColor(205,  40,  40), QColor(255, 255, 255)};
     }
     return {"?", QColor(), QColor(Qt::black)};   // 不该到这
@@ -116,6 +119,15 @@ AlarmListControl::AlarmListControl(QGraphicsItem* parent)
     }
 
     registerControlType("AlarmList", []() -> ControlBase* { return new AlarmListControl(); });
+
+    // ★ F3-b(2026-10-08):闪烁定时器
+    //   500ms 与 hmi.cpp:423 的 alarmBlinkTimer_ 一致 —— 见头文件里为什么必须同速。
+    //   ★ 【一开始不 start】updateBlinkTimer() 才是唯一的开关。
+    //   构造完就无条件开表的话,这个控件一被放进画布(哪怕工程里一条报警都没有)
+    //   就开始空转,而"没报警"恰恰是最常见的状态。
+    blinkTimer_ = new QTimer(this);
+    blinkTimer_->setInterval(500);
+    connect(blinkTimer_, &QTimer::timeout, this, &AlarmListControl::onBlinkTick);
 }
 
 AlarmListControl::~AlarmListControl() = default;
@@ -169,6 +181,10 @@ void AlarmListControl::onAlarmManagerChanged(AlarmManager* mgr) {
         connect(alarmMgr_, &AlarmManager::allCleared,
                 this, &AlarmListControl::onAllCleared);
         refreshNow();
+    } else {
+        // ★ F3-b:换 manager 时表格被清空了(上面 setRowCount(0)),
+        //   闪烁也必须跟着停 —— 否则"没接上数据源的控件"在后台一直闪。
+        updateBlinkTimer();
     }
     refreshCount();
 }
@@ -219,6 +235,10 @@ void AlarmListControl::addAlarmRow(const Alarm& alarm) {
                                                 : QStringLiteral("未确认")));
     repaintRow(row);
     refreshCount();
+    // ★ F3-b:新来一条可能"该闪",也可能来的是已确认的。
+    //   每次都重算一遍 —— 比在这里判断 level/state 更不容易漏,
+    //   少判断一次的后果是"该闪的不闪"或"已确认的还在闪",两个都是骗操作员。
+    updateBlinkTimer();
 }
 
 // ★ F3:按等级 + 状态给整行上色 —— 配色的唯一入口
@@ -250,12 +270,117 @@ void AlarmListControl::repaintRow(int row) {
         bg = QColor(240, 240, 240);
         fg = QColor(120, 120, 120);
     }
+
+    // ★ F3-b(2026-10-08):闪烁。
+    //
+    // 【关键设计:闪的是【亮度】,不是【换一套颜色】】
+    //   下面这一段是唯一改动行颜色的地方(repaintRow 是配色唯一入口),
+    //   闪烁只是在这里多算一个"亮相"的底色。
+    //   ★ 为什么不写成"闪的时候直接填红色":
+    //     那样危急/严重/警告会共用一个红 —— 而"哪一档"正是颜色在表达的信息。
+    //     操作员靠颜色分轻重,闪一下就分不出来了,闪烁反而害事。
+    //   所以亮相 = 本档底色【加深】,暗相 = 本档底色原样。
+    //   于是:闪 = 在说"这条还没处理";颜色深浅 = 在说"这条有多重"。
+    //   两件事各走各的通道,不会互相覆盖。
+    //
+    // 【为什么只闪"未确认 + 严重/危急"】
+    //   和 hmi.cpp:1492 的判据完全一致,不能各闪各的。
+    //   已确认的还在闪 = 骗操作员去处理一条已经处理过的;
+    //   信息/警告闪 = 现场最吵的一直在闪,真出事的那条就淹了。
+    if (status == QStringLiteral("未确认")
+        && (level == QStringLiteral("Critical") || level == QStringLiteral("Emergency"))) {
+        if (blinkOn_) {
+            // 亮相:亮度大幅变化,让余光也能捕捉到。
+            //
+            // ★【这里踩过一次坑,记下来】
+            //   最初写的是"亮红 #f05a5a + 白字",注释还写着"保证对比度不降"。
+            //   拿 WCAG 公式算了一遍才发现是假的:
+            //     暗相 #cd2828 + 白字 = 5.34:1
+            //     亮相 #f05a5a + 白字 = 3.33:1   ← 掉了 2 个点
+            //   也就是说闪烁最亮的那一瞬间,字恰恰是最难读的一瞬 ——
+            //   而那正是操作员最想看清内容的时候。
+            //   根因:底色一旦大幅提亮,白字必然失效,两者不能同时要。
+            //   解法:亮底配深字。#f05a5a + #3b0606 = 5.20:1,
+            //   比暗相还高一点,亮度却比暗相亮了 81%(余光绝对抓得到)。
+            //   代价:危急在亮相这半拍里不是白字了。取舍理由是
+            //   "看得清"优先于"用白字标识最重的那一档"——
+            //   后者只是个约定,前者是能不能读。
+            if (level == QStringLiteral("Emergency")) {
+                bg = QColor(240,  90,  90);   // 深红 → 亮红
+                fg = QColor( 59,   6,   6);   // 白字 → 深字(见上面)
+            } else {
+                // 严重档是浅底配深字,提亮底色的同时把字压深,
+                // 对比度反而升到 5.39:1,不需要像危急那样翻过来配。
+                bg = QColor(255, 150, 130);   // 浅橙 → 深橙
+                fg = QColor(120,  10,   5);
+            }
+        }
+        // 暗相:保持本档原色,什么都不做。
+    }
+
     for (int col = 0; col < table_->columnCount(); ++col) {
         if (auto* it = table_->item(row, col)) {
             it->setBackground(bg);
             it->setForeground(fg);
         }
     }
+}
+
+// ★ F3-b:这一行此刻该不该闪
+bool AlarmListControl::rowShouldBlink(int row) const {
+    if (!table_) return false;
+    if (row < 0 || row >= table_->rowCount()) return false;
+    auto* levelItem  = table_->item(row, 2);
+    auto* statusItem = table_->item(row, 4);
+    if (!levelItem || !statusItem) return false;
+    return statusItem->text() == QStringLiteral("未确认")
+        && (levelItem->text() == QStringLiteral("Critical")
+            || levelItem->text() == QStringLiteral("Emergency"));
+}
+
+int AlarmListControl::blinkingRowCount() const {
+    if (!table_) return 0;
+    int n = 0;
+    for (int row = 0; row < table_->rowCount(); ++row)
+        if (rowShouldBlink(row)) ++n;
+    return n;
+}
+
+bool AlarmListControl::blinkOn() const { return blinkOn_; }
+bool AlarmListControl::blinkEnabled() const { return blinkTimer_ && blinkTimer_->isActive(); }
+void AlarmListControl::advanceBlinkForTest() { onBlinkTick(); }
+
+// ★ F3-b:该闪的行一个都没了就停表
+//
+// 【为什么必须有这个】这是工控机上的 7×24 程序,不是开完就关的桌面软件。
+// 定时器一开就会一直唤醒事件循环 —— 没有报警时也照转,
+// 等于让 CPU 永远醒着做一件没有产出的事。
+// 而"报警全处理完了还闪"本身也是错的:那是在骗操作员。
+void AlarmListControl::updateBlinkTimer() {
+    if (!blinkTimer_) return;
+    if (blinkingRowCount() > 0) {
+        if (!blinkTimer_->isActive()) blinkTimer_->start();
+    } else {
+        blinkTimer_->stop();
+        // ★ 停下来之前把相位复位。
+        //   不复位的话,下一次启动的【第一帧】是"暗相",而那一行的
+        //   当前颜色可能还停在亮相的深色上(上一次 repaint 留下的)。
+        //   于是新报警刚出现时是深色,要等 500ms 才切回本档色 ——
+        //   用户看到的是"新报警的颜色不对,过一会儿才对"。
+        if (blinkOn_) {
+            blinkOn_ = false;
+            for (int row = 0; row < (table_ ? table_->rowCount() : 0); ++row)
+                repaintRow(row);
+        }
+    }
+}
+
+void AlarmListControl::onBlinkTick() {
+    blinkOn_ = !blinkOn_;
+    // ★ 只重画"该闪的那些行",不是全表。
+    //   全表重画在行数多时是纯粹的浪费,而闪烁本来就是个"局部信号"。
+    for (int row = 0; row < (table_ ? table_->rowCount() : 0); ++row)
+        if (rowShouldBlink(row)) repaintRow(row);
 }
 
 // ★ F3:重算未确认计数
@@ -304,6 +429,12 @@ QColor AlarmListControl::levelColorAt(int row) const {
     return it ? it->background().color() : QColor();
 }
 
+QColor AlarmListControl::levelTextColorAt(int row) const {
+    if (!table_) return QColor();
+    auto* it = table_->item(row, 2);
+    return it ? it->foreground().color() : QColor();
+}
+
 qint64 AlarmListControl::alarmIdAtRow(int row) const { return rowToId_.value(row, 0); }
 void AlarmListControl::setAlarmIdAtRow(int row, qint64 id) { rowToId_[row] = id; }
 
@@ -334,6 +465,9 @@ void AlarmListControl::updateAlarmRow(qint64 id, const QString& stateText) {
     //   看着像"还没处理" —— 跟 hmi.cpp 5.5 那个闪烁残留是同一类毛病。
     repaintRow(row);
     refreshCount();
+    // ★ F3-b:这一行刚从"该闪"变成"不该闪"(确认/恢复),
+    //   如果它是最后一条,定时器必须停 —— 否则会一直空转。
+    updateBlinkTimer();
 }
 
 // ★ F3(2026-09-30):双击行 → 确认这条报警
@@ -382,6 +516,10 @@ void AlarmListControl::onAllCleared() {
     rowToId_.clear();
     // ★ F3:清表必须同时清计数,否则标签停在"未确认:5"而表格已经空了。
     refreshCount();
+    // ★ F3-b:清表同理 —— 表格都空了,闪烁必须停。
+    //   少这一句的表现是"全清之后定时器还在转",而屏幕上什么都没有 ——
+    //   这是本项目反复吃亏的那一类:后台还在为一个已经不存在的东西干活。
+    updateBlinkTimer();
 }
 
 QRectF AlarmListControl::boundingRect() const {

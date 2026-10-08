@@ -26,6 +26,7 @@ class QTableWidget;
 class QGraphicsProxyWidget;
 class QWidget;
 class QLabel;
+class QTimer;
 
 namespace qwhmi::widgets {
 
@@ -52,7 +53,28 @@ public:
     QString countText() const;                // 计数标签的完整文字
     QString levelTextAt(int row) const;       // 第 row 行的等级文字
     QColor levelColorAt(int row) const;       // 第 row 行的等级底色(配色断言用)
+    // ★ F3-b:第 row 行的字色。
+    //   【为什么单独暴露】对比度是"底色 + 字色"两个数算出来的,
+    //   只给底色就断言不了对比度 —— 而"闪烁时字看得清吗"恰恰是
+    //   F3-b 最该守住的一条(见 repaintRow 里踩过的坑)。
+    QColor levelTextColorAt(int row) const;
     int  rowCount() const;
+
+    // ===== ★ F3-b(2026-10-08):闪烁 =====
+    // 【为什么单列一组访问器】闪烁的可见效果有两个:
+    //   「定时的灯是不是亮的」和「这一格现在是什么颜色」。
+    //   后者 levelColorAt 已经能看,前者只能靠等 500ms ——
+    //   而"等 500ms 再看一眼"在测试里既慢又不稳(负载一高就红)。
+    //   所以额外暴露灯态和"该不该闪的行数",让这两件事可以被直接断言。
+    bool blinkOn() const;                     // 当前处在闪烁的哪一相(亮/暗)
+    int  blinkingRowCount() const;            // 当前【正在闪】的行数(未确认 + 严重/危急)
+    bool blinkEnabled() const;                // 定时器是否在跑(没东西可闪时必须停)
+    // ★ 手动走一次闪烁相位 —— 给测试用。
+    //   【为什么不让测试干等 500ms】"睡 500ms 再看一眼颜色"这种测法
+    //   既慢又不稳:CI 上一旦机器忙,500ms 里定时器可能没被派发,
+    //   断言就会随机红 —— 而红的原因和被测逻辑毫无关系。
+    //   这里暴露"走一相"的入口,断言的是【一相之后颜色确实变了】这件事本身。
+    void advanceBlinkForTest();
 
     QRectF boundingRect() const override;
     void paintContent(QPainter* painter,
@@ -72,6 +94,8 @@ private slots:
     void onAllCleared();
     // ★ F3:双击某一行 → 确认这条报警
     void onCellDoubleClicked(int row, int col);
+    // ★ F3-b:500ms 一次,切亮/暗两相
+    void onBlinkTick();
 
 private:
     void addAlarmRow(const Alarm& alarm);
@@ -79,12 +103,31 @@ private:
     int  findRowByAlarmId(qint64 id) const;
     // ★ F3:重算"未确认"计数并刷新标签。所有会改变确认状态的路径都要过这里。
     void refreshCount();
-    // ★ F3:把某一行按等级+状态重新上色(配色与闪烁的唯一入口)
+    // ★ F3/F3-b:把某一行按等级+状态+闪烁相位重新上色。
+    //   ★ 配色的【唯一入口】 —— 闪烁也必须走这里。
+    //   闪烁若自己 setBackground,就成了第二个改颜色的地方:
+    //   两处配色各改各的,必然出现"闪一下之后颜色停在错误档位"这类 bug。
     void repaintRow(int row);
-    // ★ F3:行 → alarmId。之前只在 QHash 里,拿不到"按行号反查 id",
+    // ★ F3-b:这一行此刻该不该闪(未确认 + 严重/危急)。
+    //   抽成函数是因为定时器启动、计数统计都要用同一个判据 ——
+    //   两处各写一遍 if,改判据时漏一处就变成"闪的行和统计的行对不上"。
+    bool rowShouldBlink(int row) const;
+    // ★ F3-b:有该闪的行就把定时器开起来,一个都没有就停。
+    //   【为什么必须停】没东西可闪还在跑,等于让整个进程醒着做无用功 ——
+    //   而这套程序是要在工控机上 7×24 跑的,不是开完就关的桌面软件。
+    void updateBlinkTimer();
+    // ★ F3-b:行 → alarmId。之前只在 QHash 里,拿不到"按行号反查 id",
     //    而双击给的正是行号。
     qint64 alarmIdAtRow(int row) const;
     void   setAlarmIdAtRow(int row, qint64 id);
+
+    // ★ F3-b(2026-10-08):闪烁
+    //   【为什么 500ms】和 hmi.cpp:423 的 alarmBlinkTimer_ 取同一个值。
+    //   两套报警 UI 各闪各的、速度还不一样,操作员的目光在两者间来回时
+    //   会觉得"这边快了一点" —— 同一个产品里同类信号必须是同一个节奏。
+    //   500ms 是"慢到不刺眼、快到余光能捕捉到"的那一档。
+    QTimer* blinkTimer_ = nullptr;
+    bool    blinkOn_    = false;   // 当前处在亮相还是暗相
 
     QWidget*              container_ = nullptr;   // ★ F3:承载 计数标签 + 表格 的父 widget
     QLabel*               countLabel_ = nullptr;  // ★ F3:未确认计数
