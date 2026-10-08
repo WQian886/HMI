@@ -171,6 +171,14 @@ private:
 
     // ★ 表单。注意 hysteresis 的量纲提示:它和 threshold 同单位,
     //   但语义不同(threshold 是"越界点",hysteresis 是"死区宽度")。
+    // ★ 工程里是否存在变量 —— 静态事实,只在 setupForm 算一次。
+    //   【为什么必须单独存】setFormEnabled 里曾写成
+    //   setEnabled(on && varCombo_->isEnabled()),那是自引用门闩:
+    //   组合框一旦被禁就永远回不来(构造函数末尾会 setFormEnabled(false))。
+    //   结果"新建报警后关联变量点不动"。把"有没有变量"(事实)和
+    //   "现在能不能操作"(状态)分开,这个 bug 就不可能再发生。
+    bool            hasVariables_   = false;
+
     QComboBox*      varCombo_       = nullptr;
     QComboBox*      levelCombo_     = nullptr;
     QComboBox*      dirCombo_       = nullptr;

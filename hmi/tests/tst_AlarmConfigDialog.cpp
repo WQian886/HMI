@@ -28,6 +28,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -79,6 +80,12 @@ private slots:
 
     // ---- ★ 设计不变量:不改运行中的状态 ----
     void openDialog_doesNotMutateAlarmManager();
+
+    // ---- ★ 变量下拉可选(2026-10-08 用户报"新建报警时变量不能选")----
+    void varCombo_isSelectableOnNewRow();
+    void varCombo_picksUpVariableChange();
+    void varCombo_staysDisabledWhenNoVariables();
+    void varCombo_reEnabledAfterRowSwitch();
 
     // ---- ★ F4-c:存进工程文件(真实往返,不只测内存对象)----
     void save_writesAlarmsToRealFile();
@@ -564,6 +571,108 @@ void TestAlarmConfigDialog::addButton_newAlarmSurvivesExport() {
     const QJsonArray arr = QJsonDocument::fromJson(dlg.exportDraftToJson().toUtf8())
                                .object()["alarms"].toArray();
     QCOMPARE(arr.size(), 2);   // 原有 1 条 + 新增 1 条
+}
+
+// ============================================================================
+// ★ 变量下拉 —— 2026-10-08 用户报"新建报警的时候,变量不能选择"
+//
+// 【根因:一个自引用门闩】
+//   setFormEnabled 里写的是 varCombo_->setEnabled(on && varCombo_->isEnabled());
+//   —— 读自己的当前状态来决定要不要设自己。
+//   构造函数末尾会调 setFormEnabled(false)(还没选中行),
+//   于是组合框从打开对话框那一刻起永久变灰,选中任何行都不会恢复。
+//   等级/方向/阈值/滞回全都能改,唯独"关联变量"点不动 —— 界面上看不出任何异常。
+//
+// 【为什么 30 条测试全绿却没发现】
+//   之前没有一条用例断言过 varCombo 的 enabled 状态。
+//   大家只查 rows_ 里存的值对不对,没查过"用户能不能改"。
+//   "值对了"和"控件能用"是两件事 —— 这正是本项目记了 5 次的那条教训。
+// ============================================================================
+
+// ★ 用户报的现象原样复现:点新增后,关联变量下拉必须是可点的。
+void TestAlarmConfigDialog::varCombo_isSelectableOnNewRow() {
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Temp"), static_cast<quint16>(100),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Press"), static_cast<quint16>(101),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigVarCombo"));
+    QVERIFY2(combo, "找不到关联变量下拉框");
+    QCOMPARE(combo->count(), 2);
+
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+
+    // ★ 这条断言在修复前是红的 —— 它就是用户说的"变量不能选择"
+    QVERIFY2(combo->isEnabled(),
+             "新建报警后关联变量下拉是灰的 —— 用户点不动(自引用门闩 bug)");
+}
+
+// 不只是"亮着",还得真能改:选另一个变量,草稿和表格都要跟着变。
+// 只断言 isEnabled() 是不够的 —— 亮着但写不进草稿,用户照样觉得"没用"。
+void TestAlarmConfigDialog::varCombo_picksUpVariableChange() {
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Temp"), static_cast<quint16>(100),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Press"), static_cast<quint16>(101),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    auto* combo  = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigVarCombo"));
+    auto* table  = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(combo);
+    QVERIFY(table);
+
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));   // 新行选中,currentRow()==0
+    QCOMPARE(dlg.rowCount(), 1);
+
+    const int pressIdx = combo->findText(QStringLiteral("plc1.Press"));
+    QVERIFY(pressIdx >= 0);
+    combo->setCurrentIndex(pressIdx);          // 模拟用户选了另一个变量
+
+    QCOMPARE(dlg.variableAt(0), QStringLiteral("plc1.Press"));
+    // 表格那一格也要同步,否则用户看着没变
+    QCOMPARE(table->item(0, 1)->text(), QStringLiteral("plc1.Press"));
+}
+
+// 工程里一个变量都没有时,下拉必须保持禁用 —— 不能因为修了门闩
+// 就让"(工程里还没有变量)"这个占位项变得可选。
+void TestAlarmConfigDialog::varCombo_staysDisabledWhenNoVariables() {
+    QCOMPARE(varMgr_->allVariables().size(), 0);
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigVarCombo"));
+    QVERIFY(combo);
+    QVERIFY2(!combo->isEnabled(),
+             "工程里没有变量,下拉却可点 —— 用户会选到一个不存在的变量");
+    QCOMPARE(combo->count(), 1);   // 只有占位项
+}
+
+// 切行之后必须还能改 —— 这条直接钉死"单向门闩"这个性质。
+// 只要它存在一次"禁用后再也回不来",这条必红。
+void TestAlarmConfigDialog::varCombo_reEnabledAfterRowSwitch() {
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Temp"), static_cast<quint16>(100),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigVarCombo"));
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(combo);
+    QVERIFY(table);
+
+    // 还没选中任何行 → 整个表单禁用(这是预期的)
+    QVERIFY2(!combo->isEnabled(), "没选中行时下拉应当是灰的");
+
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));   // 选中第 0 行
+    QVERIFY2(combo->isEnabled(), "选中行后下拉必须恢复可用 —— 门闩 bug");
+
+    // ★ 用 setCurrentCell(-1,-1) 真正取消选中,而不是 clearSelection()。
+    //   clearSelection() 只清高亮,currentRow() 还在,itemSelectionChanged
+    //   不发 → fillFormFromRow 根本不会被调用 → 表单状态压根没变过。
+    //   （第一版这里用 clearSelection,断言"应该变灰"却没灰,是我把
+    //     测试前提写错了,不是实现有问题。）
+    table->setCurrentCell(-1, -1);
+    QVERIFY2(!combo->isEnabled(), "取消选中后下拉应变灰");
+
+    table->selectRow(0);
+    QVERIFY2(combo->isEnabled(), "二次选中行后下拉仍必须可用 —— 单向门闩");
 }
 
 // ============================================================================

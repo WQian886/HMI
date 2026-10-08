@@ -288,7 +288,11 @@ void AlarmConfigDialog::setupForm() {
             if (v) varCombo_->addItem(v->name());
         }
     }
-    if (varCombo_->count() == 0) {
+    // ★ hasVariables_ = "工程里到底有没有变量" —— 这是个【静态事实】,
+    //   只在这里算一次。它必须和 setFormEnabled 里的"当前能不能操作"分开:
+    //   上一版把两者混成 varCombo_->isEnabled(),结果组合框被自己锁死。
+    hasVariables_ = (varCombo_->count() > 0);
+    if (!hasVariables_) {
         varCombo_->addItem(tr("(工程里还没有变量)"));
         varCombo_->setEnabled(false);
     }
@@ -425,7 +429,16 @@ void AlarmConfigDialog::updateInfo() {
 // ============================================================================
 
 void AlarmConfigDialog::setFormEnabled(bool on) {
-    varCombo_->setEnabled(on && varCombo_->isEnabled());
+    // ★ 这里曾经写的是 varCombo_->setEnabled(on && varCombo_->isEnabled())。
+    //   【那是 2026-10-08 用户报的"新建报警时变量不能选"的根因】
+    //   自引用 = 单向门闩:组合框一旦被禁用,就再也回不来了。
+    //   而构造函数末尾会调 setFormEnabled(false)(还没选中行),
+    //   于是它从打开对话框那一刻起就永久变灰 —— 选中任何一行都不会恢复。
+    //   用户看到的就是:等级/方向/阈值/滞回都能改,唯独"关联变量"点不动。
+    //
+    //   【正确写法】把"工程里有没有变量"这个【静态事实】记在 hasVariables_,
+    //   和"当前能不能操作"这个【瞬时状态】分开。两个概念混在一起必然出这种 bug。
+    varCombo_->setEnabled(on && hasVariables_);
     levelCombo_->setEnabled(on);
     dirCombo_->setEnabled(on);
     thresholdSpin_->setEnabled(on);
@@ -477,9 +490,15 @@ void AlarmConfigDialog::writeFormToRow(int row) {
     AlarmConfigRow& r = rows_[row];
     if (!r.editable) return;   // 非阈值报警不接受表单改动
 
-    // 变量:(工程里还没有变量时下拉是禁用的,此时保持原值)
-    if (varCombo_->isEnabled()) {
+    // 变量。
+    // ★ 这里原来判断的是 varCombo_->isEnabled(),和 setFormEnabled 是同一个坑。
+    //   "下拉当前能不能操作"是【瞬时状态】(没选中行时为灰),不是"工程里有没有变量"。
+    //   后果:即便组合框修好了,这里仍会因为"恰好处于禁用态"而跳过写入 ——
+    //   用户选了变量,草稿却没记,存出去还是旧变量。
+    //   正确的判据是 hasVariables_(静态事实)。空工程时保持原值即可。
+    if (hasVariables_) {
         const QString v = varCombo_->currentText();
+        // startsWith('(') 排除占位项"(工程里还没有变量)"
         if (!v.isEmpty() && !v.startsWith('(')) r.variableName = v;
     }
     r.level         = levelCombo_->currentData().toString();
