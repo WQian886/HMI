@@ -200,6 +200,10 @@ private:
     // ★ E.5(2026-09-29):弹/隐藏 RuntimeCanvas(把编辑器存的工程文件显示出来)
     //   这是"编辑器画的画面怎么在主画面里显示"的答案。
     void onRuntimeCanvasClicked();
+    // ★ F4-a(2026-10-08):弹 AlarmConfigDialog(报警阈值/等级/滞回/屏蔽)
+    //   F2 滞回和 F2-c 屏蔽配完一直没地方点,只能手改 JSON ——
+    //   这个按钮是它们对真实用户存在的唯一途径。
+    void onAlarmConfigClicked();
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)

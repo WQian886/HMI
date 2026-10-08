@@ -27,6 +27,7 @@
 #include "ThresholdAlarmChecker.h" // 阶段 5.3-收尾(2026-08-07):合并 High/Low + 最小持续时间(DRY)
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
+#include "alarm/AlarmConfigDialog.h"  // ★ F4-a(2026-10-08):报警配置对话框(报警配置按钮)
 #include <QIntValidator>
 #include <QTimer>                 // counter / resetTimer_ / alarmBlinkTimer_ 共用
 #include <QMessageBox>
@@ -114,6 +115,24 @@ hmi::hmi(QWidget *parent)
     runtimeBtn->setMinimumSize(80, 32);
     ui.buttonRowLayout->addWidget(runtimeBtn);
     connect(runtimeBtn, &QPushButton::clicked, this, &hmi::onRuntimeCanvasClicked);
+
+    // ★ F4-a(2026-10-08):报警配置按钮 — 弹 AlarmConfigDialog
+    //   【为什么必须现在加】F4-a 的对话框 318e7b4 提交时【没有任何入口】,
+    //   用户点不开 —— 那就等于死代码。F2 滞回 / F2-c 屏蔽配完照样只能手改 JSON。
+    //   教训是这个项目自己记的(CHANGELOG 里 4 次"做完了但用不了"),
+    //   不该再犯第五次。
+    //   【为什么放在 buttonRowLayout 而不是 .ui】
+    //   跟上面 编辑器 / 运行时画面 两个按钮同一套路(hmi.cpp:105-116),
+    //   不用改 .ui 就不会撞 UIC 的 AUTOUIC 问题。
+    //   【权限】对话框内部 exec() 自查 EditProject,这里不重复查 ——
+    //   重复检查会出现"按钮该灰却没灰"和"点了才弹窗"两种不一致的反馈。
+    auto* alarmCfgBtn = new QPushButton(QStringLiteral("报警配置"), this);
+    alarmCfgBtn->setMinimumSize(80, 32);
+    alarmCfgBtn->setToolTip(QStringLiteral(
+        "查看/编辑报警的阈值、等级、滞回、屏蔽状态。\n"
+        "需要工程师(Engineer)或管理员(Admin)权限。"));
+    ui.buttonRowLayout->addWidget(alarmCfgBtn);
+    connect(alarmCfgBtn, &QPushButton::clicked, this, &hmi::onAlarmConfigClicked);
 
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
@@ -849,6 +868,22 @@ void hmi::onRuntimeCanvasClicked() {
     canvas_->show();
     canvas_->raise();
     canvas_->activateWindow();
+}
+
+// ★ F4-a(2026-10-08):报警配置按钮 — 弹 AlarmConfigDialog
+//   【为什么每次点击都 new,不做 static 单例】
+//   编辑器 / 运行时画面用 static 单例是因为它们是【窗口】,要能反复
+//   show/hide 保持状态。而对话框的草稿在 exec() 每次都会
+//   reloadFromManager() 重读(见 AlarmConfigDialog::exec),
+//   复用实例反而要操心"上次的草稿还在不在、选中行还对不对"。
+//   局部变量 + 栈上析构是最省心的写法。
+//   【为什么传 alarmMgr_ 和 varMgr_ 而不是让对话框自己找】
+//   主画面的 alarmMgr_/varMgr_ 是正在跑的那套。传错了就会出现
+//   "配置里配的报警和实际报的报警不是一回事"——
+//   而这种错在界面上完全看不出来。
+void hmi::onAlarmConfigClicked() {
+    qwhmi::alarm::AlarmConfigDialog dlg(alarmMgr_, varMgr_, this);
+    dlg.exec();
 }
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable
 //   临时 demo,后续 E.4 WYSIWYG 完整编辑器替换
