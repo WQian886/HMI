@@ -374,6 +374,10 @@
     <QtMoc Include="src\editor\RuntimeCanvas.h" />
     <ClInclude Include="src\editor\RuntimeCanvas.h" />
     <ClCompile Include="src\editor\RuntimeCanvas.cpp" />
+    <!-- ★ F4-a(2026-10-08):报警配置对话框 -->
+    <QtMoc Include="src\alarm\AlarmConfigDialog.h" />
+    <ClInclude Include="src\alarm\AlarmConfigDialog.h" />
+    <ClCompile Include="src\alarm\AlarmConfigDialog.cpp" />
     <!-- ★ QCustomPlot 单文件含 40+ Q_OBJECT 类(教训 5.1 复用):
          vcxproj 必须 <QtMoc> 这一个头,QtMsBuild 自动生 moc_qcustomplot.cpp,
          否则 LNK2019 找不到 staticMetaObject / qt_metacast / qt_metacall -->
