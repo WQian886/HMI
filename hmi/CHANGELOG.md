@@ -4,6 +4,39 @@
 
 ## [Unreleased] - 2026-10-08
 
+### CI 一直在假装运行 —— 阶段 A 标 ✅ 的那一项,实际一次都没跑过
+
+`docs/现状.md` 一直把阶段 A 记作"✅ 8/8 验证通过"。复核时发现 CI 那项**从没执行过一次**:
+**GitHub 只读仓库根的 `.github/workflows/`**,而文件一直在 `hmi/.github/workflows/build.yml`
+(仓库根是 `E:/qianwie/hmi`,`hmi/` 只是子目录)。没被执行 → 没跑过 → 自然也没红过。
+
+> 本地 64/64 全绿 + 文档写着"✅",两个证据互相印证着,谁也不会去查 CI 配置本身。
+
+已移到仓库根,并修了另外三处,**每一处都实测过**:
+
+- `cmake -S . -B build` → `CMakeLists.txt` 在 `hmi/` 下,原来那条必失败;测试同理
+- 产物路径 `build/bin/Debug/hmi.exe` → 实跑 VS generator 读 `.vcxproj`,
+  `<OutDir>` 是 `build\Debug\`,**没有 `bin` 这层**
+- 上面那个错配配的是 `if-no-files-found: warn` → **产物从来没上传过,而 CI 不会因此变红**。改 `error`
+- 删 `submodules: recursive`:`git ls-files -s` 里 gitlink 一个都没有,仓库没子模块
+- `QT_QPA_PLATFORM: offscreen` 显式设上:64 个测试里 **27 个不自己设**,本地靠
+  `build_tests.ps1` 设,CI 上没这个脚本。实测设与不设结果一致,零风险
+- **超时 30 → 60 分钟**:本机 Ninja 从零编**仅 64 个测试目标**实测 **19.5 分钟**,
+  而 CI 还要多编主程序再跑测试,runner 通常更慢。30 分钟会在编译中途被掐掉,
+  报出来是"超时失败",没人想得到去查编到第几个。
+  (这 19.5 分钟是本机值,不是 CI 值,真跑完还可能不够,到时再校)
+
+**一条我原本猜错、实测才发现无害的**:`hmi/CMakeLists.txt` 无条件
+`set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/msvc2022_64")`,我本来认定它会顶掉 CI 上
+`install-qt-action` 的环境变量。**实测是错的** —— 把硬编码改成不存在的路径,
+`find_package(Qt6)` 仍从环境变量回落找到 6.8.3。它不是 bug,但仍改成
+"优先环境变量 → `$ENV{QTDIR}` → 本机兜底":理由是这个文件要进 CI,
+写死本机 D 盘路径会让人以为"CI 依赖某人的 D 盘",谁当真去排查就是白查。
+改完验了三种情形,`.\build.ps1 -Clean` 从零重编 94 个目标通过。
+
+⚠️ **修完的 CI 一次都没在 GitHub 上真跑过** —— push 不通(代理),推不上去就无从触发。
+所以只记"已修正并本地实测等价命令可跑通",**不记 ✅**。下次 push 通了第一件事看 Actions。
+
 ### F3-b 运行时画布的报警列表会闪了 —— 并且抓到一句我自己写的假注释
 
 **补的什么**:运行时画布上的 `AlarmListControl` 原来**根本不闪**。

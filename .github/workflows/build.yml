@@ -1,0 +1,88 @@
+# 阶段 A · A6 CI (GitHub Actions windows-2022)
+#
+# ★ 2026-10-08:这个文件原来在 hmi/.github/workflows/build.yml,GitHub 根本不会执行它。
+#   GitHub 只认【仓库根】的 .github/workflows/。所以 A6 这一项标了"✅ 验证通过",
+#   实际上从来没跑过一次 —— 本地 64/64 全绿掩盖了"CI 一次都没绿过"。
+#   见 docs/现状.md 第七节 CI 一节。
+#
+# ★ 同一个文件里还修了另外三处(exit 码实测出来的,不是看出来的):
+#   ① 源目录:CMakeLists.txt 在 hmi/ 下,`-S .` 指向仓库根 → configure 必失败
+#   ② 测试同理,要在 hmi/tests
+#   ③ 产物路径:实测 VS generator 的 OutDir 是 build\Debug\,不是 build\bin\Debug\,
+#      而原来写的是 `if-no-files-found: warn` —— 路径错了也只是警告,CI 照样绿
+name: build
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    # ★ 30 → 60,是实测出来的,不是拍脑袋。
+    #   本机 Ninja 从零编【仅 64 个测试目标】就要 19.5 分钟,
+    #   而 CI 还要多编一遍主程序、再跑一遍全部测试;
+    #   GitHub 的 windows-2022 runner 通常比本机慢。
+    #   原来的 30 分钟会在编译中途被 GitHub 掐掉 —— 而工作流超时
+    #   呈现出来的是"超时失败",没人会想到去查"到底编到第几个"。
+    #   这个数字只有本机一次 clean 重编的实测值,CI 上真跑完还可能不够,
+    #   到时按真实数字再调。
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtserialbus'
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # ★ 注意 install-qt-action 已经把 CMAKE_PREFIX_PATH 设成了环境变量,
+      #   hmi/CMakeLists.txt 里那句硬编码的 set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/...")
+      #   在这里【不会】顶掉它 —— 实测过:硬编码成不存在的路径,find_package 仍能
+      #   从环境变量回落找到 Qt 6.8.3。所以本地那句硬编码是"丑但无害",没动它。
+      - name: Configure (主程序)
+        run: cmake -S hmi -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+
+      - name: Configure (tests)
+        run: cmake -S hmi/tests -B build-tests -G "Visual Studio 17 2022" -A x64
+
+      - name: Build tests
+        run: cmake --build build-tests --config Debug --parallel
+
+      - name: Run tests
+        working-directory: build-tests
+        # ★ QT_QPA_PLATFORM 必须显式设。
+        #   64 个测试里有 37 个在 initTestCase 里自己 qputenv("offscreen"),
+        #   但另外 27 个没有 —— 它们靠的是【调用者】已经设好了。
+        #   本地靠 build_tests.ps1:56 设,CI 上没有这个脚本,不设就会在
+        #   无显示器的 runner 上弹真窗口甚至直接崩。
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --output-on-failure -C Debug
+
+      - name: Upload hmi.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: hmi-windows-debug
+          # ★ 路径由实测得来:VS generator 生成的是 build\Debug\hmi.exe。
+          #   原来写的 build/bin/Debug/hmi.exe 配合 `warn` = 产物从来没上传过,
+          #   而且 CI 不会因此变红 —— 又一个"看起来在跑,其实没跑"。
+          path: build/Debug/hmi.exe
+          # ★ 从 warn 改成 error。
+          #   产物传不上去必须让 CI 红,否则这个 step 和没有一样,
+          #   而"传不上去"正是下游拿到过期二进制的源头。
+          if-no-files-found: error

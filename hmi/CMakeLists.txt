@@ -7,7 +7,24 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/msvc2022_64")
+# ★ Qt 查找路径。
+#   【原来是无条件硬编码 "D:/Qt/6.8.3/msvc2022_64"】
+#   改动的理由不是"它在 CI 上会坏" —— 实测过,即使硬编码成一个
+#   根本不存在的路径,find_package 仍能从 CMAKE_PREFIX_PATH 环境变量
+#   回落找到 Qt 6.8.3(CI 上 install-qt-action 设的就是那个环境变量)。
+#   理由是这个文件要进 CI,而 CI 机器上根本没有 D 盘 Qt:
+#   一句写死的本机路径留在里面,读的人会以为"CI 依赖某人的 D 盘",
+#   以后谁把它当真去排查,就是白查一场。
+#   【怎么做到既不改行为又不写死】优先用环境变量(本机 build.ps1 正是
+#   设了 $env:QTDIR 之后才 --preset Qt-Debug 的,那个 preset 把它
+#   映射到 CMAKE_PREFIX_PATH);环境变量没有时才退回本机默认路径。
+if(NOT CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH})
+    set(CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH}")
+elseif(NOT CMAKE_PREFIX_PATH AND DEFINED ENV{QTDIR})
+    set(CMAKE_PREFIX_PATH "$ENV{QTDIR}")
+elseif(NOT CMAKE_PREFIX_PATH)
+    set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/msvc2022_64")   # 本机兜底,CI 上不会走到
+endif()
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Widgets PrintSupport SerialBus Sql)
 
