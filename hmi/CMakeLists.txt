@@ -89,6 +89,10 @@ set(SOURCES
     # ★ F4-a(2026-10-08):报警配置对话框(只读 + 草稿导出)
     src/alarm/AlarmConfigDialog.cpp
     src/alarm/AlarmSoundDialog.cpp     # ★ F5:报警声音设置对话框
+    # ★ F4(2026-10-08):报警历史查询视图 —— 填掉 D.3 留的占位 tab。
+    #   注:src/history/ 下的文件目前靠下面的 GLOB 兜底捡进来(AlarmRecorder 等
+    #   都没写进显式列表)。这一条显式写出来是为了守住"新文件必须登记"的约定。
+    src/history/AlarmHistoryView.cpp
 )
 
 set(HEADERS
@@ -163,6 +167,7 @@ set(HEADERS
     # ★ F4-a(2026-10-08):报警配置对话框
     src/alarm/AlarmConfigDialog.h
     src/alarm/AlarmSoundDialog.h      # ★ F5:报警声音设置对话框
+    src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图
 )
 
 set(FORMS
@@ -182,23 +187,29 @@ set(RESOURCES
 #   - 显式列表里的文件永远编(GLOB 不会重复加)
 #   - 新增的 .cpp / .h 自动捡进 SOURCES / HEADERS
 #   - CONFIGURE_DEPENDS 让 CMake 在 build 时检测文件变化,自动重 configure
-#   - 排除 Qt 生成的中间文件(*.moc / moc_*.cpp 等)
-# ★ 阶段 A 修复:排除 tests/ 目录(它有自己的工程和 moc 文件,不能混编)
-file(GLOB_RECURSE EXTRA_CPP CONFIGURE_DEPENDS
-    "*.cpp"
+#
+# ★ F4(2026-10-08)修正:原来用 file(GLOB_RECURSE "*.cpp") 从 hmi/ 根开始递归。
+#   它会一路钻进 tests/build_ninja/ 的 moc 中间文件目录,于是
+#   【每加一个测试,build 都喷一百多行 "GLOB mismatch"】,
+#   列出来的还是 moc_AlarmHistoryView.cpp 这种明显不该进 hmi.exe 的东西。
+#   —— 不影响编译结果,但看着像"测试文件被编进主程序了",
+#   下一个人得来花半小时确认有没有出事。
+#   改成【显式列出要递归的目录】:根目录(非递归)+ src/ + src 的子目录。
+#   tests/、out/、x64/ 从一开始就不在搜索路径里,不是"捡进来再过滤掉"。
+file(GLOB EXTRA_CPP CONFIGURE_DEPENDS
+    "*.cpp"                       # hmi/ 根下的 hmi.cpp / Alarm.cpp 等
+)
+file(GLOB_RECURSE EXTRA_CPP_SRC CONFIGURE_DEPENDS
     "src/*.cpp"
 )
-file(GLOB_RECURSE EXTRA_H CONFIGURE_DEPENDS
+file(GLOB EXTRA_H CONFIGURE_DEPENDS
     "*.h"
+)
+file(GLOB_RECURSE EXTRA_H_SRC CONFIGURE_DEPENDS
     "src/*.h"
 )
-# 排除 tests/、x64/、out/ 等构建产物目录
-# ★ E.1b-2 还要排除 qcustomplot/examples 和 qcustomplot/documentation:
-#   gitignore 已经不让 git 看到,但 CMake GLOB 不读 .gitignore,
-#   examples 里有多个 mainwindow.cpp 都 include "ui_mainwindow.h",
-#   AUTOUIC 会撞名冲突
-list(FILTER EXTRA_CPP EXCLUDE REGEX "[/\\](tests|x64|out|qcustomplot[/\\](examples|documentation))[/\\]")
-list(FILTER EXTRA_H   EXCLUDE REGEX "[/\\](tests|x64|out|qcustomplot[/\\](examples|documentation))[/\\]")
+list(APPEND EXTRA_CPP ${EXTRA_CPP_SRC})
+list(APPEND EXTRA_H   ${EXTRA_H_SRC})
 list(REMOVE_ITEM EXTRA_CPP ${SOURCES})
 list(REMOVE_ITEM EXTRA_H   ${HEADERS})
 list(APPEND SOURCES ${EXTRA_CPP})

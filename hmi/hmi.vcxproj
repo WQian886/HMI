@@ -143,6 +143,9 @@
     <ClCompile Include="AlarmSoundPlayer.cpp" />
     <QtMoc Include="src\alarm\AlarmSoundDialog.h" />
     <ClCompile Include="src\alarm\AlarmSoundDialog.cpp" />
+    <!-- ★ F4(2026-10-08):报警历史查询视图 -->
+    <QtMoc Include="src\history\AlarmHistoryView.h" />
+    <ClCompile Include="src\history\AlarmHistoryView.cpp" />
     <!-- 阶段 6.2(2026-08-07):JSON 序列化 helper -->
     <QtMoc Include="JsonSerializer.h" />
     <ClCompile Include="JsonSerializer.cpp" />

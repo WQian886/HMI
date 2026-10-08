@@ -299,6 +299,16 @@
     <ClCompile Include="src\history\AlarmRecorder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <!-- ★ F4(2026-10-08):报警历史查询视图(填 D.3 的占位 tab) -->
+    <QtMoc Include="src\history\AlarmHistoryView.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <ClInclude Include="src\history\AlarmHistoryView.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="src\history\AlarmHistoryView.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <!-- ★ D.4(2026-09-20):CSV 导出 -->
     <ClInclude Include="src\export\CsvExporter.h">
       <Filter>Header Files</Filter>

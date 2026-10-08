@@ -8,6 +8,7 @@
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
 #include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
+#include "history/AlarmHistoryView.h" // ★ F4(2026-10-08):报警历史查询视图(填 D.3 占位 tab)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
 #include "widgets/NumberDisplay.h"
@@ -484,6 +485,24 @@ hmi::hmi(QWidget *parent)
         qInfo() << "[hmi] AlarmRecorder 启动 OK,DB=" << qwhmi::history::HistoryRecorder::defaultDbPath();
     } else {
         qWarning() << "[hmi] AlarmRecorder 启动失败,报警历史功能禁用";
+    }
+
+    // ★ F4(2026-10-08):把 D.3 留的"报警历史"占位 Label 换成真的查询界面。
+    //   【为什么用 replaceWidget 而不是改 .ui】
+    //   改 .ui 要重新跑 UIC,而这个项目里 UIC 已经咬过人
+    //   (见上方"报警配置"按钮的说明:不用改 .ui 就不会撞 AUTOUIC)。
+    //   曲线 tab 当初留的注释也是这个套路 —— 照着做,不发明新办法。
+    //
+    //   【为什么放在这里而不是 .ui 定义时】
+    //   这个视图要 AlarmRecorder*,而 recorder 在 D.3 才建出来;
+    //   .ui 里放控件就得用 ui->setupUi(this) 之后再填。
+    if (auto* placeholder = ui.tabAlarmHistory->findChild<QLabel*>(
+                QStringLiteral("alarmHistoryPlaceholder"))) {
+        auto* view = new qwhmi::history::AlarmHistoryView(alarmRecorder_, ui.tabAlarmHistory);
+        ui.tabAlarmHistoryLayout->replaceWidget(placeholder, view);
+        // 占位 Label 要显式删掉 —— replaceWidget 只是"换位置",
+        // 不删的话它还会留在布局里,用户看到上面那行灰字。
+        delete placeholder;
     }
 
     // ★ 阶段 6.3(2026-08-07):loadFromFile 完成后重绑 UI(Binding 持的是旧 Variable*)

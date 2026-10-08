@@ -69,6 +69,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
     # ★ D.3(2026-09-20):报警持久化(对称 HistoryRecorder + alarm_history 表)
     ${HMI_SRC_DIR}/src/history/AlarmRecorder.cpp
+    # ★ F4(2026-10-08):报警历史查询视图
+    ${HMI_SRC_DIR}/src/history/AlarmHistoryView.cpp
     # ★ D.4(2026-09-20):CSV 导出
     ${HMI_SRC_DIR}/src/export/CsvExporter.cpp
     # ★ D.6(2026-09-20):派生表达式解析器(Pratt 手写)
@@ -194,6 +196,10 @@ add_hmi_test(tst_AlarmShelve)
 #   【这组测试测的是决策,不是耳朵】"响不响"能断言,声音有没有真的出来测不了。
 #   绿灯之后仍然必须人耳验一次 —— 见 tst_AlarmSound.cpp 顶部。
 add_hmi_test(tst_AlarmSound)
+# ★ F4(2026-10-08):报警历史查询视图 —— 时间/等级过滤
+#   【测的是"查得准",不是"画得出来"】界面能显示是一回事,
+#   显示的是不是用户要的那几条是另一回事 —— 后者才是"能查事故"和"有个表格"的区别。
+add_hmi_test(tst_AlarmHistoryView)
 # ★ F4-a(2026-10-08):报警配置对话框
 add_hmi_test(tst_AlarmConfigDialog)
 # 阶段 D · D.4 CSV 导出
