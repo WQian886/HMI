@@ -69,6 +69,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/tag/ExpressionParser.cpp
     # ★ D.7(2026-09-20):标签导入器(CSV-based)
     ${HMI_SRC_DIR}/src/tag/TagImporter.cpp
+    # ★ F4-a(2026-10-08):报警配置对话框(只读 + 草稿导出)
+    ${HMI_SRC_DIR}/src/alarm/AlarmConfigDialog.cpp
     # ★ D.2(2026-09-20):历史曲线控件 + QCustomPlot
     ${HMI_SRC_DIR}/src/widgets/TrendWidget.cpp
     ${HMI_SRC_DIR}/3rdparty/qcustomplot/qcustomplot.cpp
@@ -182,6 +184,8 @@ add_hmi_test(tst_AlarmRecorder)
 add_hmi_test(tst_ThresholdAlarmChecker)
 # ★ F2-c(2026-09-30):报警屏蔽(shelve)—— 必须可查、可撤销、可见
 add_hmi_test(tst_AlarmShelve)
+# ★ F4-a(2026-10-08):报警配置对话框
+add_hmi_test(tst_AlarmConfigDialog)
 # 阶段 D · D.4 CSV 导出
 add_hmi_test(tst_CsvExporter)
 # 阶段 D · D.6 派生表达式解析

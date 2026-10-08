@@ -85,6 +85,8 @@ set(SOURCES
     src/editor/SelectionFrameItem.cpp
     # ★ E.5(2026-09-29):运行时画布 RuntimeCanvas —— 主窗口显示编辑器存的画面
     src/editor/RuntimeCanvas.cpp
+    # ★ F4-a(2026-10-08):报警配置对话框(只读 + 草稿导出)
+    src/alarm/AlarmConfigDialog.cpp
 )
 
 set(HEADERS
@@ -155,6 +157,8 @@ set(HEADERS
     src/editor/GroupHandleItem.h
     # ★ E.4d 续:选中态视觉统一 SelectionFrameItem
     src/editor/SelectionFrameItem.h
+    # ★ F4-a(2026-10-08):报警配置对话框
+    src/alarm/AlarmConfigDialog.h
 )
 
 set(FORMS
