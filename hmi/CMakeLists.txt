@@ -29,6 +29,7 @@ set(SOURCES
     Alarm.cpp           # 告警
     AlarmManager.cpp    # 告警管理器
     ThresholdAlarmChecker.cpp # 阈值告警检查
+    AlarmSoundPlayer.cpp # ★ F5:报警声音/蜂鸣(等级区分 + 确认即静音 + 静默时段)
     WriteFailChecker.cpp # 写入失败检查
     JsonSerializer.cpp  # JSON 序列化
     Project.cpp         # 项目(保存/加载)
@@ -87,6 +88,7 @@ set(SOURCES
     src/editor/RuntimeCanvas.cpp
     # ★ F4-a(2026-10-08):报警配置对话框(只读 + 草稿导出)
     src/alarm/AlarmConfigDialog.cpp
+    src/alarm/AlarmSoundDialog.cpp     # ★ F5:报警声音设置对话框
 )
 
 set(HEADERS
@@ -103,6 +105,7 @@ set(HEADERS
     Alarm.h
     AlarmManager.h
     ThresholdAlarmChecker.h
+    AlarmSoundPlayer.h    # ★ F5:报警声音/蜂鸣
     WriteFailChecker.h
     JsonSerializer.h
     Project.h
@@ -159,6 +162,7 @@ set(HEADERS
     src/editor/SelectionFrameItem.h
     # ★ F4-a(2026-10-08):报警配置对话框
     src/alarm/AlarmConfigDialog.h
+    src/alarm/AlarmSoundDialog.h      # ★ F5:报警声音设置对话框
 )
 
 set(FORMS

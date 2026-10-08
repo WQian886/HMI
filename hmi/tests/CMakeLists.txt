@@ -48,6 +48,12 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/TcpClient.cpp
     ${HMI_SRC_DIR}/Alarm.cpp
     ${HMI_SRC_DIR}/AlarmManager.cpp
+    # ★ F5(2026-10-08):报警声音/蜂鸣
+    #   【为什么声音层也要进 HMI_CORE_SOURCES】add_hmi_test 把这整个列表
+    #   编进每一个测试。少加一行 = 链接期报一串"无法解析的外部符号",
+    #   报错点全在测试文件里,离病根(这一行没加)很远。
+    ${HMI_SRC_DIR}/AlarmSoundPlayer.cpp
+    ${HMI_SRC_DIR}/src/alarm/AlarmSoundDialog.cpp
     ${HMI_SRC_DIR}/PollScheduler.cpp
     ${HMI_SRC_DIR}/ModbusMaster.cpp
     ${HMI_SRC_DIR}/WriteScheduler.cpp
@@ -184,6 +190,10 @@ add_hmi_test(tst_AlarmRecorder)
 add_hmi_test(tst_ThresholdAlarmChecker)
 # ★ F2-c(2026-09-30):报警屏蔽(shelve)—— 必须可查、可撤销、可见
 add_hmi_test(tst_AlarmShelve)
+# ★ F5(2026-10-08):报警声音 —— 等级区分 / 确认即静音 / 静默时段
+#   【这组测试测的是决策,不是耳朵】"响不响"能断言,声音有没有真的出来测不了。
+#   绿灯之后仍然必须人耳验一次 —— 见 tst_AlarmSound.cpp 顶部。
+add_hmi_test(tst_AlarmSound)
 # ★ F4-a(2026-10-08):报警配置对话框
 add_hmi_test(tst_AlarmConfigDialog)
 # 阶段 D · D.4 CSV 导出

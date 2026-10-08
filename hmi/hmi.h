@@ -181,6 +181,9 @@ private:
     PollScheduler* pollScheduler_ = nullptr;  // 阶段 3.3:定时轮询调度器(替代 demoTimer,真 modbus 读)
     WriteScheduler* writeScheduler_ = nullptr; // 阶段 4.3.0:写调度器(Variable.dirty_ → modbus 写 PLC,与 PollScheduler 对称)
     AlarmManager* alarmMgr_ = nullptr;  // 阶段 5.2:报警管理器(5.3 才注册 Checker 接 Variable)
+    // ★ F5(2026-10-08):报警声音/蜂鸣。独立于 AlarmManager —— 它管的是
+    //   "要不要响",而 AlarmManager 只管"发生了"。混在一起就没法按班次配了。
+    class AlarmSoundPlayer* alarmSound_ = nullptr;
     ActionManager* actionMgr_ = nullptr;  // 阶段 5.6:报警联动动作(关阀/停机)
     Project*       project_    = nullptr;  // ★ 阶段 6.2:JSON 配置存读入口
 
@@ -204,6 +207,7 @@ private:
     //   F2 滞回和 F2-c 屏蔽配完一直没地方点,只能手改 JSON ——
     //   这个按钮是它们对真实用户存在的唯一途径。
     void onAlarmConfigClicked();
+    void onAlarmSoundSettings();   // ★ F5:报警声音设置对话框
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)

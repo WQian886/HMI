@@ -28,6 +28,8 @@
 #include "WriteFailChecker.h"     // 阶段 4.3.x:写失败转报警(2026-08-05 Bug #2 修复)
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include "alarm/AlarmConfigDialog.h"  // ★ F4-a(2026-10-08):报警配置对话框(报警配置按钮)
+#include "alarm/AlarmSoundDialog.h"   // ★ F5(2026-10-08):报警声音设置对话框
+#include "AlarmSoundPlayer.h"         // ★ F5(2026-10-08):报警声音/蜂鸣(报警声音按钮)
 #include <QIntValidator>
 #include <QTimer>                 // counter / resetTimer_ / alarmBlinkTimer_ 共用
 #include <QMessageBox>
@@ -133,6 +135,19 @@ hmi::hmi(QWidget *parent)
         "需要工程师(Engineer)或管理员(Admin)权限。"));
     ui.buttonRowLayout->addWidget(alarmCfgBtn);
     connect(alarmCfgBtn, &QPushButton::clicked, this, &hmi::onAlarmConfigClicked);
+
+    // ★ F5(2026-10-08):报警声音设置按钮 — 弹 AlarmSoundDialog
+    //   【为什么必须紧挨着「报警配置」而不是塞进某个菜单】
+    //   和上面同一个理由:报警声音不响,现场靠手改 JSON 是配不了的。
+    //   而"报警配置"就在隔壁,操作员要找报警相关设置时自然会找过来 ——
+    //   拆到菜单深处的结果就是那个设置永远没人动。
+    auto* alarmSoundBtn = new QPushButton(QStringLiteral("报警声音"), this);
+    alarmSoundBtn->setMinimumSize(80, 32);
+    alarmSoundBtn->setToolTip(QStringLiteral(
+        "设置各等级报警是否发声、未确认时是否重复提醒、静默时段(免打扰)。\n"
+        "需要工程师(Engineer)或管理员(Admin)权限。"));
+    ui.buttonRowLayout->addWidget(alarmSoundBtn);
+    connect(alarmSoundBtn, &QPushButton::clicked, this, &hmi::onAlarmSoundSettings);
 
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
@@ -406,6 +421,14 @@ hmi::hmi(QWidget *parent)
     alarmBlinkTimer_ = new QTimer(this);
     alarmBlinkTimer_->setInterval(500);
     connect(alarmBlinkTimer_, &QTimer::timeout, this, &hmi::onAlarmBlinkTick);
+
+    // ★ F5(2026-10-08):报警声音/蜂鸣。
+    //   【为什么放在闪烁定时器旁边】两者都是"报警发生了"的【表现层】响应,
+    //   而 AlarmManager 只负责"发生了"这个事实。
+    //   【为什么这里什么都不配】默认设置就该是现场能直接用的那一套
+    //   (Info 不响、其余三档响、5 秒重复提醒到确认为止)。
+    //   想改的走「报警声音…」菜单 —— 见 onAlarmSoundSettings。
+    alarmSound_ = new AlarmSoundPlayer(alarmMgr_, this);
 
     // 阶段 5.6(2026-08-04):报警联动动作 — 温度高/低时速度写 0(模拟停机)
     //   ★ 5.6 收尾(2026-08-07):mapping 配置抽到 initActionManager(),为阶段 6 JSON 铺路
@@ -889,6 +912,14 @@ void hmi::onRuntimeCanvasClicked() {
 //   不会建出一条"看着配好了、实际永远不响"的报警。
 void hmi::onAlarmConfigClicked() {
     qwhmi::alarm::AlarmConfigDialog dlg(alarmMgr_, varMgr_, pollScheduler_, this);
+    dlg.exec();
+}
+
+// ★ F5(2026-10-08):报警声音设置
+//   【为什么每次点击都 new】同 onAlarmConfigClicked —— 对话框是栈上局部变量,
+//   状态存在 AlarmSoundPlayer 里,对话框自己不留草稿。
+void hmi::onAlarmSoundSettings() {
+    qwhmi::alarm::AlarmSoundDialog dlg(alarmSound_, this);
     dlg.exec();
 }
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable

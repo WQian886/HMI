@@ -138,6 +138,11 @@
     <!-- 阶段 5.3-收尾(2026-08-07):ThresholdAlarmChecker 合并 High/Low + 最小持续时间 -->
     <QtMoc Include="ThresholdAlarmChecker.h" />
     <ClCompile Include="ThresholdAlarmChecker.cpp" />
+    <!-- ★ F5(2026-10-08):报警声音/蜂鸣 -->
+    <QtMoc Include="AlarmSoundPlayer.h" />
+    <ClCompile Include="AlarmSoundPlayer.cpp" />
+    <QtMoc Include="src\alarm\AlarmSoundDialog.h" />
+    <ClCompile Include="src\alarm\AlarmSoundDialog.cpp" />
     <!-- 阶段 6.2(2026-08-07):JSON 序列化 helper -->
     <QtMoc Include="JsonSerializer.h" />
     <ClCompile Include="JsonSerializer.cpp" />
