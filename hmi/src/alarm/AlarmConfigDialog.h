@@ -1,22 +1,27 @@
 // ============================================================================
-// 阶段 F · F4-a · 报警配置对话框(只读)
+// 阶段 F · 报警配置对话框(F4-a 只读 / F4-c 落地 / F4-b 应用)
 //
-// 文件职责:把 AlarmManager 里所有 checker 的配置【读出来给人看】。
+// 文件职责:把 AlarmManager 里所有 checker 的配置【读出来给人看、给人改、
+//          并落到该落的地方】。
 //
-// ★ 为什么第一版是只读的(2026-10-08)
-//   F4 剩下的活分两步,这一步只做第一步:
-//     F4-a(本文件):把配置读出来 + 可编辑地维护一份草稿 + 导出 JSON
-//     F4-b:        把草稿应用回运行中的 AlarmManager
-//   拆开的原因是 F4-b 有个必须先看见界面才能拍板的设计问题 ——
-//   "报警正在跑的时候改阈值,怎么生效?"(重建 checker / 加 setConfig / 只准停机改)
-//   三个方案对 UI 的要求不一样。界面没做出来就拍板,拍的是想象。
+// ★ 三个阶段各管什么
+//   F4-a:读成草稿 + 可编辑 + 导出 JSON。 【不改运行中任何状态】
+//   F4-c:草稿 → 工程文件 alarms[]。       【不改运行中任何状态】
+//   F4-b:草稿 → 运行中的 AlarmManager。   【这一版才开始改运行中的状态】
 //
-//   所以这一步【刻意不改运行中的任何状态】:
-//     - 不调 addChecker / removeChecker
-//     - 不碰 ThresholdAlarmChecker::config_
-//     - 不动 shelved_
-//   好处是这一整步可以脱离 PLC 单独验收 —— 而这个项目反复吃亏的
-//   恰恰是"测试绿了 ≠ 功能能用"(见 CHANGELOG 里 4 次同类教训)。
+// ★ 为什么第一版是只读的、现在又放开了(2026-10-08)
+//   F4-a 刻意只读,是因为 F4-b 有个必须先看见界面才能拍板的设计问题 ——
+//   "报警正在跑的时候改阈值,怎么生效?"。三个方案(删了重建 / 加 setConfig /
+//   只准停机改)对界面的要求不一样,界面没做出来就拍板,拍的是想象。
+//   用户 2026-10-08 拍板选了【就地改配置】,这条路才被铺出来。
+//
+//   于是"绝不改运行中状态"这条约束从【绝对】收窄成【两条仍必须成立】:
+//     ① 只读路径(打开/编辑草稿/导出/存盘)依然完全不碰运行中;
+//     ② 改已有报警一律【就地改配置】,绝不删了重建 ——
+//        重建会让 Fired 状态里的 currentId_ 随旧对象消失,
+//        活动列表里那条报警永远收不了尾(见 ThresholdAlarmChecker.h);
+//        ③ 应用失败时运行中的状态保持原样,不能"改了一半"。
+//   这三条比"绝不碰"弱,但足以保住独立验收的能力。
 //
 // ★ 为什么这个对话框必须存在(而不是"继续手改 JSON")
 //   F2 滞回、F2-c 屏蔽都已经落地了,但【没有任何入口能配它们】:
@@ -29,7 +34,7 @@
 //   要 EditProject(Permission.h:35)。这条权限枚举定义了但从没人调用过 ——
 //   本文件是它的第一个使用者。理由:改报警配置 = 改工程行为 = 工程编辑。
 //
-// 关联:../../AlarmManager.h, ../../ThresholdAlarmChecker.h,
+// 关联:../../AlarmManager.h, ../../ThresholdAlarmChecker.h, ../../PollScheduler.h,
 //      ../auth/Permission.h, ../auth/CurrentUser.h
 // ============================================================================
 
@@ -50,6 +55,9 @@ class QTextEdit;
 
 class AlarmManager;
 class VariableManager;
+class PollScheduler;
+class AlarmChecker;
+class ThresholdAlarmChecker;
 
 namespace qwhmi::alarm {
 
@@ -81,9 +89,14 @@ struct AlarmConfigRow {
 class AlarmConfigDialog : public QDialog {
     Q_OBJECT
 public:
-    // mgr / varMgr 都不接管生命周期(由主窗口持有,活得比对话框长)
+    // mgr / varMgr / pollScheduler 都不接管生命周期(由主窗口持有,活得比对话框长)
+    //
+    // ★ pollScheduler 是 F4-b 加的:应用草稿时新增的报警要 new ThresholdAlarmChecker,
+    //   而它必须订阅 PollScheduler::rawRead 才能拿到实时值。传 nullptr 时
+    //   applyDraftToManager 会拒绝新建(并说明原因),而不是建一个永不触发的空壳。
     AlarmConfigDialog(AlarmManager* mgr,
                       VariableManager* varMgr,
+                      PollScheduler* pollScheduler = nullptr,
                       QWidget* parent = nullptr);
     ~AlarmConfigDialog() override;
 
@@ -134,12 +147,47 @@ public:
     //   两种原因分开报给用户 —— 前者要他去修变量,后者要他改名字。
     bool validateDraft(QString* errorOut) const;
 
+    // ===== ★ F4-b:把草稿应用到【运行中】的 AlarmManager =====
+    //
+    // 【和 F4-c 的分工】
+    //   F4-c:草稿 → 工程文件,运行中的报警一概不动,重载工程才生效。
+    //   F4-b:草稿 → 立刻改运行中的报警,不用重载、不用停机。
+    //   两条路都留着,因为场景不同:调机时用 F4-b 试,定版时用 F4-c 存档。
+    //
+    // 【改已有报警的方式:就地改配置,不删了重建】
+    //   见 ThresholdAlarmChecker.h 的详细说明。核心是 Fired 状态里的 currentId_
+    //   存在 checker 对象上,删掉重建会让活动列表里那条报警永远收不了尾。
+    //
+    // 【三个必须由界面来管的约束,这里逐条说明】
+    //   ① 新增的报警要 new ThresholdAlarmChecker,而它需要 PollScheduler*。
+    //      对话框原来只拿 AlarmManager* + VariableManager*,所以构造函数加了
+    //      pollScheduler 参数。没它就没法新建【能真正生效】的报警 ——
+    //      而"能存进文件但运行中不响"的报警比没有更危险。
+    //   ② 正在响的报警不能换关联变量(理由见 ThresholdAlarmChecker::setVariable)。
+    //   ③ 应用前先整体校验,失败要说清楚"哪一条、为什么"。
+    //
+    // 返回 true 表示草稿已完全落到运行中的 AlarmManager;
+    // 失败时 errorOut 说明原因,且【运行中的状态保持原样】。
+    bool applyDraftToManager(QString* errorOut);
+
+    // ★ 从草稿里删掉一行【不做任何 UI 询问】。
+    //   onRemove() = 弹确认框 + 调它。
+    //
+    //   【为什么要拆开】onRemove 原本把确认框和删除写在一起,而那个
+    //   QMessageBox::question 在 offscreen 测试下会永久阻塞(实测卡满 300s 超时),
+    //   于是"删除"这条路【一条测试都写不了】。
+    //   而 F4-b 让删除变成最危险的路径(删掉正在响的报警会留孤儿记录),
+    //   恰恰最需要测试覆盖 —— 这个可测性缺口第一次成了拦路虎。
+    //   拆开之后:询问是 UI 的职责,"怎么删"是数据层的职责,各归各。
+    bool removeRowFromDraft(int row);
+
 private slots:
     void onAdd();
     void onRemove();
     void onApplyFieldEdits();   // 表单改动 → 回写草稿行
     void onExport();            // 导出草稿 JSON(显示 + 复制到剪贴板)
     void onSaveToProject();     // ★ F4-c:草稿 → 工程文件 alarms[]
+    void onApplyToRunning();    // ★ F4-b:草稿 → 运行中的 AlarmManager
 
 private:
     void setupTable();
@@ -154,8 +202,31 @@ private:
     //   名字是 checkers_ 的 key,重名会导致加载工程文件时静默覆盖。
     QString nextFreeDraftName() const;
 
+    // ---- ★ F4-b:草稿 ⇄ 运行中 的对照 ----
+    //   【为什么不用 AlarmManager::checkers() 建索引】
+    //   那个方法每次都把整个 QHash 摊成 QList,而这三处在一次应用里会被反复调用
+    //   (每条草稿行都要查一次)。几十条报警时是几十次 O(n) 遍历 ——
+    //   不算致命,但更糟的是:checkers() 返回的是【无序的 values()】,
+    //   拿它做"找一条"的容器,读代码的人会误以为顺序有意义。
+    //   这里按名字线性找,语义直白,n 小的时候完全够用。
+    //   返回的指针【不接管生命周期】(归 AlarmManager 所有)。
+    //
+    //   ★ 返回 ThresholdAlarmChecker* 而不是 AlarmChecker*:
+    //     调用方要 setConfig()/setVariable()/isActive(),这些只在子类上有。
+    //     返回基类指针的话,每个调用点都得再 dynamic_cast 一次,
+    //     而忘了 cast 的那个点就是一条编译错误 —— 不如让函数自己管。
+    //     非阈值报警(WriteFailChecker)查得到名字但 cast 不动,返回 nullptr。
+    ThresholdAlarmChecker* thresholdCheckerNamed(const QString& name) const;
+    bool hasCheckerNamed(const QString& name) const;
+    bool hasDraftRowNamed(const QString& name) const;
+
     AlarmManager*   alarmMgr_ = nullptr;
     VariableManager* varMgr_   = nullptr;
+    // ★ F4-b:新建 ThresholdAlarmChecker 必须有它 —— checker 靠订阅
+    //   PollScheduler::rawRead 才能拿到实时值。没有它 new 出来的报警
+    //   永远不会触发,那还不如不加(界面看不出来,用户以为配成功了)。
+    //   不接管生命周期(hmi 持有它,活得比对话框长)。
+    PollScheduler*   pollScheduler_ = nullptr;
 
     QList<AlarmConfigRow> rows_;   // 草稿(★ 本对话框唯一的数据源)
 
@@ -192,6 +263,9 @@ private:
     // ★ F4-c:真正落地的按钮。exportBtn_ 只是"看一眼 + 复制到剪贴板",
     //   几乎等于没有落地能力;这个才是把草稿写进工程文件的。
     QPushButton*    saveBtn_    = nullptr;
+    // ★ F4-b:草稿 → 运行中的报警。和 saveBtn_ 是【两条不同的路】,不是替代关系:
+    //   saveBtn_ 定版存档(重载才生效),这个立刻生效(不落盘,存盘请另按)。
+    QPushButton*    applyBtn_   = nullptr;
     QPushButton*    closeBtn_   = nullptr;
     QTextEdit*      jsonView_   = nullptr;
 };

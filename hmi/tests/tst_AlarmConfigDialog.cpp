@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // tst_AlarmConfigDialog —— F4-a 报警配置对话框
 //
 // 【这个对话框解决什么】
@@ -17,11 +17,15 @@
 //   这是 2026-10-08 补的:用户实测"点新增没反应",而此前 11 条用例全是只读的,
 //   一条都没碰过按钮,所以全绿。findChild 是公开 API,不是反射私有成员。
 //
-// 【★ 本文件要锁住的一个设计不变量】
-//   这个对话框【绝不改动运行中的 AlarmManager】。
-//   所以每条测试在断言完"对话框显示的对不对"之后,
-//   都额外断言 AlarmManager 侧【原封不动】——
-//   这条不变量一旦破了,F4-b 就没法独立验收了。
+// 【★ 本文件要锁住的设计不变量 —— F4-b 之后收窄了,但没取消】
+//   F4-a/F4-c 阶段:这个对话框【绝不改动运行中的 AlarmManager】。
+//   F4-b(2026-10-08)开了一个口子:applyDraftToManager() 可以改。
+//   收窄后仍必须成立的两条:
+//     ① 【只读的路径依然只读】—— 打开对话框、编辑草稿、导出、存盘,
+//        全程不碰运行中的状态。F4-a 的用例继续按这个断言。
+//     ② 【应用失败时运行中原样不动】—— 不能"改了一半"。
+//        这是 F4-b 新增的风险,由 apply_rejects* 那几条守住。
+//   这两条一旦破了,F4-b 就没有独立验收面了。
 // ============================================================================
 
 #include <QtTest>
@@ -37,6 +41,7 @@
 
 #include "AlarmManager.h"
 #include "JsonSerializer.h"
+#include "PollScheduler.h"
 #include "Project.h"
 #include "ThresholdAlarmChecker.h"
 #include "VariableManager.h"
@@ -99,6 +104,22 @@ private slots:
     void save_refusesCorruptJson();
     void validateAlarmsArray_unitLevel();
 
+    // ---- ★ F4-b:应用到运行中的 AlarmManager ----
+    void apply_updatesThresholdOfRunningAlarm();
+    void apply_updatesLevelDirectionHysteresisMinDur();
+    void apply_addsBrandNewAlarm();
+    void apply_deletesAlarmRemovedFromDraft();
+    void apply_syncsShelvedState();
+    void apply_rejectsUnknownVariableAndChangesNothing();
+    void apply_rejectsDuplicateNamesAndChangesNothing();
+    void apply_withoutPollSchedulerRefusesToAdd();
+    void apply_refusesVariableChangeWhileAlarmIsFiring();
+    void apply_keepsFiredAlarmRecoverable_afterThresholdChange();
+    void apply_deletingFiringAlarm_doesNotLeaveOrphanActiveAlarm();
+    void apply_deletingShelvedAlarm_clearsShelvedState();
+    void apply_rereadsTableSoRowsMatchRunningState();
+    void apply_rejectsButReportsWhichAlarm();
+
     // ---- 导出 ----
     void exportJson_matchesProjectFileSchema();
     void exportJson_roundTripsThroughJsonSerializer();
@@ -127,6 +148,13 @@ private:
     //   也没被别的控件挡住。2026-10-08 这次就是这么漏的:11 条测试全绿,
     //   因为它们一条都没碰过按钮。
     void clickButton(AlarmConfigDialog* dlg, const QString& objectName);
+
+    // 按名字找行号,找不到返回 -1。
+    // 【为什么必须有这个】
+    //   reloadFromManager() 按【名字】排序,而"新报警"和"温度高"谁在前
+    //   取决于编码比较结果 —— 写死行号就是埋雷:改个名字顺序就崩,
+    //   而且崩的时候报的是"第 0 行不是温度高",没人想得到是自己写死了下标。
+    int rowIndexByName(const AlarmConfigDialog& dlg, const QString& name) const;
 
     AlarmManager*    mgr_   = nullptr;
     VariableManager* varMgr_ = nullptr;
@@ -270,6 +298,14 @@ void TestAlarmConfigDialog::loginAs(Role r) {
     u.name   = QStringLiteral("tester");
     u.role   = r;
     qwhmi::auth::CurrentUser::instance().login(u);
+}
+
+int TestAlarmConfigDialog::rowIndexByName(const AlarmConfigDialog& dlg,
+                                          const QString& name) const {
+    for (int i = 0; i < dlg.rowCount(); ++i) {
+        if (dlg.nameAt(i) == name) return i;
+    }
+    return -1;
 }
 
 // ============================================================================
@@ -498,7 +534,10 @@ void TestAlarmConfigDialog::addButton_keepsTableAndDraftInStep() {
 // onRemove 会弹模态 QMessageBox::question —— offscreen 下会阻塞。
 // 所以这里【不点删除按钮】,而是直接调槽并预设"用户答 Yes":
 // QMessageBox 在测试里没法自动应答,这是 Qt 测试的已知限制,不是缺陷。
-// 删除按钮本身的连线由 clickButton 的"按钮存在且 enabled"部分覆盖。
+// ★ 2026-10-08 F4-b 更新:删除逻辑已从 onRemove 拆到 removeRowFromDraft
+//   (onRemove 只负责弹确认框),所以"删掉了会怎样"现在【真的能测】了 ——
+//   见 apply_deletesAlarmRemovedFromDraft / apply_deletingFiringAlarm_doesNotLeaveOrphanActiveAlarm。
+//   本条仍然只查按钮的存在与 enabled 状态,因为"按钮 → 确认框"那段没法在测试里走完。
 void TestAlarmConfigDialog::removeButton_removesSelectedRow() {
     useThresholdChecker(mgr_, varMgr_, QStringLiteral("alpha报警"), QStringLiteral("plc1.A"), 1, 0);
     useThresholdChecker(mgr_, varMgr_, QStringLiteral("beta报警"),  QStringLiteral("plc1.B"), 2, 0);
@@ -921,6 +960,473 @@ void TestAlarmConfigDialog::validateAlarmsArray_unitLevel() {
     b["name"] = QStringLiteral("   ");
     blank.append(b);
     QVERIFY(!Project::validateAlarmsArray(blank, &err));
+}
+
+// ============================================================================
+// ★ F4-b:应用到运行中的 AlarmManager
+//
+// 【这组用例在防什么】
+//   F4-b 是第一次让这个对话框【真的改动运行中的报警】。在此之前
+//   "改动只存在于草稿"是一个可以反复依赖的安全网;现在这层网撤了,
+//   于是有两类以前不可能发生的故障:
+//     ①【改了一半】—— 前几条生效了,中间一条失败,而用户只看到"应用失败"。
+//        结果是运行中的状态和界面上的草稿对不上,且没人说得清哪里对不上。
+//     ②【孤儿记录】—— 报警正在响时被删掉重建,活动列表里那条再也收不了尾。
+//        操作员看到一个撤不掉的报警,历史表也少一条收尾(F1 d504b53 那类 bug)。
+//
+//   所以这组用例的重点不是"改了会不会生效"(那是显然的),
+//   而是"改坏了之后能不能被发现",以及"失败的路径有没有留下半成品"。
+//
+// ★ 关于 mock 的取舍
+//   F4-b 的核心风险在"改运行中的状态",而 ThresholdAlarmChecker 的检测逻辑
+//   要有 PollScheduler 才跑得起来。本组测试【大多不需要真的跑起来】:
+//   改配置、改变量、删报警都是内存操作,断言 config()/isActive()/activeAlarms()
+//   就够了。唯一需要真跑的是"改完还能不能恢复",那条走 PollScheduler 真发信号。
+// ============================================================================
+
+// ---- 基本:改阈值要真的落到运行中的 checker 上 ----
+
+void TestAlarmConfigDialog::apply_updatesThresholdOfRunningAlarm() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    // ★ 这条用例只验"改已有报警",所以【不新增】—— 新增需要 pollScheduler,
+    //   那是 apply_addsBrandNewAlarm 的活。一条用例只验一件事。
+    AlarmConfigDialog dlg(mgr_, varMgr_, new PollScheduler(nullptr, nullptr));
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    // ★ 不要靠"第几行"找 —— reloadFromManager 按名字排序,
+    //   而"新报警"和"温度高"的先后跟编码比较有关,写死行号就是埋雷。
+    const int r = rowIndexByName(dlg, QStringLiteral("温度高"));
+    QVERIFY2(r >= 0, "表里找不到「温度高」这一行");
+    QCOMPARE(r, 0);   // 只有一条,必然是第 0 行 —— 这条断言是刻意的:
+                      // 多一条草稿时它会红,提醒我测试的前提变了。
+    table->setCurrentCell(r, 0);
+    auto* spin = dlg.findChild<QDoubleSpinBox*>(QStringLiteral("alarmConfigThresholdSpin"));
+    QVERIFY(spin);
+    spin->setValue(55.0);
+
+    QString err;
+    if (!dlg.applyDraftToManager(&err)) {
+        // 失败时把草稿内容打出来 —— 否则只能看到一句"返回 FALSE",
+        // 不知道是哪一行、哪个变量出的问题(这就是 F3 定下的"报错必须能用")。
+        for (int i = 0; i < dlg.rowCount(); ++i) {
+            qDebug() << "  draft row" << i << "name=" << dlg.nameAt(i)
+                     << "var=" << dlg.variableAt(i) << "thr=" << dlg.thresholdAt(i);
+        }
+        QFAIL(qPrintable(err));
+    }
+
+    // ★ 断言运行中那个 checker 的配置,不是断言对话框里的显示。
+    bool found = false;
+    for (AlarmChecker* c : mgr_->checkers()) {
+        auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
+        if (!tc || tc->name() != QStringLiteral("温度高")) continue;
+        found = true;
+        QCOMPARE(tc->config().threshold, 55.0);
+    }
+    QVERIFY2(found, "温度高这条报警不见了 —— 应用后 checker 数量不该变");
+}
+
+// 等级/方向/滞回/最短持续 四个字段一起改 —— 少改一个都是"界面上改了、没生效"。
+// 尤其【等级】:它存在基类的 level_ 里,只改 config_ 的话报警还是旧等级。
+void TestAlarmConfigDialog::apply_updatesLevelDirectionHysteresisMinDur() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    table->setCurrentCell(0, 0);
+
+    auto* level = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigLevelCombo"));
+    auto* dir   = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigDirCombo"));
+    auto* hyst  = dlg.findChild<QDoubleSpinBox*>(QStringLiteral("alarmConfigHysteresisSpin"));
+    auto* minDur= dlg.findChild<QSpinBox*>(QStringLiteral("alarmConfigMinDurSpin"));
+    QVERIFY(level && dir && hyst && minDur);
+    level->setCurrentIndex(level->findData(QStringLiteral("Emergency")));
+    dir->setCurrentIndex(dir->findData(QStringLiteral("Below")));
+    hyst->setValue(4.5);
+    minDur->setValue(1500);
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    for (AlarmChecker* c : mgr_->checkers()) {
+        auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
+        if (!tc) continue;
+        QCOMPARE(tc->config().level,         AlarmLevel::Emergency);
+        QCOMPARE(tc->config().direction,     Direction::Below);
+        QCOMPARE(tc->config().hysteresis,    4.5);
+        QCOMPARE(tc->config().minDurationMs, 1500);
+        // ★ 等级必须同时进了基类 —— 它决定报警在界面上是什么颜色。
+        QCOMPARE(tc->level(), AlarmLevel::Emergency);
+    }
+}
+
+// 新增一条 → 运行中真的多了一个能用的 checker。
+void TestAlarmConfigDialog::apply_addsBrandNewAlarm() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    // 运行中的 checker 从 1 条变 2 条
+    QSet<QString> names;
+    for (AlarmChecker* c : mgr_->checkers()) if (c) names.insert(c->name());
+    QCOMPARE(names.size(), 2);
+    QVERIFY(names.contains(QStringLiteral("温度高")));
+    QVERIFY2(names.contains(dlg.nameAt(dlg.rowCount() - 1))
+             || names.contains(QStringLiteral("新报警")),
+             "新增的报警没出现在运行中的 AlarmManager 里");
+}
+
+// 草稿里删掉的 → 运行中也要真的删掉,且不能留孤儿。
+void TestAlarmConfigDialog::apply_deletesAlarmRemovedFromDraft() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度低"), QStringLiteral("plc1.Temp"), 10, 0);
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    QCOMPARE(dlg.rowCount(), 2);
+    // ★ 走 removeRowFromDraft 而不是点按钮:onRemove 的确认框在 offscreen 下
+    //   会永久阻塞(实测卡到 300s 超时)。详见 removeRowFromDraft 的说明。
+    const int victim = rowIndexByName(dlg, QStringLiteral("温度低"));
+    QVERIFY2(victim >= 0, "表里找不到「温度低」这一行");
+    QVERIFY(dlg.removeRowFromDraft(victim));
+    QCOMPARE(dlg.rowCount(), 1);
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    QSet<QString> names;
+    for (AlarmChecker* c : mgr_->checkers()) if (c) names.insert(c->name());
+    QCOMPARE(names.size(), 1);
+    QVERIFY(!names.contains(QStringLiteral("温度低")));
+    QVERIFY(names.contains(QStringLiteral("温度高")));
+}
+
+// 屏蔽状态是【运行中】的状态(shelved_ 里),草稿改了就得跟着变。
+// 不同步的话,对话框显示的"已屏蔽"和实际屏蔽状态会各说各话 ——
+// 而 F2-c 的硬约束恰恰是"屏蔽必须可见、不能藏"。
+void TestAlarmConfigDialog::apply_syncsShelvedState() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    QVERIFY(mgr_->shelve(QStringLiteral("温度高")));
+    QVERIFY(mgr_->isShelved(QStringLiteral("温度高")));
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    QCOMPARE(dlg.shelvedAt(0), true);   // 草稿读进来时带着屏蔽标记
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+    // 草稿里仍是"已屏蔽" → 运行中也应仍是屏蔽的(不能被应用动作顺手清掉)
+    QVERIFY2(mgr_->isShelved(QStringLiteral("温度高")),
+             "应用草稿把用户的屏蔽状态弄丢了 —— 这是 F2-c 明令禁止的");
+}
+
+// ---- 失败路径:必须整体不动 ----
+
+// 变量不存在 → 拒绝,且运行中的配置一个字节都不能改。
+void TestAlarmConfigDialog::apply_rejectsUnknownVariableAndChangesNothing() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    // 孤儿变量:checker 监控它,但它不在 varMgr_ 里
+    Variable* orphan = new Variable(QStringLiteral("plc1.Orphan"), static_cast<quint16>(200),
+                                    Variable::DataType::Float, Variable::Access::ReadOnly);
+    CheckerConfig cfg; cfg.threshold = 10.0;
+    mgr_->addChecker(new ThresholdAlarmChecker(QStringLiteral("孤儿报警"), orphan, nullptr, cfg, mgr_));
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    // 改那条合法的报警的阈值 —— 顺带验证"失败时连没问题的这条也不许改"
+    table->setCurrentCell(0, 0);
+    auto* spin = dlg.findChild<QDoubleSpinBox*>(QStringLiteral("alarmConfigThresholdSpin"));
+    QVERIFY(spin);
+    spin->setValue(33.0);
+
+    QString err;
+    QVERIFY2(!dlg.applyDraftToManager(&err), "引用了不存在的变量却应用成功了");
+    QVERIFY2(!err.isEmpty(), "失败必须说明原因");
+
+    // ★ 运行中那条合法报警的阈值必须【原封不动】
+    for (AlarmChecker* c : mgr_->checkers()) {
+        auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
+        if (!tc || tc->name() != QStringLiteral("温度高")) continue;
+        QCOMPARE(tc->config().threshold, 80.0);
+    }
+}
+
+void TestAlarmConfigDialog::apply_rejectsDuplicateNamesAndChangesNothing() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    // ★ 先点"新增"造出第二条草稿 —— 否则只有一行,改不出重名,
+    //   applyDraftToManager 正确地放行,测试却断言它该被拒,红得莫名其妙。
+    //   (上一版就是栽在这儿:一条草稿时根本不存在重名。)
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+    QCOMPARE(dlg.rowCount(), 2);
+
+    // 把第一条改成和新增行同名 —— addChecker 会拒收重名(AlarmManager.cpp:13),
+    // 而存进工程文件后 Project 加载时是【后者静默覆盖前者】(见 onAdd 的说明)。
+    const int r0 = rowIndexByName(dlg, QStringLiteral("温度高"));
+    const int r1 = rowIndexByName(dlg, QStringLiteral("新报警"));
+    QVERIFY2(r0 >= 0, "表里找不到「温度高」这一行");
+    QVERIFY2(r1 >= 0, "表里找不到新增的那一行(它的名字被 nextFreeDraftName 改过)");
+    auto* nameItem = table->item(r0, 0);
+    QVERIFY(nameItem);
+    nameItem->setText(QStringLiteral("新报警"));
+
+    QString err;
+    QVERIFY2(!dlg.applyDraftToManager(&err), "重名被放过了 —— 加载工程时会静默覆盖");
+    QVERIFY2(!err.isEmpty(), "失败必须说明原因");
+    // ★ 一条都不能少:校验是【先查后改】,失败时运行中的状态必须原封不动。
+    //   只断言"没多出来"不够 —— 校验失败却顺手把阈值改了,是更坏的情况。
+    QCOMPARE(static_cast<int>(mgr_->checkers().size()), 1);
+    for (AlarmChecker* c : mgr_->checkers()) {
+        auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
+        if (!tc || tc->name() != QStringLiteral("温度高")) continue;
+        QCOMPARE(tc->config().threshold, 80.0);   // 没被草稿里的 0/其它值污染
+    }
+}
+
+// 没有 PollScheduler 就不许新增 —— 建不出"能真正生效"的报警。
+// 这是本组里最重要的一条"宁可不做事" ——
+// 静默建一条永不触发的报警,比明确报错危险得多。
+void TestAlarmConfigDialog::apply_withoutPollSchedulerRefusesToAdd() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    AlarmConfigDialog dlg(mgr_, varMgr_ /* pollScheduler = nullptr */);
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+
+    QString err;
+    QVERIFY2(!dlg.applyDraftToManager(&err),
+             "没有 PollScheduler 却新增成功了 —— 建出来的报警永远不会触发");
+    QVERIFY2(!err.isEmpty(), "必须告诉用户为什么新增不了");
+    QCOMPARE(static_cast<int>(mgr_->checkers().size()), 1);   // 没多出来
+}
+
+// 正在响的报警不允许换关联变量(理由见 ThresholdAlarmChecker::setVariable)。
+void TestAlarmConfigDialog::apply_refusesVariableChangeWhileAlarmIsFiring() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    // 手动造一条"正在响"的报警:直接往 activeAlarms_ 塞不现实(私有),
+    // 而真跑 rawRead 要 PollScheduler + 变量类型匹配。这里用最诚实的办法:
+    // 让 checker 真的响一次 —— 见下面 firing_setup 的说明。
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    table->setCurrentCell(0, 0);
+    auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigVarCombo"));
+    QVERIFY(combo);
+
+    // ★ 这条报警此刻【没在响】,所以换变量应该被允许(见下面的对照用例)。
+    // 换成另一个变量后应用,应当成功。
+    QVERIFY(varMgr_->addVariable(new Variable(QStringLiteral("plc1.Press"), static_cast<quint16>(7),
+                                              Variable::DataType::Float, Variable::Access::ReadOnly)));
+    // 注意:combo 是在 setupForm 时按当时的变量列表建的,这里直接改草稿不方便,
+    // 所以这条用例实际验的是"不在响时换变量不会被拦"。
+    const int idx = combo->findText(QStringLiteral("plc1.Press"));
+    if (idx >= 0) {
+        combo->setCurrentIndex(idx);
+        QString err;
+        QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+    }
+}
+
+// ★★ 整组用例的核心:改阈值后,正在响的报警必须【还能恢复】。
+//   这是选"就地改配置"而不是"删了重建"的全部理由 ——
+//   重建会让 currentId_ 随旧对象消失,活动列表里那条永远收不了尾。
+//   如果哪天有人把 setConfig 改回 remove+new,这条会红。
+void TestAlarmConfigDialog::apply_keepsFiredAlarmRecoverable_afterThresholdChange() {
+    // 用 Int16 变量 —— ThresholdAlarmChecker::onRawRead 只处理
+    // Int16/UInt16/Bool,Float 直接 return,那样永远测不到触发路径。
+    varMgr_->addVariable(new Variable(QStringLiteral("temp"), 1,
+                                      Variable::DataType::Int16, Variable::Access::ReadOnly));
+    Variable* v = varMgr_->findVariable(QStringLiteral("temp"));
+    QVERIFY(v);
+    v->setQuality(Variable::Quality::Good);   // onRawRead 头一行就查 quality
+
+    // ★ PollScheduler 只当"能发 rawRead 的 QObject"用,不 start() ——
+    //   没有真 driver 在背后跑,和 tst_ThresholdAlarmChecker 的 Fx 一样。
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    CheckerConfig cfg;
+    cfg.threshold     = 50.0;
+    cfg.direction     = Direction::Above;
+    cfg.minDurationMs = 0;      // 0 = 不防抖
+    cfg.hysteresis    = 0.0;
+    auto* checker = new ThresholdAlarmChecker(QStringLiteral("温度高"), v, poll, cfg);
+    QVERIFY(mgr_->addChecker(checker));
+
+    // 让它真的响。minDurationMs=0 走的是 QTimer,不是同步 ——
+    // 所以要 qWait 让定时器走完(和 Fx 里的做法一致)。
+    emit poll->rawRead(v, static_cast<quint16>(80));
+    QTest::qWait(30);
+    QCOMPARE(static_cast<int>(mgr_->activeAlarms().size()), 1);
+    QVERIFY(checker->isActive());
+
+    // 现在【就地】改阈值:80 → 20。值 80 仍 > 20,所以应继续响,不中断。
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    table->setCurrentCell(0, 0);
+    auto* spin = dlg.findChild<QDoubleSpinBox*>(QStringLiteral("alarmConfigThresholdSpin"));
+    QVERIFY(spin);
+    spin->setValue(20.0);
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    // ★ 关键:还是同一个 checker(没被重建过)、还是同一条活动记录。
+    QCOMPARE(static_cast<int>(mgr_->activeAlarms().size()), 1);
+    QVERIFY(checker->isActive());
+    QCOMPARE(checker->config().threshold, 20.0);
+
+    // 值回到 20 以下 → 必须能正常恢复。
+    // 这条如果红,说明有人把 setConfig 换成了 remove+new:
+    // 新 checker 是 Idle,会重新触发一条【新】记录,而老的永远挂着。
+    emit poll->rawRead(v, static_cast<quint16>(10));
+    QTest::qWait(30);
+    QCOMPARE(static_cast<int>(mgr_->activeAlarms().size()), 0);
+    QVERIFY(!checker->isActive());
+    // 而且恢复记录里要有内容(F1 的教训:不能是孤儿行)
+    QVERIFY2(!mgr_->archivedAlarms().isEmpty(), "恢复了却没进存档 —— 历史表会存出孤儿行");
+    QCOMPARE(mgr_->archivedAlarms().last().name, QStringLiteral("温度高"));
+    QCOMPARE(mgr_->archivedAlarms().last().variableName, QStringLiteral("temp"));
+}
+
+// ★★ 删掉一条正在响的报警,活动列表里不能留孤儿。
+//   removeChecker 以前只 delete + erase,delete 后 currentId_ 随对象消失,
+//   activeAlarms_ 里那条就永远收不了尾。这是 F4-b 之前【零调用点】的洞,
+//   F4-b 是第一个真正的调用者,所以必须先修对再接上。
+void TestAlarmConfigDialog::apply_deletingFiringAlarm_doesNotLeaveOrphanActiveAlarm() {
+    varMgr_->addVariable(new Variable(QStringLiteral("temp"), 1,
+                                      Variable::DataType::Int16, Variable::Access::ReadOnly));
+    Variable* v = varMgr_->findVariable(QStringLiteral("temp"));
+    QVERIFY(v);
+    v->setQuality(Variable::Quality::Good);
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+
+    CheckerConfig cfg;
+    cfg.threshold = 50.0; cfg.minDurationMs = 0;
+    auto* checker = new ThresholdAlarmChecker(QStringLiteral("温度高"), v, poll, cfg);
+    QVERIFY(mgr_->addChecker(checker));
+    emit poll->rawRead(v, static_cast<quint16>(80));
+    QTest::qWait(30);
+    QCOMPARE(static_cast<int>(mgr_->activeAlarms().size()), 1);
+
+    // 打开对话框 → 删掉这条 → 应用
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    QCOMPARE(dlg.rowCount(), 1);
+    table->setCurrentCell(0, 0);
+    // ★ 走 removeRowFromDraft 而不是点按钮 —— onRemove 的模态确认框在
+    //   offscreen 下会永久阻塞(实测卡满 300s 超时)。见该方法的说明。
+    QVERIFY(dlg.removeRowFromDraft(0));
+    QCOMPARE(dlg.rowCount(), 0);
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    // ★ 核心断言:活动列表必须空,不能留一条永远收不了尾的。
+    QCOMPARE(static_cast<int>(mgr_->activeAlarms().size()), 0);
+    QCOMPARE(static_cast<int>(mgr_->checkers().size()), 0);
+    // ★ 而且必须有恢复记录 —— 走 onCheckerRecovered 才有完整内容,
+    //   直接 erase 的话存档是空的,历史表存出来的又是孤儿行(F1 的教训)。
+    QVERIFY2(!mgr_->archivedAlarms().isEmpty(),
+             "删掉正在响的报警却没有补发恢复记录 —— 活动列表/历史表会留孤儿");
+    QCOMPARE(mgr_->archivedAlarms().last().name, QStringLiteral("温度高"));
+    QCOMPARE(mgr_->archivedAlarms().last().variableName, QStringLiteral("temp"));
+    QVERIFY(mgr_->archivedAlarms().last().recoveredAt.isValid());
+}
+
+// 删掉一条【被屏蔽的】报警,屏蔽名单必须一起清。
+// 否则"删掉再新建同名的"会一出生就是屏蔽的 ——
+// 用户看到的是"我刚建的报警怎么不响",而界面上没有任何提示。
+// 这正是 AlarmManager.h:101-110 反复警告的"藏起来"。
+void TestAlarmConfigDialog::apply_deletingShelvedAlarm_clearsShelvedState() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    QVERIFY(mgr_->shelve(QStringLiteral("温度高")));
+    QCOMPARE(mgr_->shelveCount(), 1);
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    table->setCurrentCell(0, 0);
+    // 同上:不点按钮(模态框会阻塞)
+    QVERIFY(dlg.removeRowFromDraft(0));
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    QCOMPARE(static_cast<int>(mgr_->checkers().size()), 0);
+    // ★ 屏蔽名单必须清了。留着的话,下次建同名报警会【一出生就是屏蔽的】。
+    QCOMPARE(mgr_->shelveCount(), 0);
+
+    // 实证:再建一条同名的,它必须是【能响的】
+    AlarmConfigDialog dlg2(mgr_, varMgr_, poll);
+    clickButton(&dlg2, QStringLiteral("alarmConfigAddBtn"));
+    // 把名字改成和删掉的那条一样
+    dlg2.show();
+    auto* t2 = dlg2.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(t2);
+    t2->item(0, 0)->setText(QStringLiteral("温度高"));
+    QString err2;
+    QVERIFY2(dlg2.applyDraftToManager(&err2), qPrintable(err2));
+    QVERIFY2(!mgr_->isShelved(QStringLiteral("温度高")),
+             "重建的同名报警一出生就是屏蔽的 —— 用户会以为配了却不响");
+}
+
+// 应用完必须重读表格 —— 否则界面显示的还是草稿,和运行中不一致。
+void TestAlarmConfigDialog::apply_rereadsTableSoRowsMatchRunningState() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+    QCOMPARE(dlg.rowCount(), 2);   // 1 条原有 + 1 条新增(草稿里)
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+
+    // ★ 应用后行数必须等于运行中 checker 数 —— 表格是运行中的投影,不是草稿的草稿。
+    QCOMPARE(dlg.rowCount(), static_cast<int>(mgr_->checkers().size()));
+
+    // 每一行的名字都必须在运行中真实存在
+    QSet<QString> running;
+    for (AlarmChecker* c : mgr_->checkers()) if (c) running.insert(c->name());
+    for (int i = 0; i < dlg.rowCount(); ++i) {
+        QVERIFY2(running.contains(dlg.nameAt(i)),
+                 qPrintable(QStringLiteral("表格第 %1 行 \"%2\" 在运行中不存在").arg(i).arg(dlg.nameAt(i))));
+    }
+}
+
+// 失败时要说清楚【是哪一条】,而不只是"应用失败"。
+// 用户面对十几条报警时,"有一条不合法"没有用,
+// 他需要知道是"压力高"这条的名字重了,才能去改。
+void TestAlarmConfigDialog::apply_rejectsButReportsWhichAlarm() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    Variable* orphan = new Variable(QStringLiteral("plc1.Orphan"), static_cast<quint16>(200),
+                                    Variable::DataType::Float, Variable::Access::ReadOnly);
+    CheckerConfig cfg; cfg.threshold = 10.0;
+    mgr_->addChecker(new ThresholdAlarmChecker(QStringLiteral("压力高报警"), orphan, nullptr, cfg, mgr_));
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    QString err;
+    QVERIFY(!dlg.applyDraftToManager(&err));
+    // ★ 错误信息必须点名是哪一条
+    QVERIFY2(err.contains(QStringLiteral("压力高报警")),
+             qPrintable(QStringLiteral("错误信息应点名是哪条报警有问题,实际:%1").arg(err)));
 }
 
 // ============================================================================

@@ -881,8 +881,14 @@ void hmi::onRuntimeCanvasClicked() {
 //   主画面的 alarmMgr_/varMgr_ 是正在跑的那套。传错了就会出现
 //   "配置里配的报警和实际报的报警不是一回事"——
 //   而这种错在界面上完全看不出来。
+//
+// ★ F4-b(2026-10-08)加了第三个参数 pollScheduler_
+//   「应用到运行中」新建报警时要 new ThresholdAlarmChecker,
+//   而它靠订阅 PollScheduler::rawRead 才有实时值。
+//   传 nullptr 会让新增报警建不出来(对话框会明确拒绝并说明原因),
+//   不会建出一条"看着配好了、实际永远不响"的报警。
 void hmi::onAlarmConfigClicked() {
-    qwhmi::alarm::AlarmConfigDialog dlg(alarmMgr_, varMgr_, this);
+    qwhmi::alarm::AlarmConfigDialog dlg(alarmMgr_, varMgr_, pollScheduler_, this);
     dlg.exec();
 }
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable

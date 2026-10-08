@@ -1,13 +1,22 @@
 // ============================================================================
-// 阶段 F · F4-a · 报警配置对话框实现
+// 阶段 F · F4-a/F4-b/F4-c · 报警配置对话框实现
 //
 // 关联:AlarmConfigDialog.h
 //
-// ★ 本文件的核心约束(改代码前先读一遍)
-//   它【不改运行中的任何报警状态】。只把 AlarmManager 里的配置读成草稿,
-//   让人能看、能改草稿、能导出 JSON。应用回 AlarmManager 是 F4-b 的活。
-//   任何时候你在这里看到 addChecker / removeChecker / config_ 被写,
-//   都是 F4-b 的内容漏进来了 —— 那样这个对话框就测不了了。
+// ★ 本文件的三个阶段,以及它们各自允许碰什么
+//
+//   F4-a 只读  —— 把 AlarmManager 读成草稿,能看能改能导出。【不动运行中任何状态】
+//   F4-c 落地  —— 草稿 → 工程文件 alarms[]。【仍然不动运行中任何状态】
+//   F4-b 应用  —— 草稿 → 运行中的 AlarmManager。★ 这一版才开始改运行中的状态
+//
+// ★ 为什么"不动运行中"曾是硬约束,现在又放开了
+//   F4-a/F4-c 阶段不放开的理由是:F4-b 有个必须先看见界面才能拍板的设计问题 ——
+//   "报警正在跑的时候改阈值,怎么生效?"。那时拍板等于拍想象。
+//   2026-10-08 用户拍板选了就地改配置(setConfig),那条路才被铺出来。
+//   本文件的约束因此从"绝不碰"收窄成两条:
+//     ① 改已有报警一律【就地改配置】,绝不删了重建(见 ThresholdAlarmChecker.h)
+//     ② 应用前先整体校验,失败时运行中的状态保持原样(见 applyDraftToManager)
+//   这两条比"绝不碰"弱,但仍足以保证 F4-a 的只读断言在不改代码的前提下继续成立。
 // ============================================================================
 
 #include "alarm/AlarmConfigDialog.h"
@@ -101,8 +110,9 @@ QString dirDisplayName(const QString& key) {
 
 AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
                                      VariableManager* varMgr,
+                                     PollScheduler* pollScheduler,
                                      QWidget* parent)
-    : QDialog(parent), alarmMgr_(mgr), varMgr_(varMgr) {
+    : QDialog(parent), alarmMgr_(mgr), varMgr_(varMgr), pollScheduler_(pollScheduler) {
     setWindowTitle(tr("报警配置"));
     setModal(true);
     resize(920, 520);
@@ -138,6 +148,7 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     btnRow->addWidget(removeBtn_);
     btnRow->addWidget(exportBtn_);
     btnRow->addWidget(saveBtn_);
+    btnRow->addWidget(applyBtn_);
     btnRow->addWidget(infoLabel_);
     btnRow->addStretch();
     btnRow->addWidget(closeBtn_);
@@ -153,6 +164,7 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     connect(closeBtn_,  &QPushButton::clicked, this, &QDialog::reject);
     connect(exportBtn_, &QPushButton::clicked, this, &AlarmConfigDialog::onExport);
     connect(saveBtn_,   &QPushButton::clicked, this, &AlarmConfigDialog::onSaveToProject);
+    connect(applyBtn_,  &QPushButton::clicked, this, &AlarmConfigDialog::onApplyToRunning);
     connect(addBtn_,    &QPushButton::clicked, this, &AlarmConfigDialog::onAdd);
     connect(removeBtn_, &QPushButton::clicked, this, &AlarmConfigDialog::onRemove);
 
@@ -303,6 +315,7 @@ void AlarmConfigDialog::setupButtons() {
     removeBtn_ = new QPushButton(tr("删除选中"), this);
     exportBtn_ = new QPushButton(tr("导出草稿 JSON"), this);
     saveBtn_   = new QPushButton(tr("保存到工程文件"), this);
+    applyBtn_  = new QPushButton(tr("应用到运行中"), this);
     closeBtn_  = new QPushButton(tr("关闭"), this);
     addBtn_->setObjectName(QStringLiteral("alarmConfigAddBtn"));
     removeBtn_->setObjectName(QStringLiteral("alarmConfigRemoveBtn"));
@@ -310,9 +323,9 @@ void AlarmConfigDialog::setupButtons() {
     closeBtn_->setObjectName(QStringLiteral("alarmConfigCloseBtn"));
 
     addBtn_->setToolTip(tr("在草稿里加一条新报警。\n"
-                            "本对话框不改动运行中的报警 —— 应用是 F4-b 的活。"));
+                            "改完要按「应用到运行中」才会真正生效。"));
     removeBtn_->setToolTip(tr("从草稿里删除选中这条。\n"
-                              "同样不改动运行中的报警。"));
+                              "改完要按「应用到运行中」才会真正生效。"));
     exportBtn_->setToolTip(tr("把当前草稿导出成 JSON。\n"
                               "字段与 Project::saveToFile 写入工程文件时完全一致。"));
     // ★ 这是真正把草稿落地的按钮 —— 导出只是"看一眼 + 复制到剪贴板"。
@@ -320,6 +333,15 @@ void AlarmConfigDialog::setupButtons() {
     saveBtn_->setToolTip(tr("把当前草稿写进已有工程文件的 alarms 段。\n"
                             "只改报警,变量/画面/联动一律不动。\n"
                             "运行中的报警不受影响 —— 要生效需重新载入工程。"));
+
+    // ★ F4-b:另一条路。和 saveBtn_ 不是替代关系,是两个场景:
+    //   saveBtn_  = 定版存档(存进文件,重载工程才生效)
+    //   applyBtn_ = 现场调试(立刻改运行中的报警,不落盘)
+    applyBtn_->setObjectName(QStringLiteral("alarmConfigApplyBtn"));
+    applyBtn_->setToolTip(
+        tr("把当前草稿【立刻】应用到运行中的报警,不用重载工程、不用停机。\n\n"
+           "注意:这个按钮【不写文件】。想存进工程请另按「保存到工程文件」。\n"
+           "正在响的报警改阈值后,会在下一个采集周期按新阈值重新判定。"));
 }
 
 // ============================================================================
@@ -465,8 +487,29 @@ void AlarmConfigDialog::fillFormFromRow(int row) {
                                      thresholdSpin_, minDurSpin_, hysteresisSpin_ };
     for (QObject* w : widgets) w->blockSignals(true);
 
+    // ★ 变量下拉:这一格【必须处理"找不到"的情况】,不能像别的控件那样
+    //   "找到才设,找不到就跳过"。
+    //
+    //   【这里曾经漏了,是 F4-b 写测试时才暴露出来的】
+    //   原来的写法是:
+    //       const int varIdx = varCombo_->findText(r.variableName);
+    //       if (varIdx >= 0) varCombo_->setCurrentIndex(varIdx);   // ← 找不到就【什么都不做】
+    //   "什么都不做"意味着组合框【保留上一次选中的那个变量】。
+    //   于是这一行的真实变量(比如一个已被从工程里删掉的 plc1.Orphan)
+    //   在界面上显示成【别的变量】,而紧接着 writeFormToRow() 会把那个
+    //   显示值【写回草稿】—— 原来的关联被静默改掉了。
+    //
+    //   【为什么这在生产里也会出事,而不只是测试的问题】
+    //   工程里删掉一个变量后,还指着它的报警不会消失,而是会在
+    //   "工程师点进这个对话框、选中那一行、改个别的参数"的那一刻,
+    //   被悄悄改指向另一个变量。界面上看不出任何异常,历史记录也会
+    //   从那一刻起对不上。这正是本项目反复吃亏的"静默改数据"。
+    //
+    //   【正确的做法】找不到时明确把下拉置为"没有对应项"的状态,
+    //   并且【不要】让 writeFormToRow 用这个假值覆盖真实值。
+    //   置 -1(QComboBox 表示"无选中项"),界面上一目了然。
     const int varIdx = varCombo_->findText(r.variableName);
-    if (varIdx >= 0) varCombo_->setCurrentIndex(varIdx);
+    varCombo_->setCurrentIndex(varIdx);   // varIdx == -1 时 Qt 会显示"空",正好如实反映"没配"
 
     const int lvlIdx = levelCombo_->findData(r.level);
     if (lvlIdx >= 0) levelCombo_->setCurrentIndex(lvlIdx);
@@ -496,7 +539,15 @@ void AlarmConfigDialog::writeFormToRow(int row) {
     //   后果:即便组合框修好了,这里仍会因为"恰好处于禁用态"而跳过写入 ——
     //   用户选了变量,草稿却没记,存出去还是旧变量。
     //   正确的判据是 hasVariables_(静态事实)。空工程时保持原值即可。
-    if (hasVariables_) {
+    //
+    // ★ currentIndex() == -1 必须【保留原值】,不能写成空串。
+    //   currentIndex 为 -1 表示"这一行配的变量在下拉里找不到"
+    //   (典型场景:变量被从工程里删了,而报警还指着它)。
+    //   此时 currentText() 是空的 —— 若照写,这一行的变量关联就被
+    //   【静默清空】了,而界面上看不出任何异常。
+    //   保留原值才能让 validateDraft 报出"变量不存在",
+    //   那是用户真正需要知道的事(存下去会打不开整个工程)。
+    if (hasVariables_ && varCombo_->currentIndex() >= 0) {
         const QString v = varCombo_->currentText();
         // startsWith('(') 排除占位项"(工程里还没有变量)"
         if (!v.isEmpty() && !v.startsWith('(')) r.variableName = v;
@@ -625,10 +676,26 @@ void AlarmConfigDialog::onRemove() {
     }
     if (QMessageBox::question(this, tr("确认删除"),
                                tr("从草稿里删除报警 '%1'?\n"
-                                  "运行中的报警不受影响 —— 应用是后续步骤的事。").arg(r.name))
+                                  "删完要按「应用到运行中」才会真正删掉。").arg(r.name))
         != QMessageBox::Yes) {
         return;
     }
+    removeRowFromDraft(row);
+}
+
+// ★ 把"确认"和"删除"拆成两半(2026-10-08 F4-b 时补的)
+//   【为什么要拆】onRemove 里原本直接 QMessageBox::question + 原地删除。
+//   那个模态框在 offscreen 测试下会【永久阻塞】—— QMessageBox 在没有事件循环
+//   的测试环境里等不到应答,测试直接卡到超时(实测 300s 超时,timer 停不下来)。
+//   结果是:整个"删除"路径【一条测试都写不了】,只能像当时的
+//   removeButton_removesSelectedRow 那样"只检查按钮是亮的,但不点"。
+//   而 F4-b 一上来,删除就成了最危险的路径(删掉正在响的报警会留孤儿),
+//   恰恰最需要测试覆盖 —— 于是这个可测性缺口第一次变成了拦路虎。
+//
+//   拆法:onRemove 负责"问用户",removeRowFromDraft 负责"删",后者不做任何 UI 询问。
+//   这不是为测试开后门 —— 询问本来就是 UI 的职责,而"怎么删"是数据层的职责。
+bool AlarmConfigDialog::removeRowFromDraft(int row) {
+    if (row < 0 || row >= rows_.size()) return false;
     rows_.removeAt(row);
     // removeRow 会让后面的行号整体前移,草稿和表格的索引必须【同时】动,
     // 所以先记住要删的行,再让表格删 —— 顺序反了会错位一行。
@@ -637,6 +704,7 @@ void AlarmConfigDialog::onRemove() {
     table_->clearSelection();
     setFormEnabled(false);
     updateInfo();
+    return true;
 }
 
 void AlarmConfigDialog::onExport() {
@@ -736,6 +804,215 @@ void AlarmConfigDialog::onSaveToProject() {
         QMessageBox::warning(this, tr("保存失败"), err);
         qCWarning(hmiAlarm) << "[F4-c] 保存失败:" << err;
     }
+}
+
+// ============================================================================
+// ★ F4-b:应用草稿到运行中的 AlarmManager
+//
+// 【为什么分三步走:先全查、再全改】
+//   如果一边查一边改,改到第 5 条才发现第 3 条有问题,前 4 条已经改了运行中的报警 ——
+//   而用户看到的是"应用失败",于是他不知道到底哪些生效了。
+//   结果就是运行中的状态和界面上的草稿【对不上,而且没人说得清哪里对不上】。
+//   所以:第一遍只读地查,全过了才动手。
+//
+// 【为什么删除走 removeChecker 而不是直接 delete】
+//   removeChecker 会先给这条报警正在响的活动记录补发恢复,再清屏蔽名单。
+//   F4-b 之前它一个生产调用点都没有,那两个洞是这次一并补上的(见 AlarmManager.cpp)。
+// ============================================================================
+
+bool AlarmConfigDialog::applyDraftToManager(QString* errorOut) {
+    if (!alarmMgr_) {
+        if (errorOut) *errorOut = tr("没有连接到报警管理器,无法应用");
+        return false;
+    }
+
+    // ================= 第 1 遍:只读地查,一个字都还不改 =================
+
+    // ---- ① 草稿本身合不合法(名字空/重名、变量不存在)----
+    //   和 F4-c 存盘用的是同一套校验 —— 存下去会打不开工程文件的东西,
+    //   直接应用到运行里同样是垃圾进垃圾出。
+    QString verr;
+    if (!validateDraft(&verr)) {
+        if (errorOut) *errorOut = verr;
+        return false;
+    }
+
+    // ---- ② 有没有"草稿里新增"的行(运行中还不存在的)----
+    //   这类行需要 new ThresholdAlarmChecker,必须有 PollScheduler*,
+    //   否则建出来的报警收不到任何实时值、永不触发。
+    QStringList newNames;
+    for (const AlarmConfigRow& r : rows_) {
+        if (!r.editable) continue;
+        if (!hasCheckerNamed(r.name)) newNames << r.name;
+    }
+    if (!newNames.isEmpty() && !pollScheduler_) {
+        if (errorOut) {
+            *errorOut = tr("草稿里有 %1 条新增报警,但拿不到轮询调度器,建不出能真正生效的报警。\n\n"
+                           "没有它,新建的报警永远收不到实时值 —— 那是一条【看着配好了、"
+                           "实际上永远不会响】的报警,比不配更危险,所以这里直接拒绝。")
+                            .arg(newNames.size());
+        }
+        return false;
+    }
+
+    // ---- ③ 正在响的报警被改关联变量 → 拒绝(理由见 setVariable)----
+    //   这一条必须在动手前查:等到改到那一条才发现,前面的改动已经生效了。
+    for (const AlarmConfigRow& r : rows_) {
+        if (!r.editable) continue;
+        auto* tc = thresholdCheckerNamed(r.name);
+        if (!tc) continue;                       // 新增行,③ 不适用
+        if (tc->variable() && tc->variable()->name() == r.variableName) continue;
+        if (tc->isActive()) {
+            if (errorOut) {
+                *errorOut = tr("报警 \"%1\" 正在响,此时不能改它的关联变量。\n\n"
+                               "它当前监控的是 \"%2\"。恢复之后才能换 —— "
+                               "否则历史记录里会出现「%2 触发、%3 恢复」这种自相矛盾的一行。")
+                                .arg(r.name,
+                                     tc->variable() ? tc->variable()->name() : tr("(无)"),
+                                     r.variableName);
+            }
+            return false;
+        }
+    }
+
+    // ================= 第 2 遍:确认无误,开始改 =================
+
+    int added = 0, updated = 0, removed = 0, shelveChanged = 0;
+
+    // ---- ④ 处理删除:运行里有、草稿里没有的可配置报警 ----
+    //   草稿 reloadFromManager 时是从运行中读的,所以"运行里有、草稿里没有"
+    //   一定意味着用户在本会话里删过它(非阈值报警不在删除范围内)。
+    //   标记而非直接删,是下面的⑤要"就地改"而不是"重建"。
+    QStringList existingNames;
+    for (AlarmChecker* c : alarmMgr_->checkers()) {
+        if (!c) continue;
+        if (dynamic_cast<ThresholdAlarmChecker*>(c)) existingNames << c->name();
+    }
+    for (const QString& n : std::as_const(existingNames)) {
+        if (hasDraftRowNamed(n)) continue;
+        if (alarmMgr_->removeChecker(n)) ++removed;
+    }
+
+    // ---- ⑤ 逐条落地 ----
+    for (AlarmConfigRow& r : rows_) {
+        if (!r.editable) continue;
+
+        Variable* var = varMgr_ ? varMgr_->findVariable(r.variableName) : nullptr;
+        if (!var) continue;   // ①已经查过变量存在性,到不了这里
+
+        CheckerConfig cfg;
+        cfg.level         = JsonSerializer::alarmLevelFromString(r.level);
+        cfg.direction     = JsonSerializer::directionFromString(r.direction);
+        cfg.threshold     = r.threshold;
+        cfg.minDurationMs = r.minDurationMs;
+        cfg.hysteresis    = r.hysteresis;
+
+        if (auto* tc = thresholdCheckerNamed(r.name)) {
+            // ---- 已存在:就地改,不重建(重建会丢 currentId_,见头文件)----
+            tc->setConfig(cfg);
+            // 变量没变就不碰 —— setVariable 会清 lastValue_,
+            // 白清一次会让下一次触发快照变成 0。
+            if (!tc->variable() || tc->variable()->name() != r.variableName) {
+                tc->setVariable(var);
+            }
+            ++updated;
+        } else {
+            // ---- 新增:new 一个真的能跑起来的 checker ----
+            auto* checker = new ThresholdAlarmChecker(r.name, var, pollScheduler_, cfg);
+            if (!alarmMgr_->addChecker(checker)) {
+                // addChecker 会因为重名/空名拒绝。走到这里说明草稿有问题,
+                // 而①已经查过重名 —— 所以这属于"不该发生"的路径,
+                // 但绝不能 silently ignore:必须说出来。
+                delete checker;
+                if (errorOut) {
+                    *errorOut = tr("新增报警 \"%1\" 没能注册到报警管理器(名字重复或非法)。")
+                                    .arg(r.name);
+                }
+                return false;
+            }
+            ++added;
+        }
+
+        // ---- ⑥ 屏蔽状态跟着草稿走 ----
+        //   屏蔽是运行中状态(存在 shelved_ 里),草稿里那一列本来就显示它。
+        //   不同步的话:用户在这个对话框里看到的"已屏蔽"和实际屏蔽状态会各说各话。
+        if (alarmMgr_->isShelved(r.name) != r.shelved) {
+            if (r.shelved) alarmMgr_->shelve(r.name);
+            else           alarmMgr_->unshelve(r.name);
+            ++shelveChanged;
+        }
+    }
+
+    if (errorOut) {
+        *errorOut = tr("新增 %1 条,更新 %2 条,删除 %3 条,屏蔽状态变更 %4 条。")
+                        .arg(added).arg(updated).arg(removed).arg(shelveChanged);
+    }
+
+    // ★ 应用完必须重读 —— 草稿里的"新增行"现在是真正的 checker 了,
+    //   而 reloadFromManager 会把它们按名字排序后重新填表。
+    //   不重读的话,用户会看到一个和运行中状态不一致的表格,
+    //   下次打开对话框又变了 —— 这正是"界面和实际状态对不上"最难查的一类。
+    reloadFromManager();
+
+    qCInfo(hmiAlarm) << "[F4-b] 草稿已应用到运行中的报警:"
+                     << "新增" << added << "更新" << updated
+                     << "删除" << removed << "屏蔽变更" << shelveChanged;
+    return true;
+}
+
+void AlarmConfigDialog::onApplyToRunning() {
+    // ★ 应用会立刻改变运行中的报警,不能像 F4-a 那样"按了没反应"。
+    //   所以按之前先说清楚会发生什么 —— 尤其是【正在响的报警】,
+    //   那是操作员正盯着屏幕上的东西,不能在他不知情时改掉。
+    QStringList firing;
+    if (alarmMgr_) {
+        for (const Alarm& a : alarmMgr_->activeAlarms()) firing << a.name;
+    }
+
+    QString msg = tr("把当前草稿应用到运行中的报警?\n\n"
+                     "新增 %1 条,删除 %2 条。")
+                      .arg(rows_.size()).arg(rows_.size());
+    if (!firing.isEmpty()) {
+        msg += tr("\n\n注意:以下报警正在响,改它们的阈值会在下一个采集周期重新判定:\n  %1")
+                   .arg(firing.join(", "));
+    }
+    if (QMessageBox::question(this, tr("确认应用"), msg) != QMessageBox::Yes) {
+        return;
+    }
+
+    QString err;
+    if (applyDraftToManager(&err)) {
+        QMessageBox::information(this, tr("已应用"), err);
+    } else {
+        // 失败时运行中的状态保持原样(第 1 遍就全查过了),这点要告诉用户,
+        // 否则他会以为改了一半。
+        QMessageBox::warning(this, tr("应用失败"), err);
+        qCWarning(hmiAlarm) << "[F4-b] 应用失败:" << err;
+    }
+}
+
+// ---- 小工具:按名字找 checker(草稿 ⇄ 运行中的对照)----
+
+ThresholdAlarmChecker* AlarmConfigDialog::thresholdCheckerNamed(const QString& name) const {
+    if (!alarmMgr_) return nullptr;
+    for (AlarmChecker* c : alarmMgr_->checkers()) {
+        if (!c || c->name() != name) continue;
+        // 非阈值报警(WriteFailChecker 等)名字对得上但没有阈值可改 —— 返回 nullptr,
+        // 调用方据此认为"运行中没有这条可配置的报警"。
+        if (auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c)) return tc;
+    }
+    return nullptr;
+}
+
+bool AlarmConfigDialog::hasCheckerNamed(const QString& name) const {
+    return thresholdCheckerNamed(name) != nullptr;
+}
+
+bool AlarmConfigDialog::hasDraftRowNamed(const QString& name) const {
+    for (const AlarmConfigRow& r : rows_) {
+        if (r.name == name) return true;
+    }
+    return false;
 }
 
 QString AlarmConfigDialog::exportDraftToJson() const {

@@ -30,6 +30,31 @@ public:
     Variable* variable() const { return variable_; }
     const CheckerConfig& config() const { return config_; }
 
+    // ===== ★ F4-b(2026-10-08):运行中改配置 =====
+    //
+    // 【为什么不删了重建】删掉重建会把 checker 换成一个全新对象,
+    //   而 Fired 状态里的 currentId_ 会跟着旧对象一起消失 ——
+    //   AlarmManager::activeAlarms_ 里那条记录从此再也不会收到 recovered(),
+    //   永远挂在"活动报警"列表里出不去。历史表也会多出一条孤儿行。
+    //   这正是 F1(d504b53)刚修过的那类 bug,不能从后门再放进来。
+    //   【为什么以前没这问题】以前根本没法在运行中改报警配置 ——
+    //   F4 之前的配置只能手改 JSON + 重载工程,重载走 clearAll(),不经过这条路径。
+    //   F4-b 是第一个真正的调用者,所以这条路径必须先修对。
+    //
+    // 【就地改配置后怎么生效】
+    //   不主动触发、不主动恢复,【等下一个采集周期由 onRawRead 按新阈值重新判定】。
+    //   这是唯一正确的时机:值是那一刻才可信的,配置是我们给的。
+    //   Fired 状态下把阈值从 80 调到 60、当前值 70,下一个周期自然判"仍在响";
+    //   调到 100、当前值 70,下一个周期自然判"已恢复"并补上恢复记录。
+    void setConfig(const CheckerConfig& cfg);
+
+    // ★ 换监控的变量。调用方负责拦住"正在响时换变量"的情况,理由见 .cpp。
+    void setVariable(Variable* v);
+
+    // 当前是否正在响(已 emit triggered、还没恢复)。
+    // 界面用它决定能不能换变量 —— 见 AlarmConfigDialog::applyDraftToManager。
+    bool isActive() const { return state_ == State::Fired; }
+
 private slots:
     // 跟 HighAlarmChecker 一样订阅 rawRead(原始值,绕开 Variable 死区)
     // v 可能是 PollScheduler 监控的任何 Variable,Checker 只关心 variable_

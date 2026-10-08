@@ -3,6 +3,7 @@
 #include "ThresholdAlarmChecker.h"
 #include "PollScheduler.h"  // ★ BUGFIX-3(2026-08-05)保留:需要完整定义才能 connect PollScheduler::rawRead
 #include "Variable.h"
+#include "src/logging/Logging.h"   // ★ F4-b:hmiAlarm 分类
 #include <QTimer>
 
 ThresholdAlarmChecker::ThresholdAlarmChecker(const QString& alarmName,
@@ -59,6 +60,69 @@ ThresholdAlarmChecker::ThresholdAlarmChecker(const QString& alarmName,
 }
 
 ThresholdAlarmChecker::~ThresholdAlarmChecker() = default;
+
+// ============================================================================
+// ★ F4-b(2026-10-08):运行中改配置
+//
+// 【核心决定:不重建 checker,就地改,判定交给下一个采集周期】
+//   详见 ThresholdAlarmChecker.h 里的说明。这里只补两个容易被忽略的细节。
+// ============================================================================
+
+void ThresholdAlarmChecker::setConfig(const CheckerConfig& cfg) {
+    // level 存在基类的 level_ 里,config_.level 只是 CheckerConfig 的一份副本。
+    // 只改 config_ 的话,报警【等级】这一列在界面上改了、实际报出来的还是旧等级 ——
+    // 而等级决定颜色和声音,是操作员第一时间看的东西。
+    setLevel(cfg.level);
+    config_ = cfg;
+
+    // ★ 坑一:Pending 状态下 minDurationMs 变了,必须重新起表。
+    //   durationTimer_ 是在进入 Pending 那一刻用【当时的】minDurationMs 起的。
+    //   如果用户此刻把 500 改成 5000,定时器还按 500 走 —— 500ms 后照样报出去,
+    //   新配的 5000 完全没生效,而界面上明明白白写着 5000。
+    //   这正是本项目反复吃的那类:配置改了、界面显示改了、行为没改,且没有任何提示。
+    //
+    //   为什么是【重新计时】而不是【按比例调整剩余时间】
+    //   —— 重新计时更保守:新值总是从"现在"起算满,
+    //   绝不会因为改配置而让一条正在酝酿的报警提前报出去。
+    //   (提前报 = 误报,工业现场比晚报更危险。)
+    if (state_ == State::Pending) {
+        durationTimer_->start(config_.minDurationMs);
+    }
+
+    // ★ 坑二:Fired 状态下什么都不做,是【故意的】,不是漏了。
+    //   阈值刚改完就自己判一次"还该不该响",看着更聪明,其实是错的:
+    //   lastValue_ 是【上一次采集】的值,可能是几秒前的。
+    //   拿一个陈旧的值去改报警的生死,等于在传感器断线时也会"恢复"一条报警。
+    //   正确做法是什么都不做 —— 下一个 rawRead 自然会用新阈值重新走一遍
+    //   onRawRead 的状态机,那时手里的是新鲜值。
+    //
+    //   代价:改完配置到生效最多有一个采集周期的延迟(通常 100ms 量级)。
+    //   这个延迟对着一台 7×24 的机器是可以接受的,换成"用陈旧值误判"不可接受。
+    if (state_ == State::Fired) {
+        qCDebug(hmiAlarm)
+            << "[F4-b] 报警" << name_ << "配置已改,当前正在响;"
+               "将在下一个采集周期按新阈值重新判定";
+    }
+}
+
+void ThresholdAlarmChecker::setVariable(Variable* v) {
+    // ★ 为什么调用方必须拦住"正在响时换变量"
+    //   activeAlarms_ 里那条记录的 variableName 是【触发那一刻】的变量名。
+    //   正在响的时候把变量换掉,那条记录会永远挂着旧变量名,
+    //   而恢复它的新判定用的是新变量的值 —— 历史表里会留下
+    //   "A 变量触发、被 B 变量恢复"这种自相矛盾的一行。
+    //   和改阈值不同:改阈值后新判定的还是同一个变量,记录自洽;
+    //   换变量打破了这个前提,所以这里不做,要换先得让它恢复。
+    //
+    //   调用方(AlarmConfigDialog)据此拒绝并提示用户,不是静默拒绝。
+    variable_ = v;
+    // lastValue_ 是【旧变量】的采样值。换变量不清它的话,下一次新变量的
+    // rawRead 之前,lastValue_ 仍会被读成旧变量的值 —— 界面上"当前值"会显示
+    // 一个根本不在这条报警上的量。清掉,让触发快照只能是新变量的值。
+    lastValue_ = 0.0;
+    qCDebug(hmiAlarm) << "[F4-b] 报警" << name_ << "改监控变量 ->"
+                      << (v ? v->name() : QStringLiteral("(无)"));
+}
 
 // ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 variable_ 指针
 //   旧 Variable 被 delete,新 Variable 同名替换;由 hmi.cpp connect varMgr_->variableReplaced 触发

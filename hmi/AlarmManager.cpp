@@ -18,11 +18,46 @@ bool AlarmManager::addChecker(AlarmChecker* c) {
     return true;
 }
 
+// ★ F4-b(2026-10-08)重写:删 checker 之前必须先把它正在响的报警收尾
+//
+// 【这个函数以前为什么会写出孤儿记录】
+//   它只做了 delete + erase。若这条报警此刻是 Fired,那条 activeAlarms_ 记录
+//   的 id 记在 checker 的 currentId_ 里,delete 之后【没有任何对象知道那个 id】,
+//   recovered() 永远不会来 —— activeAlarms_ 里那条记录就永远挂在"活动"列表里,
+//   操作员看到一个撤不掉的报警,历史表也少一条收尾。
+//   这和 F1(d504b53)的孤儿行是同一类 bug,只是发生在删除而不是恢复时。
+//
+// 【为什么以前没暴露】removeChecker 此前【一个生产调用点都没有】,
+//   删 checker 只走 clearAll()(先把 activeAlarms_ 整个清空)。
+//   F4-b 是第一个真正的调用者,所以必须先把这条路修对再接上去。
+//
+// 【顺便修掉的第二个洞】原来没有清 shelved_。
+//   于是"删掉一条被屏蔽的报警 → 再新建一条同名的"会【一出生就是被屏蔽的】,
+//   而用户看到的是"我刚建的报警怎么不响"。这正是 AlarmManager.h:101-110
+//   反复警告的"藏起来"。现在删的时候同步摘掉屏蔽名单并发信号。
 bool AlarmManager::removeChecker(const QString& name) {
     auto it = checkers_.find(name);
     if (it == checkers_.end()) return false;
+
+    // ---- 1. 先把这条报警的活动记录走一遍正常的"恢复"流程 ----
+    //   不能直接 activeAlarms_.erase —— 那样 AlarmRecorder 就又拿不到
+    //   完整记录了(F1 的教训)。走 onCheckerRecovered 才能同时:
+    //     · 填 recoveredAt / state=Cleared
+    //     · 存进 archived_
+    //     · emit alarmRecovered(id, 完整记录)
+    //   按名字匹配而不是按 currentId_(那个要 delete 之后才拿不到,顺序反了)。
+    const QList<Alarm> actives = activeAlarms_.values();
+    for (const Alarm& a : actives) {
+        if (a.name == name) onCheckerRecovered(a.id_);
+    }
+
+    // ---- 2. 清屏蔽名单(见上面的第二个洞)----
+    if (shelved_.remove(name)) emit shelveChanged(name, false);
+
     delete it.value();  // setParent(this) 的对象 delete 会自动从 QObject 树移除
     checkers_.erase(it);
+    qCInfo(hmiAlarm) << "[F4-b] 已删除报警 checker:" << name
+                     << "(同时补发了它的恢复记录,不让活动列表留孤儿)";
     return true;
 }
 
