@@ -6,8 +6,10 @@
 #include "AlarmRecorder.h"
 #include "../logging/Logging.h"
 
+#include <QColor>
 #include <QComboBox>
 #include <QDateTimeEdit>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -52,6 +54,39 @@ const char* actionDisplay(int action) {
     return "?";
 }
 
+// 表格的行高。
+// ★ 为什么不用默认行高:默认行高是跟着字体走的,换一款中文字体就变。
+//   而报警历史是要【一屏一屏地对比着看】的 ——
+//   行高忽高忽低会让眼睛在两行之间找不到对应关系,
+//   这正是"查事故"时最不能有的那种视觉噪声。
+constexpr int kRowHeight = 26;
+
+// 等级 → 前景色。返回无效 QColor = 不上色。
+//
+// ★ 【色值必须和 AlarmListControl 一样,不能各定各的】
+//   F3 已经在报警列表里定了四档颜色。如果历史这里另挑一套,
+//   同一个产品里"危急=这个颜色"就有了两个答案 ——
+//   用户在列表里认出来的红,到历史里换了张脸,得重新记一遍映射。
+//   抄的是 AlarmListControl.cpp:40-46 的 fg 那四个值。
+//
+// ★ 【为什么用 fg 而不是 bg】
+//   列表里是整行铺底色(红底白字),历史表里只给"等级"两个字上色 ——
+//   如果照抄 bg,严重(255,205,195)这种浅色在白底表格上等于没上色,
+//   而危急的深红(205,40,40)又太扎眼。所以取"这一档的文字色"。
+//
+// ★ 【为什么信息级不上色】
+//   信息级在历史里量最大(模式切换、泵启停全记),
+//   给它也上色等于让整张表五颜六色,最该被看见的严重/危急就淹了。
+//   返回无效 QColor,调用方据此跳过。
+QColor levelColor(int level) {
+    switch (level) {
+    case 1:  return QColor(120,  80,   0);   // 警告 —— 暗黄
+    case 2:  return QColor(150,  20,  10);   // 严重 —— 橙红
+    case 3:  return QColor(205,  40,  40);   // 危急 —— 红
+    }
+    return QColor();   // 信息(0)不上色;越界值同样不上色
+}
+
 } // namespace
 
 AlarmHistoryView::AlarmHistoryView(AlarmRecorder* recorder, QWidget* parent)
@@ -71,6 +106,10 @@ AlarmHistoryView::AlarmHistoryView(AlarmRecorder* recorder, QWidget* parent)
 
 void AlarmHistoryView::setupUi() {
     auto* root = new QVBoxLayout(this);
+    // ★ 统一留白。原来全走 Qt 默认值,筛选栏贴着表格边,
+    //   表格贴着状态栏,整个视图没有边界感。
+    root->setContentsMargins(12, 12, 12, 8);
+    root->setSpacing(8);
     setupFilterRow(this, root);
 
     table_ = new QTableWidget(this);
@@ -80,23 +119,47 @@ void AlarmHistoryView::setupUi() {
         << tr("时间") << tr("报警名") << tr("等级") << tr("动作")
         << tr("关联变量") << tr("触发值") << tr("阈值"));
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setStretchLastSection(true);
+    // ★ 拉伸【报警名】那一列,而不是最后一列。
+    //   原来用的是 setStretchLastSection(true) —— 那是"把多余的宽度全给最后一列"。
+    //   而最后一列是"阈值",内容是 "> 80.0" 这么几个字:
+    //   表格一宽,那几个字就摊在一列 700px 宽的空地上,其余六列被挤成一条条窄缝,
+    //   于是【时间/报警名挤在一起、阈值那一大片空着】。
+    //   ★ 亲眼看过渲染图才发现的 —— 几何断言查不出来,
+    //     ResizeToContents 和 stretchLastSection 都是"合法"的,只是难看。
+    //   报警名才是宽度最不确定的一列(用户自己起名),让它吃余量,
+    //   其余列一律按内容收紧,谁也不用替谁扛空白。
+    table_->horizontalHeader()->setSectionResizeMode(kColName, QHeaderView::Stretch);
+    table_->horizontalHeader()->setStretchLastSection(false);
+    // ★ 隔行底色。
+    //   报警历史动辄几十上百行,纯白底上横平竖直的网格线
+    //   会让眼睛在【一行的哪一格】上串行 —— 而查事故时
+    //   恰恰要横向对比同一行的"等级/动作/触发值/阈值"。
+    //   隔行底色就是给眼睛一条横向的锚。
+    table_->setAlternatingRowColors(true);
+    table_->verticalHeader()->setDefaultSectionSize(kRowHeight);
+    table_->verticalHeader()->setVisible(false);   // 行号对查历史没有意义,纯占宽
     // ★ 历史是"给人查"的,不是"给人改"的。
     //   不设 NoEditTriggers 的话,用户双击一格就能改掉一个值,
     //   看着像编辑成功了,实际上只是内存里的显示变了 ——
     //   关掉窗口就没了,而用户会以为历史被改了。
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table_->setWordWrap(false);
     root->addWidget(table_, 1);
 
     statusLabel_ = new QLabel(this);
     statusLabel_->setObjectName(QStringLiteral("alarmHistoryStatus"));
+    statusLabel_->setStyleSheet(QStringLiteral("color:#555;"));
     root->addWidget(statusLabel_);
 }
 
 void AlarmHistoryView::setupFilterRow(QWidget* parent, QVBoxLayout* layout) {
+    auto* outer = new QVBoxLayout;
+    outer->setSpacing(8);
+
     auto* row = new QHBoxLayout;
     row->setObjectName(QStringLiteral("alarmHistoryFilterRow"));
+    row->setSpacing(8);
 
     const QDateTime now = QDateTime::currentDateTime();
     // ★ 默认"最近 24 小时",不是"全部"。
@@ -116,9 +179,28 @@ void AlarmHistoryView::setupFilterRow(QWidget* parent, QVBoxLayout* layout) {
     row->addWidget(new QLabel(tr("到:"), parent));
     row->addWidget(toEdit_);
 
-    // ---- 快捷范围 ----
-    // 【为什么要有快捷键】手点两次日历选"三天前 14:23 到今天 14:23"
-    // 是件很烦的事,而"最近一天/三天/一周"覆盖了绝大多数查事故的场景。
+    queryBtn_ = new QPushButton(tr("查询"), parent);
+    queryBtn_->setObjectName(QStringLiteral("alarmHistoryQueryBtn"));
+    queryBtn_->setDefault(true);   // 回车 = 查询,不用每次去够鼠标
+    connect(queryBtn_, &QPushButton::clicked, this, &AlarmHistoryView::refresh);
+    row->addWidget(queryBtn_);
+
+    row->addStretch();
+    outer->addLayout(row);
+
+    // ---- 第二行:快捷范围 + 等级 ----
+    // ★ 为什么拆成两行而不是七个控件挤一行:
+    //   从/到/四个快捷/等级/查询 全排一行,窄一点的窗口(1024×768 的工控机很常见)
+    //   就开始换行或者把控件压扁 —— 而"查事故"往往发生在分辨率最低的那台机器上。
+    //   拆两行之后,第一行只有"时间 + 查询",第二行是筛选项,
+    //   层次清楚,任何宽度下都不会挤。
+    auto* row2 = new QHBoxLayout;
+    row2->setObjectName(QStringLiteral("alarmHistoryFilterRow2"));
+    row2->setSpacing(8);
+    row2->addWidget(new QLabel(tr("快捷范围:"), parent));
+
+    // 手点两次日历选"三天前 14:23 到今天 14:23"是件很烦的事,
+    // 而这几个快捷键覆盖了绝大多数查事故的场景。
     //
     // ★ 每一项都单独写死成 tr("字面量"),而不是 tr(变量):
     //   lupdate 只能扫出字面量。用变量的话,界面照常显示中文,
@@ -138,11 +220,11 @@ void AlarmHistoryView::setupFilterRow(QWidget* parent, QVBoxLayout* layout) {
         connect(b, &QPushButton::clicked, this, [this, h = kShortcuts[i].hours]() {
             applyShortRange(h);
         });
-        row->addWidget(b);
+        row2->addWidget(b);
     }
 
-    row->addSpacing(12);
-    row->addWidget(new QLabel(tr("最低等级:"), parent));
+    row2->addSpacing(12);
+    row2->addWidget(new QLabel(tr("最低等级:"), parent));
     levelCombo_ = new QComboBox(parent);
     levelCombo_->setObjectName(QStringLiteral("alarmHistoryLevelCombo"));
     // ★ 选项是"下限",不是集合 —— 文案必须说清楚,否则用户以为
@@ -153,15 +235,13 @@ void AlarmHistoryView::setupFilterRow(QWidget* parent, QVBoxLayout* layout) {
     levelCombo_->addItem(tr("仅危急"),        3);
     levelCombo_->setCurrentIndex(1);   // 默认"警告及以上" —— 信息级不响,
                                        // 它的历史记录量大且少有人查
-    row->addWidget(levelCombo_);
+    levelCombo_->setToolTip(tr("按最低等级过滤:选「严重及以上」会同时显示危急。"));
+    row2->addWidget(levelCombo_);
 
-    queryBtn_ = new QPushButton(tr("查询"), parent);
-    queryBtn_->setObjectName(QStringLiteral("alarmHistoryQueryBtn"));
-    connect(queryBtn_, &QPushButton::clicked, this, &AlarmHistoryView::refresh);
-    row->addWidget(queryBtn_);
+    row2->addStretch();
+    outer->addLayout(row2);
 
-    row->addStretch();
-    layout->addLayout(row);
+    layout->addLayout(outer);
 }
 
 void AlarmHistoryView::applyShortRange(int hours) {
@@ -216,7 +296,22 @@ void AlarmHistoryView::refresh() {
         //   当成 3 个 Latin-1 字符,表格里显示成 "ä¸¥" —— 等级和动作两列全是乱码。
         //   这条用例就是被这个坑绊红的:报错里 Actual 打印成 ä¸¥,
         //   一眼看过去像"实际值就是严重",其实比的是乱码。
-        table_->setItem(i, kColLevel,     new QTableWidgetItem(QString::fromUtf8(levelDisplay(r.level))));
+        auto* lvl = new QTableWidgetItem(QString::fromUtf8(levelDisplay(r.level)));
+        // ★ 等级上色 + 加粗。
+        //   历史里四档全是黑字,而用户扫一眼历史最先找的就是"哪几条最重"。
+        //   【和 F3 给 AlarmListControl 上色是同一个理由】
+        //   报警列表里每行都是报警,没有"这行没报警"作参照,不分色就分不出轻重。
+        //   色值和 AlarmListControl 一致 —— 同一个产品里"危急=这个颜色"
+        //   必须处处相同,否则用户要记两套映射。
+        //   同时加粗:只靠颜色区分,对色觉障碍用户和黑白打印出来的报表无效。
+        const QColor c = levelColor(r.level);
+        if (c.isValid()) {
+            lvl->setForeground(c);
+            QFont f = lvl->font();
+            f.setBold(true);
+            lvl->setFont(f);
+        }
+        table_->setItem(i, kColLevel, lvl);
         table_->setItem(i, kColAction,    new QTableWidgetItem(QString::fromUtf8(actionDisplay(r.action))));
         table_->setItem(i, kColVariable,  new QTableWidgetItem(r.variableName));
         table_->setItem(i, kColValue,     new QTableWidgetItem(r.triggerValue));

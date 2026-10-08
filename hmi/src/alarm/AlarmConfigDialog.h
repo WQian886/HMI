@@ -239,6 +239,10 @@ private:
     QTableWidget*  table_       = nullptr;
     QLabel*        infoLabel_   = nullptr;
     QLabel*        hiddenLabel_ = nullptr;  // ★ "N 条非阈值报警未显示" —— 不静默截断
+    // ★ "表单为什么是灰的"这句话。
+    //   一打开对话框,下面六个控件全是灰的,界面上一个字的解释都没有。
+    //   不生效的东西必须看得见【为什么不生效】—— 同 F2-c「静音不能等于隐藏」。
+    QLabel*        formHint_   = nullptr;
 
     // ★ 表单。注意 hysteresis 的量纲提示:它和 threshold 同单位,
     //   但语义不同(threshold 是"越界点",hysteresis 是"死区宽度")。

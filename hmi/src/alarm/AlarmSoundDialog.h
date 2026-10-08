@@ -47,6 +47,9 @@ public:
     bool   masterEnabled() const;
     bool   levelEnabled(int index) const;
     bool   repeatEnabled() const;
+    // ★ 单位是【毫秒】,和 AlarmSoundPlayer::Settings 一致。
+    //   界面上那个 spin 是秒,但换算只发生在对话框内部,这里对外仍然是毫秒 ——
+    //   否则同一个量在两处有两种单位,迟早有人算错。
     int    repeatIntervalMs() const;
     bool   quietEnabled() const;
     QString quietStartText() const;   // "HH:mm"
@@ -55,6 +58,9 @@ public:
 private:
     void loadFromPlayer();
     void saveToPlayer();
+    // 总开关 / 重复提醒 / 静默时段三处开关 → 下面控件的可用状态。
+    // 总开关关着却还能改下面,是"改了不生效但看不出来"的典型 —— 见实现处注释。
+    void updateEnabledState();
     // 试听时用哪一档:从重到轻取第一个开着的。
     // 没有这一档就退到 Warning —— 试听【必须永远有声音】,
     // 静音状态下点试听却一声不响,用户只会以为功能坏了。

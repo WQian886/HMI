@@ -227,6 +227,8 @@
     <QtMoc Include="src\drivers\EipDriver.h" />
     <ClInclude Include="src\drivers\EipDriver.h" />
     <ClCompile Include="src\drivers\EipDriver.cpp" />
+    <!-- ★ C.4(2026-09-30):协议切换 UX 守门人(纯函数,无 Q_OBJECT,不进 QtMoc) -->
+    <ClInclude Include="src\drivers\ProtocolGuard.h" />
     <!-- 阶段 D · D.1 SQLite 历史库(2026-09-18,Q_OBJECT 走 QtMoc) -->
     <QtMoc Include="src\history\HistoryRecorder.h" />
     <ClInclude Include="src\history\HistoryRecorder.h" />

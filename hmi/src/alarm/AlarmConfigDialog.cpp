@@ -34,6 +34,9 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFontDatabase>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -88,6 +91,22 @@ const DirItem kDirections[] = {
 // 上看不出异常。这类静默失效正是本项目反复吃亏的地方(见头文件)。
 constexpr double kMaxMagnitude = 1.0e9;
 
+// "最短持续"这一格显示成什么。
+//
+// ★ 【为什么单独一个函数】这个值要显示在【三个地方】
+//   (reloadFromManager 填表 / onAdd 新增行 / writeFormToRow 回写),
+//   三处各写一遍 QString::number(...) 的后果是:改了格式就有两处忘了改,
+//   于是同一列里出现 "500" 和 "500 ms" 混排 —— 而这一列的意义恰恰是
+//   逐行对比"谁防抖多久",混排的那一刻这个用途就没了。
+//
+// ★ 【为什么不自动带单位】Qt 没有"显示单位但值是纯数字"的表格单元。
+//   要么数字要么字符串,这里选字符串:这一列只给人看,
+//   没有任何逻辑会去 setText(QString::number(...)) 之后再拿回来解析 ——
+//   草稿里的真值是 row.minDurationMs(int),不经过这个字符串。
+QString minDurText(int ms) {
+    return QCoreApplication::translate("qwhmi::alarm", "%1 ms").arg(ms);
+}
+
 // key(工程文件里的英文枚举名)→ 显示文字(中文)。
 // 【为什么要这两个函数,而不是直接把 kLevels 里的 text 存起来】
 //   草稿行存的是 key —— 导出时要喂给 JsonSerializer::toJson(cfg),
@@ -115,7 +134,10 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     : QDialog(parent), alarmMgr_(mgr), varMgr_(varMgr), pollScheduler_(pollScheduler) {
     setWindowTitle(tr("报警配置"));
     setModal(true);
-    resize(920, 520);
+    // ★ 520 → 560。原来 520 是"一行表单"的尺寸;表单拆成两行 + 一行提示之后,
+    //   520 会让表格被压到只剩 200 出头,一条报警的完整行都要滚动才看得全 ——
+    //   而"表格 + 表单"必须同屏可见,否则改参数时看不到自己改的是哪一行。
+    resize(920, 560);
 
     table_       = new QTableWidget(this);
     infoLabel_   = new QLabel(this);
@@ -123,40 +145,108 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     jsonView_    = new QTextEdit(this);
     jsonView_->setReadOnly(true);
     jsonView_->setVisible(false);
+    // ★ JSON 用等宽字体。
+    //   比例字体下,缩进、逗号、花括号对不齐,
+    //   而"看一眼导出的草稿对不对"这件事本身就是要用眼睛对齐着看结构 ——
+    //   等宽字体是让这件事成立的前提,不是装饰。
+    jsonView_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    jsonView_->setLineWrapMode(QTextEdit::NoWrap);
 
     setupTable();
     setupForm();
     setupButtons();
 
     // ---- 布局 ----
-    auto* formRow = new QHBoxLayout;
-    formRow->addWidget(new QLabel(tr("关联变量:"), this));
-    formRow->addWidget(varCombo_);
-    formRow->addWidget(new QLabel(tr("等级:"), this));
-    formRow->addWidget(levelCombo_);
-    formRow->addWidget(new QLabel(tr("方向:"), this));
-    formRow->addWidget(dirCombo_);
-    formRow->addWidget(new QLabel(tr("阈值:"), this));
-    formRow->addWidget(thresholdSpin_);
-    formRow->addWidget(new QLabel(tr("最短持续(ms):"), this));
-    formRow->addWidget(minDurSpin_);
-    formRow->addWidget(new QLabel(tr("滞回:"), this));
-    formRow->addWidget(hysteresisSpin_);
+    //
+    // ★ 【原来这里是两条各挤了 7 个 / 6 个控件的横排】
+    //   ① 表单行:关联变量 / 等级 / 方向 / 阈值 / 最短持续 / 滞回 —— 7 组
+    //      标签+控件,全塞进一条 920px 的横排里。
+    //      后果不是"难看"这么简单:七个标签宽度各不相同("最短持续(ms):"
+    //      比"滞回:"宽一倍),Qt 默认左对齐,于是六个输入框的【左边缘参差不齐】,
+    //      眼睛在"等级"和"阈值"之间找不到一条竖线可以对。
+    //      而这个对话框的主要动作就是"选中一行 → 改几个数",
+    //      对齐恰恰是这里最要紧的东西。
+    //      现在拆成两行放进 GroupBox,每行三组,组内用竖直基准线对齐。
+    //   ② 按钮行:6 个按钮 + 1 个状态标签挤一条。
+    //      六个按钮长短不一("新增报警" 4 个字,"保存到工程文件" 7 个字),
+    //      而且【危险度和语义完全不同】的动作混在一起:
+    //      "删除选中"会丢数据,"应用到运行中"会立刻改变现场,
+    //      "导出草稿 JSON"什么都不改只是看一眼 —— 三个按钮长得一模一样。
+    //      现在按语义分成两簇:左边是"改草稿",右边是"落地 / 关闭"。
+    auto* paramBox = new QGroupBox(tr("报警参数"), this);
+    auto* formGrid = new QGridLayout(paramBox);
+    formGrid->setHorizontalSpacing(10);
+    formGrid->setVerticalSpacing(6);
+    // 三列等宽:两行之间"等级"对"阈值"、"方向"对"滞回",
+    // 竖着扫也能对上。
+    formGrid->setColumnStretch(1, 1);
+    formGrid->setColumnStretch(3, 1);
+    formGrid->setColumnStretch(5, 1);
+    struct FormField { const char* label; QWidget* w; };
+    const FormField kFields[6] = {
+        { "关联变量:",   varCombo_ },
+        { "等级:",       levelCombo_ },
+        { "方向:",       dirCombo_ },
+        { "阈值:",       thresholdSpin_ },
+        { "最短持续:",   minDurSpin_ },
+        { "滞回:",       hysteresisSpin_ },
+    };
+    for (int i = 0; i < 6; ++i) {
+        // 【每项都单独写死成 tr("字面量"),而不是 tr(变量)】
+        //   lupdate 只能扫出字面量。用 kFields[i].label 这种变量,
+        //   界面照常显示中文,但翻译工具永远扫不到它 ——
+        //   到要做 i18n(阶段 I)那天这几个标签会莫名其妙地不跟着翻译。
+        //   和 AlarmHistoryView 里的快捷按钮是同一条纪律。
+        auto* lbl = new QLabel(tr(kFields[i].label), paramBox);
+        // ★ 标签右对齐。
+        //   Qt 默认左对齐时,"关联变量:"(5 字)和"等级:"(2 字)是两个不同宽度的框,
+        //   框宽不同 → 右边缘不同 → 紧挨着的输入框左边缘也就对不齐。
+        //   右对齐 + 竖直基准线,三个输入框的左边缘才真正成一条线。
+        lbl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        formGrid->addWidget(lbl, i / 3, (i % 3) * 2);
+        formGrid->addWidget(kFields[i].w, i / 3, (i % 3) * 2 + 1);
+    }
+    // 单位跟着控件走,而不是塞在标签里 ——
+    // "最短持续:" + 一个带 " ms" 后缀的输入框,比"最短持续(ms):" + 裸数字
+    // 少一层来回翻译的负担:后缀写在控件上,值变了单位不会忘。
+    minDurSpin_->setSuffix(tr(" ms"));
+
+    // 表单为什么是灰的 —— 必须说出来。
+    // 原来一打开就是六个灰控件,界面上一个字的解释都没有,
+    // 用户会以为功能坏了,而实际上只是"还没选中行"。这和 F2-c
+    // 「静音不能等于隐藏」是同一条:不生效的东西要看得见为什么。
+    formHint_ = new QLabel(paramBox);
+    formHint_->setStyleSheet(QStringLiteral("color:#888;"));
+    formHint_->setWordWrap(true);
+    formGrid->addWidget(formHint_, 2, 0, 1, 6);
 
     auto* btnRow = new QHBoxLayout;
+    btnRow->setSpacing(8);
+    // ---- 左簇:只改草稿,不动运行中 ----
     btnRow->addWidget(addBtn_);
     btnRow->addWidget(removeBtn_);
     btnRow->addWidget(exportBtn_);
+    btnRow->addStretch();
+    // ---- 右簇:落地 / 关闭 ----
+    // 保存和"应用"之间留一道缝:这两个不是一类动作
+    // (一个写文件、一个改现场),挤在一起容易被当成同一个按钮按错。
     btnRow->addWidget(saveBtn_);
     btnRow->addWidget(applyBtn_);
-    btnRow->addWidget(infoLabel_);
-    btnRow->addStretch();
+    btnRow->addSpacing(12);
     btnRow->addWidget(closeBtn_);
 
     auto* root = new QVBoxLayout(this);
-    root->addWidget(table_);
+    // ★ 统一留白 + 统一间距。原来全走 Qt 默认值,表格贴着对话框边、
+    //   表单贴着表格,整块内容没有边界。
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(8);
+    root->addWidget(table_, 1);
     root->addWidget(hiddenLabel_);
-    root->addLayout(formRow);
+    root->addWidget(paramBox);
+    // 状态标签独占一行。夹在按钮中间时,它既不像说明也不像控件,
+    // 而且按钮一多就被挤到"看不到"的位置。
+    infoLabel_->setStyleSheet(QStringLiteral("color:#555;"));
+    root->addWidget(infoLabel_);
     root->addLayout(btnRow);
     root->addWidget(jsonView_);
 
@@ -228,11 +318,25 @@ void AlarmConfigDialog::setupTable() {
     //   里"不反射 private 成员"同一个坑的另一面)。
     table_->setObjectName(QStringLiteral("alarmConfigTable"));
     table_->setColumnCount(8);
+    // ★ 表头去掉单位,单位跟值走。
+    //   原来写的是"最短持续(ms)",而单元格里是一个裸数字 500 ——
+    //   单位只在表头,一滚动到看不见表头的地方就没了。
+    //   改成表头只说是什么,值后面带单位(见 writeFormToRow),
+    //   这样"这一格是什么"和"这一格是什么单位"分开了,列名也能短一截。
     table_->setHorizontalHeaderLabels(QStringList()
         << tr("报警名") << tr("关联变量") << tr("等级") << tr("方向")
-        << tr("阈值") << tr("最短持续(ms)") << tr("滞回") << tr("已屏蔽"));
+        << tr("阈值") << tr("最短持续") << tr("滞回") << tr("已屏蔽"));
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setStretchLastSection(true);
+    // ★ 拉伸【报警名】,不是最后一列。
+    //   原来用 setStretchLastSection(true),而最后一列是"已屏蔽" ——
+    //   这一列绝大多数时候是【空的】(没屏蔽时填空串)。
+    //   于是表格一宽,几百像素的空白全落在这一列上,"已屏蔽"三个字孤零零
+    //   悬在右边,中间六列被挤成窄缝。
+    //   真正宽度不确定的是报警名(用户自己起名),余量给它才说得通。
+    //   —— 同样是看渲染图才发现的,ResizeToContents + stretchLastSection
+    //   全都是"合法"的,只是难看。
+    table_->horizontalHeader()->setSectionResizeMode(kColName, QHeaderView::Stretch);
+    table_->horizontalHeader()->setStretchLastSection(false);
     // ★ 名字必须能双击改。
     //   【上一版的真实缺陷】这里设的是 NoEditTriggers,只在 onAdd 里给
     //   新增行的 nameItem 单独补了个 Qt::ItemIsEditable 标志 ——
@@ -247,6 +351,12 @@ void AlarmConfigDialog::setupTable() {
                             | QAbstractItemView::AnyKeyPressed);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    // ★ 行高固定、隔行底色 —— 和 AlarmHistoryView 同一条理由:
+    //   报警是【一屏一屏横向对比】着看的(名字/等级/阈值/滞回挨着看),
+    //   行高随字体变动会让眼睛在两行之间串行,隔行底色则给一条横向锚点。
+    table_->setAlternatingRowColors(true);
+    table_->verticalHeader()->setDefaultSectionSize(26);
+    table_->verticalHeader()->setVisible(false);   // 行号在这张表里没有意义
 }
 
 void AlarmConfigDialog::setupForm() {
@@ -411,7 +521,7 @@ void AlarmConfigDialog::reloadFromManager() {
         put(kColLevel,      r.editable ? levelDisplayName(r.level) : tr("(非阈值)"));
         put(kColDir,        r.editable ? dirDisplayName(r.direction) : QString());
         put(kColThreshold,  r.editable ? QString::number(r.threshold, 'g', 6) : QString());
-        put(kColMinDur,     r.editable ? QString::number(r.minDurationMs) : QString());
+        put(kColMinDur,     r.editable ? minDurText(r.minDurationMs) : QString());
         put(kColHysteresis, r.editable ? QString::number(r.hysteresis, 'g', 6) : QString());
         put(kColShelved,    r.shelved ? tr("是") : QString());
     }
@@ -466,6 +576,33 @@ void AlarmConfigDialog::setFormEnabled(bool on) {
     thresholdSpin_->setEnabled(on);
     minDurSpin_->setEnabled(on);
     hysteresisSpin_->setEnabled(on);
+
+    // ★ 灰色必须带解释。
+    //   这个函数是全文件【唯一】决定表单能不能用的地方,所以提示也只能写在这里 ——
+    //   写在构造函数里的话,后面每次改选中行都得记得同步一句,漏一次就成了
+    //   "控件灰着,理由还是上次那条",比没有更误导。
+    //
+    //   三种情况给三种说法,而不是一句"请先选中一行":
+    //     · 没选中行        → 告诉用户下一步做什么
+    //     · 选中的是非阈值报警 → 告诉用户【为什么这条改不了】(否则会一直试)
+    //     · 能改            → 收起提示,把版面还给控件
+    if (!formHint_) return;
+    if (on) {
+        formHint_->setVisible(false);
+        return;
+    }
+    // ★ 判据是"当前行号还落在 rows_ 范围内",不是单纯的 currentRow() >= 0。
+    //   clearSelection() 不会把 currentRow() 复位,所以删掉最后一行之后
+    //   currentRow() 还指着那个已经不存在的行 —— 只判 >= 0 的话,
+    //   用户会看到"这一条是非阈值报警"这一句完全对不上的解释。
+    const int cur = table_->currentRow();
+    if (cur < 0 || cur >= rows_.size()) {
+        formHint_->setText(tr("↑ 先在上表选中一行,这里才能改参数。"));
+    } else {
+        formHint_->setText(
+            tr("↑ 这一条是非阈值报警(没有阈值可配),只能查看、不能改参数。"));
+    }
+    formHint_->setVisible(true);
 }
 
 void AlarmConfigDialog::fillFormFromRow(int row) {
@@ -567,7 +704,7 @@ void AlarmConfigDialog::writeFormToRow(int row) {
         if (auto* it = table_->item(row, kColLevel))      it->setText(levelDisplayName(r.level));
         if (auto* it = table_->item(row, kColDir))        it->setText(dirDisplayName(r.direction));
         if (auto* it = table_->item(row, kColThreshold))  it->setText(QString::number(r.threshold, 'g', 6));
-        if (auto* it = table_->item(row, kColMinDur))     it->setText(QString::number(r.minDurationMs));
+        if (auto* it = table_->item(row, kColMinDur))     it->setText(minDurText(r.minDurationMs));
         if (auto* it = table_->item(row, kColHysteresis)) it->setText(QString::number(r.hysteresis, 'g', 6));
         suppressItemChanged_ = false;
     }
@@ -649,7 +786,7 @@ void AlarmConfigDialog::onAdd() {
     put(kColLevel,      levelDisplayName(row.level));
     put(kColDir,        dirDisplayName(row.direction));
     put(kColThreshold,  QString::number(row.threshold, 'g', 6));
-    put(kColMinDur,     QString::number(row.minDurationMs));
+    put(kColMinDur,     minDurText(row.minDurationMs));
     put(kColHysteresis, QString::number(row.hysteresis, 'g', 6));
     put(kColShelved,    QString());
     suppressItemChanged_ = false;
