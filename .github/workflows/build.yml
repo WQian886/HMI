@@ -20,15 +20,29 @@ on:
 jobs:
   build-windows:
     runs-on: windows-2022
-    # ★ 30 → 60,是实测出来的,不是拍脑袋。
-    #   本机 Ninja 从零编【仅 64 个测试目标】就要 19.5 分钟,
-    #   而 CI 还要多编一遍主程序、再跑一遍全部测试;
-    #   GitHub 的 windows-2022 runner 通常比本机慢。
-    #   原来的 30 分钟会在编译中途被 GitHub 掐掉 —— 而工作流超时
-    #   呈现出来的是"超时失败",没人会想到去查"到底编到第几个"。
-    #   这个数字只有本机一次 clean 重编的实测值,CI 上真跑完还可能不够,
-    #   到时按真实数字再调。
-    timeout-minutes: 60
+    # ★ 30 → 60 → 120。每一个数字都是被真实失败逼出来的,不是拍脑袋。
+    #
+    #   30:本机 Ninja 从零编【仅 66 个测试目标】就要 19.5 分钟,CI 还要
+    #      多编一遍主程序、再跑一遍全部测试,而且 windows-2022 runner
+    #      通常比本机慢 → 编译中途被 GitHub 掐掉。
+    #   60:CI 第一次真跑(build 37895487099)失败于 Qt 模块缺失,
+    #      修好后第二次真跑(37895849642)编到 55 分钟被 cancel。
+    #      ★ 注意这里的教训:"超时"呈现出来的是一句 cancelled,
+    #        没人会想到去翻日志看"到底编到第几个目标"。
+    #        看到 cancelled 要先确认是【超时】还是【被取消】——
+    #        这两者在 UI 上长得几乎一样。
+    #   120:本地 Ninja 19.5 分钟 vs VS generator 55+ 分钟还没编完。
+    #        VS generator 每个 target 都是独立 project,MSBuild 那边
+    #        调度粒度比 Ninja 粗很多。真正的根治是让 CI 用 Ninja
+    #        (本地同配置 19.5 分钟),或者把 ~25 个核心源文件抽成静态库
+    #        —— 现在 67 个编译目标各自独立编译一遍这 25 个 .cpp。
+    #        实测(build_ninja 目录):总 .obj 5161 个、3514.5 MB,其中
+    #        AlarmRecorder.cpp.obj 有 67 份、核心源文件合计 721.5 MB,
+    #        占编译输出的 20.5%。也就是说去重最多省五分之一,
+    #        剩下 80% 花在这 67 个测试各自的 tst_*.cpp + moc + uic 上,
+    #        那不是冗余,是真实工作量 —— 别指望 C 方案能一把解决超时。
+    #        在那之前,先把超时抬到能跑完,拿到一次真实的绿灯基线。
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -73,10 +87,23 @@ jobs:
       - name: Run tests
         working-directory: build-tests
         # ★ QT_QPA_PLATFORM 必须显式设。
-        #   64 个测试里有 37 个在 initTestCase 里自己 qputenv("offscreen"),
-        #   但另外 27 个没有 —— 它们靠的是【调用者】已经设好了。
+        #   66 个 ctest 目标里有 38 个在 initTestCase 里自己
+        #   qputenv("offscreen"),但另外 28 个没有 —— 它们靠的是
+        #   【调用者】已经设好了。
         #   本地靠 build_tests.ps1:56 设,CI 上没有这个脚本,不设就会在
         #   无显示器的 runner 上弹真窗口甚至直接崩。
+        #
+        #   ★ 这里有三个不一样的数,别互相套用、也别当成 bug 去"修":
+        #       磁盘 tst_*.cpp     = 67   (Get-ChildItem)
+        #       编译目标(67 个 exe)= 67   (ninja -t targets all)
+        #                              66 个 add_hmi_test() + 1 个直接
+        #                              add_executable,见
+        #                              hmi/tests/CMakeLists.txt:165
+        #       ctest 目标         = 66   (ctest -N)
+        #     差的那一个是有意为之:tst_ProtocolComboShot 只编译、
+        #     不注册测试 —— 它靠真实 QTipLabel 显示取证,要多链 UiTools
+        #     和两个路径宏,判定线不稳,进 ctest 会变成间歇性失败。
+        #     但它【确实会被编译】,所以它照样占一整份 HMI_CORE_SOURCES。
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --output-on-failure -C Debug
