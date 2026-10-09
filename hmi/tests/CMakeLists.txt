@@ -65,6 +65,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/S7Driver.cpp
     # 阶段 C · C.3 EIP 协议适配器(2026-09-18)DriverFactory 创建 EipDriver 需要链接 EipDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
+    # ★ 2026-10-10:协议下拉框置灰(tst_ProtocolComboGrey 调的是这个生产函数)
+    ${HMI_SRC_DIR}/src/drivers/ProtocolAvailabilityUi.cpp
     # 阶段 D · D.1 SQLite 历史库(2026-09-18)
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
     # ★ D.3(2026-09-20):报警持久化(对称 HistoryRecorder + alarm_history 表)
@@ -182,6 +184,10 @@ add_hmi_test(tst_ProjectSchema)
 add_hmi_test(tst_IPollDriver)
 # 阶段 C · C.4 协议选择 UX 锁(教训 1.5)
 add_hmi_test(tst_ProtocolSwitch)
+# ★ 2026-10-10:协议可用性(UI 置灰 S7/EIP 的查表)
+add_hmi_test(tst_ProtocolAvailability)
+# ★ 2026-10-10:协议下拉框置灰的【控件级】验证(逻辑对 ≠ 控件对)
+add_hmi_test(tst_ProtocolComboGrey)
 # 阶段 D · D.1 SQLite 历史库
 add_hmi_test(tst_HistoryRecorder)
 # 阶段 D · D.3 报警持久化

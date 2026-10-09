@@ -1,7 +1,61 @@
 # CHANGELOG
 
-> 最后核对：**2026-10-09**（基于代码核对：`ctest` **64 个目标 64 通过**，
+> 最后核对：**2026-10-10**（基于代码核对：`ctest` **66 个目标 66 通过**，
 > `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出）
+
+## [Unreleased] - 2026-10-10
+
+### 协议下拉框置灰 —— v0.2.0 只发 Modbus,S7/EIP 之前是"假可用"
+
+`isSupported()` 答的是"工厂认不认识这个名字",而 S7/EIP 有骨架、**认识**。
+于是两个 stub 被当正常协议摆在下拉框里,用户选下去只看到一句
+"协议不兼容,不能切换" —— **界面从头到尾没说过它们没实现**。
+
+拆成两个函数:`isSupported()` 保持原义,新增 **`isUsable()`** 答"真能连吗"
+(v0.2.0 只有 Modbus 返 true)。UI 抽成 `ProtocolAvailabilityUi.cpp`,负责置灰 +
+加"(未实现)"后缀 + tooltip 写明档期,启动时逐条 `qWarning`,选中时弹说明并撤回下拉框。
+
+> 抽成生产代码是为了让测试打的是**真代码**。第一版把这段逻辑抄进测试文件,
+> 那样测的是副本 —— `hmi.cpp` 里那份被谁改错,测试照样全绿。
+
+顺带修掉两个**此前从未执行过**的 bug,都是被新测试逼出来的:
+
+- **下拉框撤回那段是死代码**:`findText(current, Qt::MatchFixedString)` 大小写敏感,
+  拿协议 ID 去显示名里找永远返回 -1,撤回逻辑从未生效。
+- **`"EtherNet/IP"` 匹配不上任何协议标识**:显示名小写是 `"ethernet/ip"`,
+  工厂认的是 `"eip"` / `"ethernet_ip"`。为此加了 `normalizeProtocolName()`。
+
+这两个一直没暴露,是因为 `DriverFactory::create` 硬编码 `"modbus"`,
+S7/EIP 分支**从来没真跑起来过**。v0.3.0 真接上时第一个撞的就是它们。
+
+三条行为变更全部做了变异验证(`isUsable` 放行 s7 / 后缀不拆 / 撤回退回 `indexOf`),
+三次都如实红过再绿回来。
+
+**验证做到哪一步**:`ctest` **66/66 通过**(64 + `tst_ProtocolAvailability` +
+`tst_ProtocolComboGrey`)、`hmi.exe` 构建通过、**MSBuild 真编一次**。
+注意 64→66 这两个新测试**不登记进 vcxproj** —— 测试走自己的 CMake 工程,
+CMake 根本不读 `hmi.vcxproj`,所以它们证明不了工程文件是对的。
+
+### `sync_vcxproj.py --apply` 会毁掉 vcxproj —— 已修,并加了脚本守着
+
+登记新文件时顺手 `--apply` 了一次,**文件当场坏掉**,靠 `git checkout` 撤销:
+BOM 从 `239,187,191` 变成 `60,63,120`、CRLF 406 行变 0 行、
+git diff **395 增 403 删**、连带 filters 报出 **222 条"假的不一致"**。
+
+修的时候又挖出两层。第一版修复(按字节写回 BOM + CRLF)只挡住了表层 ——
+ElementTree 照样把 `<Project xmlns="...">` 写成 **`<ns0:Project xmlns:ns0="...">`**,
+并且**丢掉全部 68 条 XML 注释**(23814 → 20103 字节)。
+
+最终**根本不用 ElementTree 写**:改成文本级纯追加,在 `</Project>` 前插一个新
+`<ItemGroup>`。判据一句话:**纯增行、零删行** —— 真的 diff 就该是"加了两条",
+不是"重排了四百行"。
+
+★ 第一版探针**打印了 PASS**:我只查了 BOM / 裸 LF / XML 能否解析,三条全过,
+而文件已被改得面目全非。**自检脚本自己也会假绿**,判据必须挑真能区分好坏的项。
+
+新增 `scripts/check_vcxproj_writeback.py` 守这条写回路径(TEMP 副本上跑,不动真文件)。
+**这已是本项目第三次被"脚本说成功、文件其实坏了"绊到** —— 前两次分别死在
+`fix_filters_entries.py` 的 `return 0` 排在写回之前、和这次的 `tree.write()`。
 
 ## [Unreleased] - 2026-10-09
 

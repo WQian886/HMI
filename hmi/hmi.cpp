@@ -6,6 +6,7 @@
 #include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
+#include "drivers/ProtocolAvailabilityUi.h" // ★ 2026-10-10:协议下拉框"未实现"标注
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
 #include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
 #include "history/AlarmHistoryView.h" // ★ F4(2026-10-08):报警历史查询视图(填 D.3 占位 tab)
@@ -189,6 +190,33 @@ hmi::hmi(QWidget *parent)
     // ★ 阶段 C · C.4(2026-09-18):协议选择下拉框信号(教训 1.5 跨协议 UX 锁)
     connect(ui.protocolComboBox, &QComboBox::currentTextChanged,
             this, &hmi::onProtocolComboChanged);
+
+    // ★★ 2026-10-10:把没实现的协议置灰(Wqian 2026-09-29 拍板的那条处置)
+    //
+    //   【原来的问题】S7 / EtherNet/IP 在下拉框里是【正常可选项】,
+    //     没灰、没标注。选下去只会弹"协议不兼容,不能切换" ——
+    //     界面从头到尾没告诉过用户"这两个还没实现"。
+    //     而 S7Driver/EipDriver 至今是 qWarning + emit errorOccurred 的骨架,
+    //     底层依赖(snap7 / libplctag)连头文件都没有,3rdparty 下只有 README。
+    //
+    //   【为什么改成查表而不是直接删掉这两项】
+    //     v0.3.0 真接上 S7/EIP 时,如果是删的,还得回头改 UI + 改测试。
+    //     置灰 = isUsable() 里加一行就自动亮起来(见 DriverFactory.cpp 注释)。
+    //
+    //   【为什么这段在 ProtocolAvailabilityUi.cpp 而不是就地写】
+    //     就地写就只能让测试复制一份副本去跑,测的不是这一份。
+    //     抽出来之后下面 tst_ProtocolComboGrey 调的是同一个函数。
+    qwhmi::drivers::applyProtocolAvailabilityStyling(ui.protocolComboBox);
+
+    // 启动时提示一次(现状.md 279-281 定的处置:置灰 + 启动 qWarning)
+    for (int i = 0; i < ui.protocolComboBox->count(); ++i) {
+        const QString shown = ui.protocolComboBox->itemText(i);
+        if (qwhmi::drivers::DriverFactory::isUsable(shown)) {
+            continue;
+        }
+        qWarning() << "[协议可用性]" << shown << "已在下拉框置灰:"
+                   << ui.protocolComboBox->itemData(i, Qt::ToolTipRole).toString();
+    }
 
     // ==================== 阶段 2 第 4 练:重设计 — Qt 统一接口 ====================
     // ★ C.1(2026-09-17):ModbusMaster 包装为 ModbusDriver(IPollDriver*)
@@ -1580,6 +1608,28 @@ void hmi::onAllAlarmsCleared() {
 //   教训 1.5:不允许跨协议切工程 — Modbus 地址 0x0002 在 S7 是 DBW2,语义完全不同
 //   教训 2026-09-17 4.1:状态/迁移要给 1 个现实类比(让 Wqian 秒懂)
 //   规划 C.4 第 316-348 行:协议选择 UX 规则锁定
+// ★ 撤回下拉框到当前协议那一项(声明处的注释解释了为什么不能直接 findText)
+void hmi::revertProtocolCombo() {
+    ui.protocolComboBox->blockSignals(true);
+    QStringList texts;
+    texts.reserve(ui.protocolComboBox->count());
+    for (int i = 0; i < ui.protocolComboBox->count(); ++i) {
+        texts << ui.protocolComboBox->itemText(i);
+    }
+    const int idx = qwhmi::drivers::findProtocolItemIndex(texts, currentProtocol_);
+    if (idx < 0) {
+        // ★ 找不到必须说出来。原来这里是静默的 if(idx >= 0),
+        //   下拉框停在错的那一项上,而 currentProtocol_ 还是旧的 ——
+        //   界面和实际连的东西对不上,却没有任何日志。
+        qWarning() << "[C.4] 撤回协议下拉框失败:找不到与"
+                   << currentProtocol_ << "匹配的项目,"
+                   << "下拉框现在停在:" << ui.protocolComboBox->currentText();
+    } else {
+        ui.protocolComboBox->setCurrentIndex(idx);
+    }
+    ui.protocolComboBox->blockSignals(false);
+}
+
 void hmi::onProtocolComboChanged(const QString& protocolName) {
     const QString normalized = protocolName.trimmed().toLower();
     const QString current = currentProtocol_;
@@ -1588,6 +1638,27 @@ void hmi::onProtocolComboChanged(const QString& protocolName) {
     //   教训 1.5:跨协议切工程 → 弹错误 + audit 记录 rejected + 撤销下拉框
     if (!qwhmi::drivers::isCrossProtocolChange(current, normalized)) {
         qDebug() << "[C.4] 协议未变:" << protocolName;
+        return;
+    }
+
+    // ★★ 2026-10-10:先分清"这个协议没实现"和"实现了但不能跨协议切"。
+    //
+    //   【为什么要分开】原来一律弹"协议不兼容,不能切换,请创建新工程"。
+    //   用户选 S7 得到的答复是"你得换个工程" —— 而真相是"这东西还没写"。
+    //   按前者去做的人会白建一个工程,然后发现还是连不上。
+    //   这是同一个"界面在撒谎"病的第二种表现:措辞把用户往错误方向带。
+    if (!qwhmi::drivers::DriverFactory::isUsable(protocolName)) {
+        const QString reason = qwhmi::drivers::DriverFactory::unavailableReason(protocolName);
+        QMessageBox::information(this, QStringLiteral("协议尚未实现"), reason);
+        qwhmi::auth::AuditLog::instance().append(
+            QStringLiteral("protocol.change"),
+            QStringLiteral("system"),
+            QStringLiteral("system"),
+            current,
+            QStringLiteral("%1→%2").arg(current, normalized),
+            QStringLiteral("unimplemented"));
+        // 同样要撤回下拉框 —— 用户没能切过去
+        revertProtocolCombo();
         return;
     }
 
@@ -1614,10 +1685,5 @@ void hmi::onProtocolComboChanged(const QString& protocolName) {
     qWarning() << "[C.4] 跨协议切工程被阻止:" << current << "→" << protocolName;
 
     // 撤销下拉框变更(用户没成功切)
-    ui.protocolComboBox->blockSignals(true);
-    const int idx = ui.protocolComboBox->findText(current, Qt::MatchFixedString);
-    if (idx >= 0) {
-        ui.protocolComboBox->setCurrentIndex(idx);
-    }
-    ui.protocolComboBox->blockSignals(false);
+    revertProtocolCombo();
 }

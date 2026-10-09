@@ -36,6 +36,7 @@ sync_vcxproj.py — 自动同步 hmi/hmi/hmi.vcxproj 和 hmi.vcxproj.filters
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -278,36 +279,63 @@ def insert_include_into_vcxproj(
 ) -> None:
     """把缺失的 <ClCompile>/<ClInclude> 插入 vcxproj。
 
-    简化策略:把所有新增项追加到第一个 <ItemGroup> 里(跟现有风格混在一起即可)。
+    ★★ 这里【不用 ElementTree 写回】,改成按文本做纯追加。
+      原因不是 BOM 一条,是三条,全都实测过:
+
+      1. BOM + 行尾被毁。原来的 tree.write() 写完是 60,63,120(即 "<?x"),
+         403 行 CRLF 变成 0 行。
+      2. 整个文件被重排。git diff 395 增 403 删,连带着 hmi.vcxproj.filters
+         那边立刻报出 222 条"假的不一致",排查成本极高(踩过一次,git checkout 撤销)。
+      3. ★ 名字空间被打上 ns0: 前缀,而且【注释全被丢掉】。
+         实测输出是 <ns0:Project xmlns:ns0="..."> 而不是 <Project xmlns="...">,
+         文件从 23814 字节缩到 20103 —— 少掉的 3.7 KB 全是 <!-- --> 注释。
+         要消掉这条得 register_namespace + TreeBuilder(insert_comments=True),
+         但那还是在跟库的默认行为赌。
+
+      追加一个 <ItemGroup> 在 </Project> 之前,MSBuild 完全接受(ItemGroup 在
+      Project 下放哪都行),而且是【纯增行、零删行】:git diff 里只有新加的那几行,
+      任何意外都能一眼看出来。真的 diff 应该是"加了两条",不是"重排了四百行"。
     """
     if not missing_cpp and not missing_h:
         return
 
-    tree = ET.parse(vcxproj_path)
-    root = tree.getroot()
+    text = vcxproj_path.read_text(encoding="utf-8-sig")
 
-    # 找第一个 ItemGroup(主代码 ItemGroup),追加到末尾
-    # vcxproj 通常只有一个主 ItemGroup,其他是配置 / QtMoc
-    first_itemgroup = None
-    for elem in root.iter(f"{{{NS}}}ItemGroup"):
-        # 跳过 ProjectConfigurations / QtSettings / ItemDefinitionGroup 类的
-        if elem.find(f"{{{NS}}}ClCompile") is not None or elem.find(f"{{{NS}}}ClInclude") is not None:
-            first_itemgroup = elem
-            break
+    # 已有的 Include 一律跳过 —— 双保险,正常情况下 compute_diff 已经滤掉了。
+    existing: set[str] = set()
+    for tag in ("ClCompile", "ClInclude"):
+        for m in re.finditer(r"<" + tag + r'\s+Include="([^"]+)"', text):
+            existing.add(m.group(1))
 
-    if first_itemgroup is None:
-        # 找不到就建一个新的
-        first_itemgroup = ET.SubElement(root, f"{{{NS}}}ItemGroup")
-
+    lines = ['  <ItemGroup>']
     for cpp in missing_cpp:
-        ET.SubElement(first_itemgroup, f"{{{NS}}}ClCompile",
-                      {"Include": cpp.replace("/", "\\")})
+        p = cpp.replace("/", "\\")
+        if p in existing:
+            continue
+        lines.append(f'    <ClCompile Include="{p}" />')
     for h in missing_h:
-        ET.SubElement(first_itemgroup, f"{{{NS}}}ClInclude",
-                      {"Include": h.replace("/", "\\")})
+        p = h.replace("/", "\\")
+        if p in existing:
+            continue
+        lines.append(f'    <ClInclude Include="{p}" />')
+    lines.append("  </ItemGroup>")
 
-    # 写回(保留 XML 声明 + UTF-8)
-    tree.write(vcxproj_path, encoding="utf-8", xml_declaration=True)
+    if len(lines) == 2:      # 全部都已在册,没真新增
+        return
+
+    block = "\r\n".join(lines) + "\r\n"
+    idx = text.rfind("</Project>")
+    if idx < 0:
+        raise ET.ParseError("vcxproj 里找不到 </Project>,无法确定插入点")
+
+    new_text = text[:idx] + "  <!-- ★ sync_vcxproj.py 追加 -->\r\n" + block + text[idx:]
+
+    # 落盘前自检:解析不了就不写。宁可什么都不做。
+    ET.fromstring(new_text)
+
+    with open(vcxproj_path, "wb") as f:
+        f.write(b"\xef\xbb\xbf")               # UTF-8 BOM
+        f.write(new_text.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
 
 
 # ---- 主流程 ---------------------------------------------------------------

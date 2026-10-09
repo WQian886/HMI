@@ -212,4 +212,17 @@ private:
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)
     QString currentProtocol_ = QStringLiteral("modbus");
+
+    // ★ 把下拉框撤回"当前协议"那一项。
+    //   【为什么需要它】原来内联在 onProtocolComboChanged 里,写成
+    //   findText(current, Qt::MatchFixedString),而 current 存的是协议 ID
+    //   ("modbus"),下拉框里的显示文字是 "Modbus" ——
+    //   MatchFixedString 是【大小写敏感】的,findText 返回 -1,
+    //   撤回那几行在 if(idx >= 0) 里,于是【静默不执行】。
+    //   结果:用户选了别的协议被拒绝后,下拉框停在错的那一项上,
+    //   再点一下连接,连的是下拉框显示的那个协议 —— 而 currentProtocol_ 还是旧的。
+    //   这个 bug 一直没显形,是因为 create() 硬编码 "modbus",
+    //   弹窗虽然错了,实际连的始终是 Modbus,看不出不一致。
+    //   v0.3.0 真接上 S7/EIP 就会立刻变成"界面说 A、实际连 B"。
+    void revertProtocolCombo();
 };

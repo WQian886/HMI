@@ -108,3 +108,7 @@ docs/HMI工程档案.md
 
 # ===== AI 助手工作目录(本地状态,不进 git) =====
 .workbuddy/
+
+# Python 字节码(2026-10-10):scripts/check_vcxproj_writeback.py 要 import sync_vcxproj,跑一次就生成一份
+__pycache__/
+*.pyc
