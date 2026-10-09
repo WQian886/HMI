@@ -17,6 +17,53 @@
 
 namespace qwhmi::history {
 
+namespace {
+
+// ============================================================================
+// ★ F2(2026-10-10):alarm_history 的列清单 —— schema 的唯一真相源
+//
+//   CREATE TABLE 由它拼出来,老库升级也逐列拿它比对。两处共用一份,
+//   才不会出现"建表写死了 10 列、迁移路径却按 9 列补"这种静默漂移。
+//
+//   【为什么不用 PRAGMA user_version】
+//     user_version 是【文件级】唯一整数,而 AlarmRecorder 和 HistoryRecorder
+//     打开的是同一个 history.db(hmi.cpp:531)。只要 HistoryRecorder 以后也
+//     要记版本号,两个类就会互相覆盖对方的整数 —— 谁后 open 谁赢,
+//     升级顺序一变就错,而且不报任何错。
+//     探测式(PRAGMA table_info 看列在不在)没有这个问题:
+//     它问的是"表实际长什么样",不是"文件自称第几版"。
+//     这也是 HistoryRecorder D.2 的既有做法(is_heartbeat),沿用它。
+//
+//   【为什么是列清单而不是纯 PRAGMA 循环】
+//     纯循环只能补"已声明的列",新加一列时人容易忘了在两处都登记。
+//     清单是单点:加列只改这一处,建表和升级同时跟上。
+// ============================================================================
+struct ColumnSpec {
+    const char* name;
+    const char* decl;
+};
+
+//   name/level 可空:AlarmManager 已经从 activeAlarms_ erase 后才 emit 信号
+//   → 找不到完整 Alarm 数据时,只写 id + action + action_at(其他列 NULL)
+const ColumnSpec kColumns[] = {
+    { "id",             "INTEGER PRIMARY KEY AUTOINCREMENT" },
+    { "alarm_id",       "INTEGER NOT NULL"   },  // Alarm.id_,跨行关联同一条报警
+    { "name",           "TEXT"               },  // 报警名("温度高"),可空(erase 后)
+    { "level",          "INTEGER"            },  // AlarmLevel enum,同上可空
+    { "action",         "INTEGER NOT NULL"   },  // 0=触发 1=确认 2=恢复 3=清除
+    { "action_at",      "INTEGER NOT NULL"   },  // Unix 毫秒
+    { "variable_name",  "TEXT"               },  // "plc1.Temperature"
+    { "trigger_value",  "TEXT"               },  // 触发值快照
+    { "threshold",      "TEXT"               },  // 阈值描述
+    { "user",           "TEXT"               },  // 确认人(预留;v1 默认空)
+};
+
+} // namespace
+
+// ★ 加一列时,记得同时做两件事:
+//   1. 在上面 kColumns 里登记(否则新库建不出来)
+//   2. 在 insertAction / query 里用上(否则加了也没人读)
+
 AlarmRecorder::AlarmRecorder(QObject* parent)
     : QObject(parent)
 {
@@ -79,28 +126,22 @@ bool AlarmRecorder::ensureSchema() {
     if (!db_) return false;
     QSqlQuery q(*db_);
 
-    // ★ D.3:alarm_history 表 — 1 行 = 1 个状态变更(4 个 action 枚举)
-    //   name/level 可空:AlarmManager 已经从 activeAlarms_ erase 后才 emit 信号
-    //   → 找不到完整 Alarm 数据时,只写 id + action + action_at(其他列 NULL)
-    const QString createAlarmHistory = R"(
-        CREATE TABLE IF NOT EXISTS alarm_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alarm_id INTEGER NOT NULL,      -- Alarm.id_,跨行关联同一条报警
-            name TEXT,                      -- 报警名("温度高"),可空(AlarmManager erase 后)
-            level INTEGER,                  -- AlarmLevel enum,同上可空
-            action INTEGER NOT NULL,        -- 0=triggered,1=acknowledged,2=recovered,3=cleared
-            action_at INTEGER NOT NULL,     -- Unix 毫秒
-            variable_name TEXT,             -- 关联变量名("plc1.Temperature")
-            trigger_value TEXT,             -- 触发值快照
-            threshold TEXT,                 -- 阈值描述
-            user TEXT                       -- 确认人(预留;v1 默认空)
-        )
-    )";
+    // ---- 1. 建表(列定义来自 kColumns,见文件头) ------------------------
+    //   新库走这条;老库 CREATE TABLE IF NOT EXISTS 是空操作,交给第 3 步。
+    QStringList colDefs;
+    for (const auto& c : kColumns) {
+        colDefs << QStringLiteral("    %1 %2").arg(QLatin1String(c.name),
+                                                      QLatin1String(c.decl));
+    }
+    const QString createAlarmHistory =
+        QStringLiteral("CREATE TABLE IF NOT EXISTS alarm_history (\n%1\n)")
+            .arg(colDefs.join(QStringLiteral(",\n")));
     if (!q.exec(createAlarmHistory)) {
         qCritical() << "[AlarmRecorder] CREATE alarm_history 失败:" << q.lastError().text();
         return false;
     }
 
+    // ---- 2. 索引 -------------------------------------------------------
     // 索引:按时间窗查询
     if (!q.exec("CREATE INDEX IF NOT EXISTS idx_alarm_time ON alarm_history(action_at)")) {
         qCritical() << "[AlarmRecorder] CREATE INDEX 失败:" << q.lastError().text();
@@ -111,6 +152,51 @@ bool AlarmRecorder::ensureSchema() {
         qCritical() << "[AlarmRecorder] CREATE INDEX alarm_id 失败:" << q.lastError().text();
         return false;
     }
+
+    // ---- 3. ★ 老库补列(2026-10-10 新增) --------------------------------
+    //   上面的 CREATE TABLE IF NOT EXISTS 对已存在的表【什么也不做】,
+    //   所以老库少了列,它还是少 —— 后面 INSERT 那列直接 "no such column" 报错,
+    //   而且是在用户现场第一次写报警时才炸。逐列探测补齐。
+    for (const auto& c : kColumns) {
+        if (!addColumnIfMissing(QStringLiteral("alarm_history"),
+                                QLatin1String(c.name), QLatin1String(c.decl))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ★ F2(2026-10-10):探测式加列 —— 缺才补,幂等。
+//   为什么是"探测"而不是"记版本号":user_version 是文件级唯一整数,而
+//   AlarmRecorder 与 HistoryRecorder 共用同一个 history.db(hmi.cpp:531),
+//   两个类各自记版本会互相覆盖。详见文件头 kColumns 的注释。
+bool AlarmRecorder::addColumnIfMissing(const QString& table, const QString& column,
+                                       const QString& decl) {
+    if (!db_) return false;
+
+    {
+        QSqlQuery info(*db_);
+        if (!info.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) {
+            qCritical() << "[AlarmRecorder] PRAGMA table_info 失败:" << info.lastError().text();
+            return false;
+        }
+        while (info.next()) {
+            if (info.value(1).toString() == column) {
+                return true;   // 已存在 —— 无需迁移
+            }
+        }
+    }
+
+    // 表不存在时 addColumn 会失败;那种情况不该走到这(createSchema 刚建过),
+    // 真发生了说明上面的 CREATE 失败了,报出来比静默跳过强。
+    QSqlQuery alter(*db_);
+    if (!alter.exec(QStringLiteral("ALTER TABLE %1 ADD COLUMN %2 %3")
+                        .arg(table, column, decl))) {
+        qCritical() << "[AlarmRecorder] ALTER TABLE 加列失败:" << alter.lastError().text()
+                    << table << column;
+        return false;
+    }
+    qInfo() << "[AlarmRecorder] 旧库升级:新增列" << table << column;
     return true;
 }
 

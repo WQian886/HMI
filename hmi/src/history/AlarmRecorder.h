@@ -75,6 +75,12 @@ private slots:
 
 private:
     bool ensureSchema();
+    // ★ F2(2026-10-10):缺列就补 —— 见 .cpp 里为什么不用 PRAGMA user_version
+    //   (AlarmRecorder 和 HistoryRecorder 共用同一个 history.db 文件,user_version
+    //    是【文件级】唯一整数,两个类会互相覆盖对方的版本号)
+    //   幂等:列已存在就直接返回,不碰表。
+    bool addColumnIfMissing(const QString& table, const QString& column,
+                            const QString& decl);
     // ★ INSERT helper:写一行 action 记录
     bool insertAction(qint64 alarmId, const QString& name, int level, int action,
                       const QDateTime& at, const QString& varName = {},

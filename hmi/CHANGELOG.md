@@ -3,6 +3,30 @@
 > 最后核对：**2026-10-10**（基于代码核对：`ctest` **66 个目标 66 通过**，
 > `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出）
 
+## [Unreleased] - 2026-10-10 (四)
+
+### 报警历史库补上老库升级路径 —— 纯基建,不含 schema 语义变更
+
+`AlarmRecorder::ensureSchema()` 原本只有 `CREATE TABLE IF NOT EXISTS`，
+而 `IF NOT EXISTS` 的语义是**表在就什么也不做**。老库一旦少了列就一直少着，
+直到用户现场第一次写报警或查历史才抛 `no such column`。
+新装环境永远建完整表，**这条路径压根没人走过** —— 测试全绿、现场才炸。
+
+- `kColumns` 列清单成为 `alarm_history` schema 的**唯一真相源**：
+  `CREATE TABLE` 由它拼出，老库升级也逐列比对，两处不再可能漂移。
+- 新增 `addColumnIfMissing()`：`PRAGMA table_info` 探测 → 缺才
+  `ALTER TABLE ADD COLUMN`，幂等。沿用 `HistoryRecorder`（D.2）既有做法。
+- **没有引入版本号**：`AlarmRecorder` 与 `HistoryRecorder` 共用同一个
+  `history.db`（`hmi.cpp:531`），而 `PRAGMA user_version` 是**文件级唯一整数**，
+  两个类各自记版本会互相覆盖、且不报任何错。
+
+验证方式不是"加了之后是好的"，而是**负向对照**：临时开关关掉迁移循环后，
+红的是且仅是 3 条新用例，其余 15 条老用例照常通过。其中
+`legacyDb_existingRowsSurviveUpgrade` 暴露的真实现场症状是 ——
+缺列时 `query()` 返回 **0 行**，即"报警历史全空"。
+
+`ctest` **66/66**、`hmi.vcxproj` 经 **MSBuild** 编译通过。
+
 ## [Unreleased] - 2026-10-10 (三)
 
 ### F5-a 漏掉的两张报警表 —— 「报警名」被截断,「状态」空摊 440px

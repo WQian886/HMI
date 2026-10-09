@@ -14,6 +14,9 @@
 #include <QtTest>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlError>
 #include "history/AlarmRecorder.h"
 #include "../Alarm.h"
 #include "../AlarmManager.h"
@@ -55,6 +58,12 @@ private slots:
 
     // ★ F1:改信号签名引入的回归风险 —— 老的只接 id 的槽还接得上吗
     void legacyIdOnlySlot_stillReceivesRecovery();
+
+    // ★ F2(2026-10-10):老库升级
+    void legacyDb_missingColumns_getsThemAdded();
+    void legacyDb_existingRowsSurviveUpgrade();
+    void freshDb_isNotTouchedByUpgrade();
+    void upgrade_isIdempotent_reopenTwice();
 
 private:
     // ★ 公共 fixture:DB + Recorder + Manager + 1 个 TestChecker
@@ -473,6 +482,215 @@ void TestAlarmRecorder::legacyIdOnlySlot_stillReceivesRecovery() {
              "hmi.cpp:1350 和 AlarmListControl.h:49 都是这个签名,"
              "它们失配的话 UI 就不更新了,而且不会有任何编译错误。");
     QCOMPARE(legacy.lastId, f.sampleAlarm.id_);
+}
+
+// ============================================================================
+// ★ F2(2026-10-10):老库升级
+//
+// 【要防的事】AlarmRecorder::ensureSchema() 原来只有
+//     CREATE TABLE IF NOT EXISTS alarm_history (...)
+// 而 IF NOT EXISTS 的语义是"表在就啥也不做"。于是老库一旦少了列,
+// 它就一直少着 —— 直到用户现场第一次写报警,INSERT 才抛 "no such column: user",
+// 报警历史当场哑掉。这是典型的【测试全绿、装到现场才炸】:
+// 任何新装的环境都建的是完整表,老库升级这条路径压根没人走过。
+//
+// 【怎么测才有意义】光断言"升级后列齐了"是不够的 ——
+// 不加迁移时代码照样能建出完整表(new DB 走 CREATE 就齐了),
+// 那条断言在加迁移之前【也是绿的】,测了个寂寞。
+// 所以每条用例都从【手搓一个残缺的老库】开始:
+// 形状照 D.3 提交时的样子,故意少两列,然后让生产代码去打开它。
+// 不加迁移 → PRAGMA 查不到 user 列 → 断言红。
+// ============================================================================
+
+namespace {
+
+// 手搓一个"老库":D.3 时期的表,故意少 user / threshold 两列。
+// 刻意不用 AlarmRecorder::open() 建 —— 那建出来的是【新】表,正是要模拟的东西的反面。
+bool createLegacyDb(const QString& path, QString* err) {
+    if (QSqlDatabase::contains("legacy_alarm")) {
+        QSqlDatabase::removeDatabase("legacy_alarm");
+    }
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "legacy_alarm");
+    db.setDatabaseName(path);
+    if (!db.open()) { *err = db.lastError().text(); return false; }
+    QSqlQuery q(db);
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS alarm_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alarm_id INTEGER NOT NULL,
+            name TEXT,
+            level INTEGER,
+            action INTEGER NOT NULL,
+            action_at INTEGER NOT NULL,
+            variable_name TEXT,
+            trigger_value TEXT
+        )
+    )")) { *err = q.lastError().text(); db.close(); return false; }
+    db.close();
+    QSqlDatabase::removeDatabase("legacy_alarm");
+    return true;
+}
+
+// 查表里有哪些列(PRAGMA table_info 的第 1 列是列名)
+QStringList columnsOf(const QString& path, const QString& table) {
+    QStringList cols;
+    const QString conn = "cols_" + QString::number(reinterpret_cast<quintptr>(&cols));
+    if (QSqlDatabase::contains(conn)) QSqlDatabase::removeDatabase(conn);
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", conn);
+    db.setDatabaseName(path);
+    if (!db.open()) { QSqlDatabase::removeDatabase(conn); return cols; }
+    QSqlQuery q(db);
+    if (q.exec(QStringLiteral("PRAGMA table_info(%1)").arg(table))) {
+        while (q.next()) cols << q.value(1).toString();
+    }
+    db.close();
+    QSqlDatabase::removeDatabase(conn);
+    return cols;
+}
+
+int rowCountOf(const QString& path) {
+    const QString conn = "cnt_" + QString::number(static_cast<int>(path.size()));
+    if (QSqlDatabase::contains(conn)) QSqlDatabase::removeDatabase(conn);
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", conn);
+    db.setDatabaseName(path);
+    int n = -1;
+    if (db.open()) {
+        QSqlQuery q(db);
+        if (q.exec("SELECT COUNT(*) FROM alarm_history") && q.next()) {
+            n = q.value(0).toInt();
+        }
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(conn);
+    return n;
+}
+
+} // namespace
+
+// ★ 老库少两列 → 打开后自动补上
+void TestAlarmRecorder::legacyDb_missingColumns_getsThemAdded() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/legacy.db";
+
+    QString err;
+    QVERIFY2(createLegacyDb(path, &err),
+             qPrintable(QStringLiteral("造老库失败:%1").arg(err)));
+    // 先确认老库确实是残缺的 —— 不然下面的绿可能只是"本来就有"
+    const QStringList before = columnsOf(path, "alarm_history");
+    QVERIFY2(!before.contains(QStringLiteral("user")) &&
+             !before.contains(QStringLiteral("threshold")),
+             qPrintable(QStringLiteral("手搓的老库本该缺 user/threshold,实际列:%1")
+                            .arg(before.join(","))));
+
+    {
+        AlarmRecorder ar;
+        QVERIFY2(ar.open(path), "打开老库失败");
+    }
+
+    const QStringList after = columnsOf(path, "alarm_history");
+    for (const QString& want : { "user", "threshold" }) {
+        QVERIFY2(after.contains(want),
+                 qPrintable(QStringLiteral("升级后仍然缺列 %1,实际列:%2")
+                                .arg(want).arg(after.join(","))));
+    }
+    // 反向:不该凭空多出列
+    QCOMPARE(after.size(), before.size() + 2);
+}
+
+// ★ 升级不能动老数据 —— 报警历史是事故追溯的凭据,升级把它清了就等于删证据
+void TestAlarmRecorder::legacyDb_existingRowsSurviveUpgrade() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/legacy_rows.db";
+
+    QString err;
+    QVERIFY2(createLegacyDb(path, &err), qPrintable(err));
+
+    // 往老库里塞 3 行(只写老库有的列)
+    {
+        const QString conn = "seed";
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", conn);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare(R"(
+            INSERT INTO alarm_history
+                (alarm_id, name, level, action, action_at, variable_name, trigger_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        )");
+        const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
+        for (int i = 0; i < 3; ++i) {
+            q.addBindValue(1000 + i);
+            q.addBindValue(QStringLiteral("老报警%1").arg(i));
+            q.addBindValue(2);
+            q.addBindValue(0);
+            q.addBindValue(t0 + i);
+            q.addBindValue(QStringLiteral("plc1.T%1").arg(i));
+            q.addBindValue(QStringLiteral("%1.5").arg(i));
+            QVERIFY(q.exec());
+        }
+        db.close();
+        QSqlDatabase::removeDatabase(conn);
+    }
+    QCOMPARE(rowCountOf(path), 3);
+
+    { AlarmRecorder ar; QVERIFY(ar.open(path)); }
+
+    QCOMPARE(rowCountOf(path), 3);
+
+    // 内容也要在,不能只是行数对(行数对但内容被清空也是事故)
+    // ★ 刻意不用 lambda 包 —— QVERIFY 失败时展开成 return;,
+    //   有返回值的 lambda 里塞它编译不过(实测 C2562)。
+    AlarmRecorder ar;
+    QVERIFY(ar.open(path));
+    const auto recs = ar.query(QDateTime::currentMSecsSinceEpoch() - 60000,
+                               QDateTime::currentMSecsSinceEpoch() + 60000);
+    ar.close();
+    QCOMPARE(recs.size(), 3);
+    QVERIFY2(recs[0].name == QStringLiteral("老报警0"),
+             qPrintable(QStringLiteral("老数据内容变了,读到:%1").arg(recs[0].name)));
+}
+
+// ★ 新库不该被"升级"碰 —— 顺带钉住列清单本身
+//   (建表定义由 kColumns 生成,这条能挡住"清单和实际表结构对不上")
+void TestAlarmRecorder::freshDb_isNotTouchedByUpgrade() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/fresh.db";
+
+    { AlarmRecorder ar; QVERIFY(ar.open(path)); }
+    const QStringList cols = columnsOf(path, "alarm_history");
+
+    QCOMPARE(cols.size(), 10);
+    for (const QString& want : { "id", "alarm_id", "name", "level", "action",
+                                 "action_at", "variable_name", "trigger_value",
+                                 "threshold", "user" }) {
+        QVERIFY2(cols.contains(want),
+                 qPrintable(QStringLiteral("新库缺列 %1,实际列:%2")
+                                .arg(want).arg(cols.join(","))));
+    }
+}
+
+// ★ 幂等:同一文件开两次,第二次不该再 ALTER(否则每次启动都改一次表)
+void TestAlarmRecorder::upgrade_isIdempotent_reopenTwice() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/twice.db";
+
+    QString err;
+    QVERIFY2(createLegacyDb(path, &err), qPrintable(err));
+    const QStringList first = columnsOf(path, "alarm_history");
+
+    { AlarmRecorder ar; QVERIFY(ar.open(path)); }
+    const QStringList second = columnsOf(path, "alarm_history");
+
+    { AlarmRecorder ar; QVERIFY(ar.open(path)); }
+    const QStringList third = columnsOf(path, "alarm_history");
+
+    QCOMPARE(second, third);
+    // 补过之后不该再翻倍 —— 不幂等的话这里会是 first+4
+    QCOMPARE(second.size(), first.size() + 2);
 }
 
 // ★ QTEST_GUILESS_MAIN(创建 QCoreApplication,SQLite 需要)
