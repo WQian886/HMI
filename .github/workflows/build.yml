@@ -39,7 +39,14 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          modules: 'qtserialbus'
+          # ★ 2026-10-10:原来只有 qtserialbus,CI 第一次真跑就红在这一行。
+          #   报错原文:Qt6SerialBus could not be found because dependency
+          #   Qt6SerialPort could not be found。
+          #   —— qtserialbus 依赖 qtserialport,而 install-qt-action 不会
+          #   自动带上间接依赖。本地 D:\Qt 是全量安装,两个模块都在,
+          #   所以本地永远发现不了这个问题。这就是"本地绿 ≠ CI 绿"。
+          #   以后再加 Qt 模块,记得把【依赖链上的】都列进来。
+          modules: 'qtserialbus qtserialport'
           cache: true
 
       - name: Setup MSVC
