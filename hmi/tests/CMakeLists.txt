@@ -7,7 +7,7 @@ project(hmi_tests LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql PrintSupport)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql PrintSupport UiTools)
 enable_testing()
 
 # 主程序源码目录(用来 include 头文件)
@@ -159,6 +159,24 @@ function(add_hmi_test test_name)
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
 endfunction()
+
+# ★ 2026-10-10:把协议下拉框真的渲染出来存 PNG(见 tst_ProtocolComboShot.cpp 头注)
+#   不用 add_hmi_test,因为它要额外的 UiTools 和两个路径宏。
+add_executable(tst_ProtocolComboShot tst_ProtocolComboShot.cpp ${HMI_CORE_SOURCES})
+target_link_libraries(tst_ProtocolComboShot PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Test Qt6::Widgets Qt6::UiTools
+    Qt6::Network Qt6::SerialBus Qt6::Sql Qt6::PrintSupport
+)
+target_compile_options(tst_ProtocolComboShot PRIVATE /utf-8)
+target_compile_definitions(tst_ProtocolComboShot PRIVATE
+    HMI_SRC_DIR_STRING="${HMI_SRC_DIR}"
+    HMI_SHOT_DIR="${CMAKE_BINARY_DIR}/shots"
+)
+# 故意【不进】 add_test / ctest:
+#   它里面有 QVERIFY,但那一半是 tooltip 显示与否,依赖 QTipLabel 的显示延迟,
+#   轮询 1.5 秒还不行就判红 —— 这正是 tst_Trend 那种偶发红的来源,不想再加一条。
+#   字体字形那条断言倒是确定性的,可要拆出来单跑,目前不值得。
+#   用法:直接跑 build_ninja\tst_ProtocolComboShot.exe,PNG 落在 shots\。
 
 add_hmi_test(tst_Variable)
 add_hmi_test(tst_VariableManager)
