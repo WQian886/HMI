@@ -21,6 +21,10 @@ namespace qwhmi::widgets {
 
 namespace {
 
+// ★ 2026-10-10:报警名那一列的下标(时间/报警名/等级/值/状态)。
+//   写常量而不是裸 1:这一列的宽度取决于用户自己起什么名,是唯一有理由吃余量的列。
+constexpr int kColName = 1;
+
 // ★ F3:4 档等级 → (文字, 底色, 字色)
 //
 // 【为什么以前只有 Critical/Emergency 有颜色】原来只给这两档上了红底,
@@ -82,7 +86,17 @@ AlarmListControl::AlarmListControl(QGraphicsItem* parent)
     table_ = new QTableWidget;
     table_->setColumnCount(5);
     table_->setHorizontalHeaderLabels({"时间", "报警名", "等级", "值", "状态"});
-    table_->horizontalHeader()->setStretchLastSection(true);
+    // ★ 拉伸【报警名】那一列,不是最后一列(2026-10-10)。
+    //   原来 setStretchLastSection(true) —— 余量全给"状态"(就"未确认"三个字),
+    //   实测 876px 视口下摊到 476px,空掉 440px;而报警名只有 100px,
+    //   真实报警名需要 135px,被截断。
+    //   ★ E.5 之后操作员实际盯的是【运行时画布】这张表,不是主窗口那张,
+    //     所以这一处的优先级不低于 hmi.cpp。
+    //   做法与 AlarmHistoryView / AlarmConfigDialog 一致(F5-a):
+    //   按内容收紧,余量给宽度最不确定的一列。
+    table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    table_->horizontalHeader()->setSectionResizeMode(kColName, QHeaderView::Stretch);
+    table_->horizontalHeader()->setStretchLastSection(false);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);   // 只读
     // ★ F3:单选 + 双击确认。单选是为了"双击哪行就确认哪行"不会歧义。
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);

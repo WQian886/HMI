@@ -36,6 +36,9 @@
 #include <QPixmap>
 #include <QToolTip>
 #include <QDir>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QVBoxLayout>
 #include <QDebug>
 
 #include "drivers/ProtocolAvailabilityUi.h"
@@ -49,7 +52,110 @@ class tst_ProtocolComboShot : public QObject
 
 private slots:
     void renderPopup();
+    void measureStretchLastSection();
 };
+
+// 量两遍:【改之前】和【改之后】。
+//
+// ★ 只量改之前那遍没有意义 —— 那只能证明"原来是坏的",
+//   证明不了"改完是好的"。两边都量,中间的差才是结论。
+//   两条 QVERIFY 一起把两头都钉住:改完必须放得下,改回去必须放不下。
+//
+// 复刻的是 hmi.cpp:417-419 / AlarmListControl.cpp:83-85 的那份配置
+// (5 列:时间/报警名/等级/值/状态)。不是复制生产逻辑 ——
+// 生产逻辑只有那几行,抄过来量的是 Qt 自己的默认行为。
+void tst_ProtocolComboShot::measureStretchLastSection()
+{
+    auto run = [](bool fixed, const char* label) {
+        QWidget host;
+        host.resize(900, 400);
+
+        auto* table = new QTableWidget(&host);
+        table->setColumnCount(5);
+        table->setHorizontalHeaderLabels(
+            QStringList() << QStringLiteral("时间") << QStringLiteral("报警名")
+                          << QStringLiteral("等级") << QStringLiteral("值")
+                          << QStringLiteral("状态"));
+        if (fixed) {
+            // ★ 2026-10-10 改完的配置,与 hmi.cpp / AlarmListControl.cpp 一致
+            table->horizontalHeader()->setSectionResizeMode(
+                QHeaderView::ResizeToContents);
+            table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+            table->horizontalHeader()->setStretchLastSection(false);
+        } else {
+            table->horizontalHeader()->setStretchLastSection(true);
+        }
+
+        auto* lay = new QVBoxLayout(&host);
+        lay->addWidget(table);
+        host.show();
+        QTest::qWaitForWindowExposed(&host);
+
+        table->setRowCount(1);
+        table->setItem(0, 0, new QTableWidgetItem(QStringLiteral("14:23:05")));
+        table->setItem(0, 1, new QTableWidgetItem(
+            QStringLiteral("3#锅炉给水温度高高报警")));
+        table->setItem(0, 2, new QTableWidgetItem(QStringLiteral("高高")));
+        table->setItem(0, 3, new QTableWidgetItem(QStringLiteral("87.30")));
+        table->setItem(0, 4, new QTableWidgetItem(QStringLiteral("未确认")));
+
+        // Qt6 的 QHeaderView 没有 text(),得从 model 的 headerData 取
+        auto colName = [&](int c) {
+            return table->model()
+                ->headerData(c, Qt::Horizontal, Qt::DisplayRole)
+                .toString();
+        };
+
+        qInfo().noquote() << "=== " << label << " ===";
+        qInfo().noquote() << "表格视口宽度:" << table->viewport()->width();
+        int total = 0;
+        for (int c = 0; c < table->columnCount(); ++c) {
+            const int w = table->columnWidth(c);
+            total += w;
+            qInfo().noquote()
+                << QStringLiteral("  列[%1] %2 = %3 px")
+                       .arg(c)
+                       .arg(colName(c))
+                       .arg(w);
+        }
+        qInfo().noquote() << "  合计:" << total;
+
+        const int nameW = table->columnWidth(1);
+        const int nameNeed = table->fontMetrics().horizontalAdvance(
+            QStringLiteral("3#锅炉给水温度高高报警"));
+        const int lastW = table->columnWidth(4);
+        const int lastNeed = table->fontMetrics().horizontalAdvance(
+            QStringLiteral("未确认"));
+        qInfo().noquote()
+            << QStringLiteral("  报警名列 %1 px / 需要 %2 px -> %3")
+                   .arg(nameW)
+                   .arg(nameNeed)
+                   .arg(nameW >= nameNeed ? QStringLiteral("够")
+                                          : QStringLiteral("★放不下,截断★"));
+        qInfo().noquote()
+            << QStringLiteral("  状态列 %1 px / 内容只要 %2 px -> 空掉 %3 px")
+                   .arg(lastW)
+                   .arg(lastNeed)
+                   .arg(lastW - lastNeed);
+        return nameW >= nameNeed;
+    };
+
+    const bool oldOk =
+        run(false, "改之前:stretchLastSection(true),无 ResizeToContents");
+    const bool newOk = run(
+        true, "改之后:ResizeToContents + 拉伸报警名 + stretchLastSection(false)");
+
+    qInfo().noquote()
+        << QStringLiteral("★ 结论:改之前放得下=%1,改之后放得下=%2")
+               .arg(oldOk ? QStringLiteral("是") : QStringLiteral("否"))
+               .arg(newOk ? QStringLiteral("是") : QStringLiteral("否"));
+
+    // 这才是真断言:改完必须放得下。
+    QVERIFY2(newOk, "★ 改完之后报警名仍然被截断");
+    // 反向也钉一下:免得哪天有人把配置改回去,这条测试还照样绿。
+    QVERIFY2(!oldOk,
+             "★ 旧配置居然也放得下 —— 说明当初的问题判断错了,先查清楚再改");
+}
 
 void tst_ProtocolComboShot::renderPopup()
 {
@@ -179,7 +285,7 @@ void tst_ProtocolComboShot::renderPopup()
         if (shown && tip) {
             qInfo().noquote() << "  tooltip 内容:" << tip->property("text");
         }
-        QVERIFY2(shown, "★ 装了 ToolTipFilter 也弹不出 tooltip —— item 说明对用户不可见");
+        QVERIFY2(shown, "★ tooltip 弹不出来 —— item 说明对用户不可见");
 
         //   ★ 这条断言现在【是通过】的 —— 原代码本来就能弹。
     //     第一版探针判它"坏",是因为探针本身两处都写错了:

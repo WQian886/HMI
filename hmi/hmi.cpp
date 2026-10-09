@@ -51,6 +51,16 @@
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
 #include <QStandardPaths>    // ★ D.4.1:CSV 导出默认路径(桌面)
 #include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
+#include <QHeaderView>       // ★ 2026-10-10:两张表的列宽策略(报警名/Variable 吃余量)
+
+// ★ 2026-10-10:两张表里"宽度最不确定"的那一列的下标。
+//   写成常量而不是裸 1 —— 报警名的宽度【取决于用户自己起什么名】,
+//   是唯一有理由吃余量的列;其余列一律按内容收紧。
+//   跟 AlarmHistoryView.cpp / AlarmConfigDialog.cpp 里的 kColName 是同一个理由。
+namespace {
+constexpr int kColAlarmName = 1;   // 报警表:时间/报警名/等级/值/状态
+constexpr int kColVarName   = 1;   // 审计表:时间/Variable/新值/结果/地址
+} // namespace
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
 QVector<quint16> parseValueList(const QString& text, QString* errOut);
@@ -416,7 +426,17 @@ hmi::hmi(QWidget *parent)
     // 阶段 5.4(2026-08-04):报警列表 UI 配置(5 列:时间/报警名/等级/值/状态)
     ui.alarmTable->setColumnCount(5);
     ui.alarmTable->setHorizontalHeaderLabels({"时间", "报警名", "等级", "值", "状态"});
-    ui.alarmTable->horizontalHeader()->setStretchLastSection(true);
+    // ★ 拉伸【报警名】那一列,不是最后一列(2026-10-10)。
+    //   原来用的是 setStretchLastSection(true) —— "把多余的宽度全给最后一列"。
+    //   而最后一列是"状态",内容就"未确认"三个字,大多数时候更短。
+    //   实测(876px 视口,不是推理):时间 100 / 报警名 100 / 等级 100 / 值 100 /
+    //   状态 476 —— 状态空掉 440px,而报警名只有 100px,
+    //   真实报警名(如"3#锅炉给水温度高高报警")需要 135px,★直接被截断★。
+    //   这与 F5-a 在 AlarmConfigDialog / AlarmHistoryView 上修掉的是同一形态的缺陷,
+    //   当时漏了这两张表。做法照搬那两处:按内容收紧,余量给宽度最不确定的一列。
+    ui.alarmTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    ui.alarmTable->horizontalHeader()->setSectionResizeMode(kColAlarmName, QHeaderView::Stretch);
+    ui.alarmTable->horizontalHeader()->setStretchLastSection(false);
 
     // 阶段 5.4:接 AlarmManager 信号(槽函数实现见文件末尾)
     connect(alarmMgr_, &AlarmManager::alarmTriggered, this, &hmi::onAlarmTriggered);
@@ -604,7 +624,12 @@ hmi::hmi(QWidget *parent)
     // 阶段 4.x 写审计日志(2026-07-28):配置 auditTable + 接 WriteScheduler 信号
     ui.auditTable->setColumnCount(4);
     ui.auditTable->setHorizontalHeaderLabels({"时间", "Variable", "新值", "结果/地址"});
-    ui.auditTable->horizontalHeader()->setStretchLastSection(true);
+    // ★ 拉伸【Variable】那一列,不是最后一列(2026-10-10)。理由同上:
+    //   最后一列是"结果/地址",就几个字;而 Variable 名是用户自己配的,
+    //   长度最不确定。原来 stretchLastSection(true) 让短列吃走全部余量。
+    ui.auditTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    ui.auditTable->horizontalHeader()->setSectionResizeMode(kColVarName, QHeaderView::Stretch);
+    ui.auditTable->horizontalHeader()->setStretchLastSection(false);
     connect(writeScheduler_, &WriteScheduler::auditAppended, this,
         [this](const WriteAuditEntry& e){
             int row = ui.auditTable->rowCount();

@@ -3,6 +3,46 @@
 > 最后核对：**2026-10-10**（基于代码核对：`ctest` **66 个目标 66 通过**，
 > `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出）
 
+## [Unreleased] - 2026-10-10 (三)
+
+### F5-a 漏掉的两张报警表 —— 「报警名」被截断,「状态」空摊 440px
+
+F5-a 在 `AlarmConfigDialog` / `AlarmHistoryView` 上修掉过
+"拉伸最后一列 → 短列吃走全部余量"这个缺陷，但**漏了报警表本身**。
+
+`hmi.cpp` 与 `AlarmListControl.cpp` 两处配置完全一样
+（时间/报警名/等级/值/**状态**），都是 `setStretchLastSection(true)`
+且**没有** `ResizeToContents`。实测 876px 视口：
+
+| 列 | 改之前 | 改之后 | 内容需要 |
+|---|---|---|---|
+| 时间 | 100 px | 55 px | — |
+| **报警名** | **100 px（★截断★）** | **708 px（够）** | 135 px |
+| 等级 | 100 px | 32 px | — |
+| 值 | 100 px | 38 px | — |
+| 状态 | **476 px（空 440）** | **43 px（空 7）** | 36 px |
+
+真实报警名（如「3#锅炉给水温度高高报警」）需要 135px，而那一列只有 100px。
+
+`AlarmListControl` 那一处优先级不低于主窗口 —— E.5 之后操作员实际盯的是
+**运行时画布**上这个"会闪的"列表，不是主窗口那张。
+
+做法照搬 F5-a 已确立的写法：`ResizeToContents` + 指定列 `Stretch` +
+`stretchLastSection(false)`，余量给宽度最不确定的一列。
+审计表（`hmi.cpp`）同构处理，拉伸 `Variable` 列。
+
+**这一条是量出来的，不是看渲染图看出来的** —— `tst_ProtocolComboShot` 里
+新增 `measureStretchLastSection`，把列宽直接打出来，并把「改之前放不下 /
+改之后放得下」两头都钉成断言，免得有人把配置改回去还照样绿。
+
+未动：`UserManagementDialog`（末列是时间戳，不是空列，吃不满余量）、
+`TableControl`（列头由用户配置，**不能写死索引**，规则待 Wqian 拍板）。
+
+验证：`ctest` 66/66、`hmi.exe` 经 **MSBuild** 编译通过。
+
+> ⚠️ 期间全量套跑出现过 **1 次红**，连续 8 次复跑全绿，未取到失败断言原文，
+> 未能确认是否仍是那条已知的 `tst_Trend` 偶发失败。**如实记，不编原因。**
+
 ## [Unreleased] - 2026-10-10 (二)
 
 ### 把协议下拉框真的渲染出来看 —— 结论:功能是好的,但我差点修错东西
