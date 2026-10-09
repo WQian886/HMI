@@ -1,6 +1,42 @@
 # CHANGELOG
 
-> 最后核对：**2026-10-08**（基于代码核对：`ctest` **64 个目标 64 通过**，`hmi.exe` clean 重编通过）
+> 最后核对：**2026-10-09**（基于代码核对：`ctest` **64 个目标 64 通过**，
+> `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出）
+
+## [Unreleased] - 2026-10-09
+
+### vcxproj.filters 漏配 27 条 —— 编译不受影响,所以测试全绿也照样漏
+
+约定 3 要求新增 `.cpp/.h` 同时登记到 `hmi.vcxproj` **和** `hmi.vcxproj.filters`。
+实测登记长期只做了前一半:QtMoc 缺 12、ClCompile 缺 11、ClInclude 缺 4,
+最早可追到 5.2 阶段的 `ThresholdAlarmChecker`,一直到昨天的 `AlarmConfigDialog`。
+
+**为什么没有任何自动检查抓到它**:`.filters` 只管 VS 资源管理器的**显示**,
+Ninja / ctest 走 CMakeLists,根本不读这个文件。症状是"文件在 VS 里看不见",
+而 64/64 全绿。已用新增的 `scripts/fix_filters_entries.py` 补齐(默认 dry-run)。
+
+顺带清掉 2 条幽灵条目:`HighAlarmChecker.h/.cpp` 在 `369451f` 就删了、
+改名成 `ThresholdAlarmChecker`,filters 里的旧名没人跟着清。
+`--prune` 只删磁盘上也不存在的条目 —— `AlarmHistoryView.h` 那类
+"只登记 `<QtMoc>` 不登记 `<ClInclude>`"的(29 个头都是这惯例)保留,那是惯例不是错。
+
+### 待办里"EXCLUDE_DIRS 应跳过 `3rdparty/`"这条照做会编译失败
+
+原 P1 写的做法会**直接编译失败**:`3rdparty` 下只有 `qcustomplot` 真的有源文件,
+而 `qcustomplot.cpp` 是必须编进 hmi 的(`CMakeLists.txt:37` + `hmi.vcxproj` 都已收录)。
+真正要排的是 `3rdparty/qcustomplot/examples/` —— 5 个示例程序、21 个源文件,
+**其中 5 个定义了 `main()`**;`--apply` 塞进去就是链接期 `multiple definition of main`,
+而这个错**只在链接期爆**,编译阶段一路绿灯。已改的是 `"examples"` 子目录名。
+
+> 改完 dry-run 从「缺 12 个 .cpp + 7 个 .h」变成「缺 0 残留 0」,
+> 顺带证明 `hmi.vcxproj` 本体一直是准的(本次没动它)。
+
+**工程文件是 UTF-8 带 BOM + 全 CRLF,本项目已经因此踩坑两次**。
+脚本按字节读写,已核对:BOM 仍是 `239,187,191`、CRLF 675→753、**裸 LF = 0**。
+
+验证做到哪一步:filters 222 条逐条查磁盘 0 幽灵、`sync_vcxproj.py` 缺 0 残留 0、
+**MSBuild 真编一次**(唯一会读 filters 的路径 —— CMake 那条读不到,别拿 configure 成功当验证)、
+`ctest` 64/64。
 
 ## [Unreleased] - 2026-10-08
 

@@ -75,6 +75,26 @@ EXCLUDE_DIRS = {
     # 里面有 x64/ 子目录(moc_*.cpp 等),如果脚本在 hmi/ 根扫,
     # 会扫到 hmi/hmi/x64/ 里的 moc_*.cpp,需要排除掉 hmi/hmi/ 本身
     # 简单做法:用 rglob + 跳过包含 "x64" 路径的(已含)即可
+
+    # ★ QCustomPlot 的【示例程序】(2026-10-09 加)
+    #
+    #   【为什么不直接排除 "3rdparty" —— 那会闯大祸】
+    #     待办清单里原来写的是"EXCLUDE_DIRS 应跳过 3rdparty/"。
+    #     照做会【直接编译失败】:3rdparty 下只有 qcustomplot 真的有源文件,
+    #     而 qcustomplot/qcustomplot.cpp 是【必须】编进 hmi 的
+    #     (CMakeLists.txt:37 也在编它,hmi.vcxproj 也已收录)。
+    #     把 3rdparty 整个排掉,等于把唯一要编的那个也排了。
+    #
+    #   【真正要排除的是什么】
+    #     3rdparty/qcustomplot/examples/ 下有 5 个示例程序,
+    #     实测共 21 个源文件、其中【5 个定义了 main()】
+    #     (axis-tags / interactions / plots /
+    #      scrollbar-axis-range-control / text-document-integration 各一个)。
+    #     hmi 自己已经有一个 main.cpp —— 一旦 --apply 把这 5 个也塞进 vcxproj,
+    #     链接期直接 "multiple definition of main",而且这个错【只在链接期爆】,
+    #     编译阶段一路绿灯。
+    #   所以排除的是 examples/ 这个子目录,不是 3rdparty/。
+    "examples",
 }
 
 # vcxproj 命名空间(MSBuild XML)

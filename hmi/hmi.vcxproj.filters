@@ -1,6 +1,90 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
+         症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
+         所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
+    <ClCompile Include="ThresholdAlarmChecker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AlarmSoundPlayer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\alarm\AlarmSoundDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="JsonSerializer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Project.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\instance\SingleInstance.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\tray\SystemTray.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\logging\Logging.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\crash\CrashHandler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\editor\RuntimeCanvas.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\alarm\AlarmConfigDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\logging\Logging.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\crash\CrashHandler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\editor\RuntimeCanvas.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\alarm\AlarmConfigDialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <QtMoc Include="ThresholdAlarmChecker.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="AlarmSoundPlayer.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\alarm\AlarmSoundDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="JsonSerializer.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="Project.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\instance\SingleInstance.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\tray\SystemTray.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\editor\PropertySheet.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\editor\PropertyChangeCommand.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\editor\EditorMainWindow.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\editor\RuntimeCanvas.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\alarm\AlarmConfigDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
     <Filter Include="Source Files">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>qml;cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
@@ -112,12 +196,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <!-- 阶段 5.3:HighAlarmChecker 注册到过滤器 -->
-    <QtMoc Include="HighAlarmChecker.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
-    <ClCompile Include="HighAlarmChecker.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <!-- 阶段 4.3.x:WriteFailChecker 注册到过滤器 -->
     <QtMoc Include="WriteFailChecker.h">
       <Filter>Header Files</Filter>
