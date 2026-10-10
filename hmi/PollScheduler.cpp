@@ -56,10 +56,19 @@ PollScheduler::PollScheduler(VariableManager* mgr,
 //   于是"读请求在途 + 用户删掉该变量"→ onDriverReadFinished 拿到悬空指针,
 //   v->setQuality(...) / v->address() 直接 use-after-free。
 //
-//   【为什么这不是臆想出来的场景】
-//   轮询周期 100ms、Modbus 往返几毫秒到几百毫秒 —— 请求在途是【常态】,
-//   不是极端情况。而"用户在界面上删变量"是配置对话框里的常规操作。
-//   两个都不罕见,叠加起来就是一次迟早会发生的崩溃。
+//   【为什么这不是臆想出来的场景 —— 以及我一开始写错了】
+//   原来这里写的是"用户在界面上删变量是配置对话框里的常规操作"。
+//   【那句话是错的,已更正】:全仓查过,hmi.ui 里根本没有删变量的入口,
+//   removeVariable() 也只有测试在调。照那句话去找触发路径是找不到的。
+//
+//     真正在生产里踩中的是【另一条路,而且更普通】:
+//     用户点【打开工程】换工程 → Project::loadFromFile 第 4 步
+//     → varMgr_->clear() 把【全部】变量 delete 掉,换成新工程的。
+//     而这发生在【轮询正在跑】的时候 —— nextPollAtMs_ 里每个变量都是 key,
+//     每一个都当场变成悬空 key。
+//   叠加"轮询 100ms 一次、Modbus 往返几毫秒到几百毫秒,请求在途是常态",
+//   就是一次迟早会发生的崩溃。第二次及以后的换工程必然命中
+//   (第一次加载时 start() 还没跑,容器是空的)。
 void PollScheduler::connectVariableManager() {
     if (!varMgr_) return;
     connect(varMgr_, &VariableManager::variableReplaced,

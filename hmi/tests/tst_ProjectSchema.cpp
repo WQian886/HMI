@@ -23,6 +23,8 @@
 #include "AlarmManager.h"
 #include "ActionManager.h"
 #include "PollScheduler.h"
+#include "JsonSerializer.h"
+#include "ThresholdAlarmChecker.h"
 // ★ E.3 测试:controls 序列化需要 ControlBase
 #include "widgets/BarControl.h"
 #include "widgets/LedControl.h"
@@ -65,6 +67,9 @@ private slots:
     void loadFromFile_restoresControlsViaSignal();
     void roundTrip_preservesControlProperties();
     void unknownControlType_loadsAsNull();
+
+    // ★ 2026-10-10:换工程后不该有 checker 攥着已删除的变量
+    void loadFromFile_leavesNoCheckerOnDeadVariable();
 };
 
 // ★ E.3 修复:实例化每个控件一次填注册表(每个 new + delete 触发构造函数里的
@@ -445,6 +450,116 @@ void TestProjectSchema::unknownControlType_loadsAsNull() {
     QCOMPARE(okCount, 0);            // 未知 type 跳过
     QCOMPARE(out.size(), 0);         // 没创建任何控件
     QVERIFY(out.isEmpty());
+}
+
+// ============================================================================
+// ★ 2026-10-10:换工程之后,不该有 checker 攥着一个已经不存在的变量
+//
+// 【背景 —— 一条"碰巧安全"的依赖】
+//   ThresholdAlarmChecker::variable_ 是【裸 Variable*】,而它的 onVariableReplaced
+//   槽至今【没有任何地方 connect】(hmi.cpp 那条连接在 E#29 改成"按名查"时被删了,
+//   槽成了孤儿)。所以 varMgr_->clear() 执行的时候,每个活着的 checker 手里的
+//   variable_ 当场变成悬空指针。
+//
+//   它今天不崩,唯一原因是紧接着的 alarmMgr_->clearAll() 把 checker 全 delete 了,
+//   而那条路上没人解引用 variable_(clearAll 只 delete,~ThresholdAlarmChecker 是 = default)。
+//
+// ★ 我一开始把不变量写错了,测试自己把它顶了回来 —— 如实记下来:
+//   我最初断言的是"变量被 delete 的那一刻,alarmMgr 里应该已经没有 checker 了"。
+//   实跑结果 Actual=1 —— 【checker 那时确实还活着】,生产里也一样
+//   (hmi 启动时建的 checker,换工程时变量先被删光)。
+//   所以"安全"来自那扇窗口里没人解引用,不是来自"checker 已经清空"。
+//   把不变量写成"那扇窗口里没有活着的 checker"是在描述一个不存在的事实。
+//
+// 【这条测试钉的是真正可观测的那一条】
+//   换工程【之后】,每条 checker 的 variable() 必须正好是 varMgr_ 里现存的那个指针。
+//   这是 loadFromFile 之后真正应该成立、而且坏了之后会【晚很久才崩】的性质:
+//   悬空的 checker 指针当下不会崩,要等到下一次有人调 variable()->name() 才崩 ——
+//   而 Project.cpp:420(保存工程)正是这么调的,那是用户的常规动作。
+//
+//   ★ 比指针而不是比名字:比名字会顺手 v->name(),那本身就是解引用悬空指针。
+//     这里全程只比地址,所以这条测试【自己不会成为那个崩溃】。
+//
+// ★ 这一条不是纸上谈兵,是实测出来的(2026-10-10):
+//   临时加了一句 QCOMPARE(tc->variable(), oldTemp) 做对照 —— oldTemp 是已释放指针。
+//   结果不是干净地红,是【直接崩】:0xC0000005,栈顶
+//   QTest::Internal::pointerToString<Variable>() ← QTest::compare_ptr_helper。
+//   也就是说 QCOMPARE 在报告失败时会把两个指针【解引用】取名字,
+//   悬空指针在失败路径上照样炸。
+//   → 断言只能拿【确定还活着】的指针去比。上面那句 tc->variable() == live
+//     两个都是活的,所以这条测试永远不会自己变成那个崩溃。
+// ============================================================================
+
+void TestProjectSchema::loadFromFile_leavesNoCheckerOnDeadVariable() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("order.json"));
+
+    // 构造一个 v3 工程:1 个变量 + 1 条阈值报警
+    QJsonObject root;
+    root["schema_version"] = 3;
+
+    QJsonObject v;
+    v["name"]       = QStringLiteral("Temp");
+    v["address"]    = 3;
+    // ★ 大小写敏感:JsonSerializer 走 QMetaEnum::keyToValue,小写 int16 无效
+    //   (它的报错信息里专门写了这一句,这里别再踩一遍)
+    v["data_type"]  = QStringLiteral("Int16");
+    v["access"]     = QStringLiteral("ReadWrite");
+    root["variables"] = QJsonArray{v};
+
+    QJsonObject a;
+    a["name"]     = QStringLiteral("温度高");
+    a["variable"] = QStringLiteral("Temp");
+    a["level"]     = QStringLiteral("Critical");
+    a["threshold"] = 80.0;
+    a["direction"] = QStringLiteral("Above");
+    root["alarms"] = QJsonArray{a};
+
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(QJsonDocument(root).toJson());
+    f.close();
+
+    VariableManager vm;
+    AlarmManager am;
+    PollScheduler ps(&vm, static_cast<qwhmi::drivers::IPollDriver*>(nullptr));
+
+    // ★ 先手工建出一个【老工程】的 checker —— loadFromFile 要把它连同老变量一起清掉。
+    //   这一步不能省:省了就变成"从空工程加载空工程",什么也没被清过,断言必然假绿。
+    QString err;
+    Variable* oldTemp = JsonSerializer::fromJsonVariable(v, &vm, &err);
+    QVERIFY2(oldTemp != nullptr, qPrintable(QStringLiteral("变量构造失败:%1").arg(err)));
+    QVERIFY(vm.addVariable(oldTemp));
+
+    CheckerConfig oldCfg;
+    oldCfg.level     = AlarmLevel::Warning;
+    oldCfg.direction = Direction::Below;
+    oldCfg.threshold = 10.0;
+    auto* oldChecker = new ThresholdAlarmChecker(QStringLiteral("老报警"), oldTemp, &ps, oldCfg, &am);
+    QVERIFY(am.addChecker(oldChecker));
+    QCOMPARE(am.checkers().size(), 1);
+    QCOMPARE(am.checkers().first(), oldChecker);
+
+    Project p(&vm, &am, nullptr, &ps, nullptr);
+    QVERIFY2(p.loadFromFile(path), "这个工程文件自己都读不回来,后面测的就不是清场问题了");
+
+    // 加载完:老 checker 必须已经不在了(它是靠 clearAll 走的)
+    QVERIFY2(am.checkers().size() == 1 && am.checkers().first() != oldChecker,
+             "换工程之后老 checker 还活着 —— 它攥着的变量早就被删了");
+
+    // ★ 核心断言:新 checker 的 variable() 必须是 manager 里【现存】的那个指针。
+    //   地址比较,不解引用 —— 悬空指针在这里也是安全的被比较对象。
+    Variable* live = vm.findVariable(QStringLiteral("Temp"));
+    QVERIFY(live != nullptr);
+    QCOMPARE(vm.count(), 1);
+
+    const QList<AlarmChecker*> now = am.checkers();
+    for (AlarmChecker* c : now) {
+        auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
+        QVERIFY(tc != nullptr);
+        QCOMPARE(tc->variable(), live);
+    }
 }
 
 QTEST_MAIN(TestProjectSchema)

@@ -131,8 +131,12 @@ void tst_VariableManager::findByAlias_returnsCorrectVariable() {
 // 【为什么它一直没被发现】
 //   同名【替换】会 emit、clear() 也会 emit,唯独 removeVariable() 不发。
 //   三个入口长得一样、两个会通知一个不会,读代码的人极容易以为都会。
-//   而 loadFromFile 走的是 clear() 不是 removeVariable(),
-//   所以"正常流程"永远碰不到,只有【用户在界面上删变量】才碰得到。
+//
+//   ★ 更正(2026-10-10 当天晚些时候):原来这里写的是
+//     "只有【用户在界面上删变量】才碰得到" —— 【那句话是错的】。
+//     全仓查过:removeVariable() 除了本文件这些用例,没有任何生产调用方,
+//     hmi.ui 里也没有删变量的入口。别照着这句话去找触发路径。
+//     生产里真正删光变量的是 clear()(换工程),而它早就 emit 了。
 //
 // 【对照】clear() 早就做对了(2026-08-07),而且写清了理由。
 //   removeVariable() 当时只是漏了 —— 现在补上,两个入口语义一致。

@@ -281,7 +281,12 @@ void TestIPollDriver::readRequest_passesAllFourAreas() {
 //     nextPollAtMs_(key) / inFlight_(key) / activeVariables_(key) / pending_(value)
 //   而 QObject 析构【不通知任何人】。于是:
 //     1. tick 发出读请求,变量进了 pending_
-//     2. 用户在配置对话框里删掉这个变量 ← 常规操作
+//     2. 那个 Variable 被 delete —— 生产里最常见的触发是【换工程】:
+//        Project::loadFromFile 第 4 步 varMgr_->clear() 一次删光全部变量。
+//        ★ 用例里用 removeVariable() 代替,两者 emit 的是同一个信号,
+//          对 PollScheduler 是同一条路径;换成 clear() 跑结论一样。
+//        (顺带更正:这组注释原来写的是"用户在配置对话框里删变量",
+//         那句话是错的 —— hmi.ui 里没有删变量的入口,照着找会找不到。)
 //     3. PLC 回包到达,onDriverReadFinished 拿到悬空指针
 //     4. v->setQuality(...) / v->address() → use-after-free
 //

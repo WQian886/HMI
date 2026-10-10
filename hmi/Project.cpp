@@ -257,8 +257,35 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
     }
 
     // 4. 清空现有状态(Q4-A 全删干净)
+    //
+    // ★★★【这两行之间的"空窗期",2026-10-10 查证后补记】★★★
+    //
+    //   ThresholdAlarmChecker::variable_ 是【裸 Variable*】,而它的
+    //   onVariableReplaced 槽【至今没有任何地方 connect】(hmi.cpp 那条连接
+    //   在 E#29 改成"按名查"时被删了,槽成了孤儿)。
+    //   所以上面 varMgr_->clear() 执行的时候,【每一个还活着的 checker】
+    //   手里的 variable_ 当场变成悬空指针。
+    //
+    //   ★ 我一度以为"安全"来自这两行的顺序(以为 checker 先被清了)。
+    //     实测不是:变量死的那一刻 checker【确实还活着】(Actual=1),
+    //     生产里也一样 —— hmi 启动时建的 checker,换工程时变量先被删光。
+    //     真正的安全来源是:紧接着的 clearAll() 把 checker 全 delete 了,
+    //     而那条路上【没人解引用 variable_】
+    //     (clearAll 只 delete,~ThresholdAlarmChecker 是 = default)。
+    //
+    //   所以这是"碰巧安全",不是"设计安全" —— 代码里没有任何一处表达它。
+    //   【哪天有人往析构或 clearAll 里加一行"删之前把变量名打出来"就是 UAF】,
+    //   而那行看起来像再正常不过的日志。
+    //
+    //   【为什么现在不直接给 checker 接上广播】
+    //     checker 构造函数只收 Variable*,没有 VariableManager*,接不上;
+    //     要接就得把 varMgr 穿过 Project / hmi / 一堆测试的构造签名,
+    //     改动面远超一个孤儿槽该有的代价,而它今天确实不崩。
+    //     等真要加"变量删除"功能时,连同 removeVariable 那条路一起做。
+    //     加载后的可观测后果由 tst_ProjectSchema::loadFromFile_
+    //     leavesNoCheckerOnDeadVariable 钉住。
     if (varMgr_)   varMgr_->clear();
-    if (alarmMgr_) alarmMgr_->clearAll();
+    if (alarmMgr_) alarmMgr_->clearAll();   // ★ 必须紧跟在上一行后面,中间别插解引用 variable_ 的代码
     if (actionMgr_) actionMgr_->clear();
 
     // ★ F3(2026-09-30)问题 3:失败路径统一收口。
