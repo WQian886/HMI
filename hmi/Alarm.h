@@ -41,6 +41,18 @@ struct Alarm {
     QDateTime   recoveredAt;       // 默认 invalid(没恢复就是 invalid)
     QString     triggerValue;     // 触发时的值快照("80.5")
     QString     threshold;        // 阈值描述(">= 80.0")
+    // ★ F6(2026-10-10):区域 —— 现场的组织归属("一号泵房"/"反应釜区")
+    //   【为什么加】整个代码库此前没有"区域"概念,报警历史只能按时间/等级筛。
+    //     现场几十上百条报警混在一起时,操作员真正要问的是
+    //     "我负责的那块有没有出事",那是组织归属问题不是时间问题。
+    //   【为什么是手填而不是复用 plcId】plcId 是【通信归属】不是【组织归属】:
+    //     一台 PLC 常常同时带一号泵房和二号泵房,一个区域也可能横跨两台 PLC。
+    //     plcId 经常不是一个正确的区域 —— 一个经常筛错的筛选框比没有更糟。
+    //   【为什么是自由文本而不是工程级下拉清单】自由文本是清单方案的【真子集】:
+    //     现在只多一列 TEXT,将来想收窄成下拉清单,只改 UI 不动 schema。
+    //     反过来先做清单、日后发现多数项目只有两三个区域,就得迁移第二次。
+    //   【参照】Wqian 2026-10-10 拍板(见 AlarmHistoryView.h"区域"一节)
+    QString     area;             // 可空 = 未分配。空值归入"未分配"桶,不是假装没这回事
 };
 Q_DECLARE_METATYPE(Alarm)
 
@@ -73,6 +85,15 @@ struct CheckerConfig {
     //   【取舍】单边滞回(不用双阈值区间),工业 HMI 常规做法,参数也好配。
     //         hysteresis = 0 时退化成老行为 —— 这是必须守住的不变量。
     double     hysteresis    = 0.0;                   // 滞回量(0 = 不启用,行为同 5.3)
+
+    // ★ F6(2026-10-10):区域 —— 每条报警规则填一次,由 ThresholdAlarmChecker
+    //   原样抄进它 emit 的 Alarm。字段说明与理由见上面 struct Alarm::area。
+    //
+    //   ★ 必须留在【末尾】:hmi.cpp:407/412 是聚合初始化
+    //       CheckerConfig highCfg{AlarmLevel::Critical, Direction::Above, 50.0, 500};
+    //     插到中间会让 500 被当成 QString area —— 能编过,运行时直接崩。
+    //     加新字段前先 grep "CheckerConfig \w+ \{"。
+    QString    area;                                   // 可空 = 未分配
 };
 
 // ★ IMPROVE-5.2(2026-08-04):报警检测器基类(具体逻辑由 5.3 子类实现)

@@ -56,6 +56,12 @@ const ColumnSpec kColumns[] = {
     { "trigger_value",  "TEXT"               },  // 触发值快照
     { "threshold",      "TEXT"               },  // 阈值描述
     { "user",           "TEXT"               },  // 确认人(预留;v1 默认空)
+    // ★ F6(2026-10-10):区域。加这一行就同时完成两件事 ——
+    //   新库建表带 area 列;老库走 addColumnIfMissing 补上。
+    //   老行的 area 是 NULL → 读回来是空串 → 归入"未分配"桶。
+    //   【为什么不写 NOT NULL DEFAULT ''】SQLite 的 ALTER TABLE ADD COLUMN
+    //   不允许带非空默认值,强行写会在老库上直接报错。加可空列是正确的。
+    { "area",           "TEXT"               },  // 现场区域("一号泵房"),可空 = 未分配
 };
 
 } // namespace
@@ -203,13 +209,15 @@ bool AlarmRecorder::addColumnIfMissing(const QString& table, const QString& colu
 bool AlarmRecorder::insertAction(qint64 alarmId, const QString& name, int level,
                                  int action, const QDateTime& at,
                                  const QString& varName, const QString& triggerValue,
-                                 const QString& threshold, const QString& user) {
+                                 const QString& threshold, const QString& user,
+                                 const QString& area) {
     if (!isOpen()) return false;
     QSqlQuery q(*db_);
     q.prepare(R"(
         INSERT INTO alarm_history
-            (alarm_id, name, level, action, action_at, variable_name, trigger_value, threshold, user)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (alarm_id, name, level, action, action_at, variable_name,
+             trigger_value, threshold, user, area)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     )");
     q.addBindValue(alarmId);
     q.addBindValue(name);
@@ -220,6 +228,10 @@ bool AlarmRecorder::insertAction(qint64 alarmId, const QString& name, int level,
     q.addBindValue(triggerValue);
     q.addBindValue(threshold);
     q.addBindValue(user);
+    // ★ F6:区域。最后一个,默认空 —— 现有 4 个调用点(acknowledged / recovered /
+    //   allCleared / triggered)里,只有 triggered 拿得到完整 Alarm,其余几个
+    //   兜底行本来就只有 id + 时间,区域理应同样空着。
+    q.addBindValue(area);
     if (!q.exec()) {
         qWarning() << "[AlarmRecorder] INSERT 失败:" << q.lastError().text();
         return false;
@@ -244,7 +256,8 @@ void AlarmRecorder::setSource(AlarmManager* mgr) {
 void AlarmRecorder::onAlarmTriggered(const Alarm& alarm) {
     insertAction(alarm.id_, alarm.name, static_cast<int>(alarm.level),
                  /*action=*/0, alarm.triggeredAt,
-                 alarm.variableName, alarm.triggerValue, alarm.threshold);
+                 alarm.variableName, alarm.triggerValue, alarm.threshold,
+                 /*user=*/{}, alarm.area);
 }
 
 void AlarmRecorder::onAlarmAcknowledged(qint64 id) {
@@ -260,7 +273,8 @@ void AlarmRecorder::onAlarmAcknowledged(qint64 id) {
                                  ? a.acknowledgedAt : QDateTime::currentDateTime();
             insertAction(id, a.name, static_cast<int>(a.level),
                          /*action=*/1, at,
-                         a.variableName, a.triggerValue, a.threshold);
+                         a.variableName, a.triggerValue, a.threshold,
+                         /*user=*/{}, a.area);
             return;
         }
     }
@@ -297,7 +311,8 @@ void AlarmRecorder::onAlarmRecovered(qint64 id, const Alarm& recovered) {
                          ? recovered.recoveredAt : QDateTime::currentDateTime();
     insertAction(id, recovered.name, static_cast<int>(recovered.level),
                  /*action=*/2, at,
-                 recovered.variableName, recovered.triggerValue, recovered.threshold);
+                 recovered.variableName, recovered.triggerValue, recovered.threshold,
+                 /*user=*/{}, recovered.area);
 }
 
 void AlarmRecorder::onAllCleared() {
@@ -306,22 +321,47 @@ void AlarmRecorder::onAllCleared() {
                  /*action=*/3, QDateTime::currentDateTime());
 }
 
+// ★ F6:返回【空但非 null】的串 —— 这是 query() 判定"筛未分配"的唯一依据。
+//   QStringLiteral("") 在 Qt6 里构造的是非 null 的空串;QString() 是 null。
+//   写反的后果是"筛未分配"退化成"不筛",界面看起来正常、结果多出来一堆 ——
+//   是那种不会变红、只会让人以为程序抽了风的错。
+QString AlarmRecorder::unassigned() {
+    static const QString s = QStringLiteral("");
+    return s;
+}
+
 QVector<AlarmRecorder::Record> AlarmRecorder::query(qint64 fromMs, qint64 toMs,
-                                                   int minLevel) {
+                                                   int minLevel,
+                                                   const QString& area) {
     QVector<Record> result;
     if (!isOpen()) return result;
 
     QSqlQuery q(*db_);
-    q.prepare(R"(
+    // ★ F6:area 条件是【可选的】,不是固定的一段 SQL。
+    //   判据是 isNull() 不是 isEmpty():null=不筛(老调用点默认,行为逐位不变),
+    //   空串=筛"未分配"。见 .h 里 unassigned() 那段注释。
+    const bool filtering = !area.isNull();
+    QString sql = QStringLiteral(R"(
         SELECT alarm_id, name, level, action, action_at,
-               variable_name, trigger_value, threshold, user
+               variable_name, trigger_value, threshold, user, area
         FROM alarm_history
         WHERE action_at >= ? AND action_at <= ? AND level >= ?
-        ORDER BY action_at ASC
     )");
+    if (filtering) {
+        // COALESCE(area,'') 是必须的:老行 area 是 NULL,而
+        //   "WHERE area = ''" 匹配不到 NULL —— 会让"未分配"这个桶永远是空的,
+        //   而那恰恰是老库里【全部】的记录。那就是筛选器一开就全空。
+        sql += QStringLiteral(" AND COALESCE(area, '') = ?");
+    }
+    sql += QStringLiteral(" ORDER BY action_at ASC");
+
+    q.prepare(sql);
     q.addBindValue(fromMs);
     q.addBindValue(toMs);
     q.addBindValue(minLevel);
+    if (filtering) {
+        q.addBindValue(area);
+    }
     if (!q.exec()) {
         qWarning() << "[AlarmRecorder] query 失败:" << q.lastError().text();
         return result;
@@ -338,9 +378,26 @@ QVector<AlarmRecorder::Record> AlarmRecorder::query(qint64 fromMs, qint64 toMs,
         r.triggerValue = q.value(6).toString();
         r.threshold    = q.value(7).toString();
         r.user         = q.value(8).toString();
+        r.area         = q.value(9).toString();   // NULL → 空串
         result.append(r);
     }
     return result;
+}
+
+// ★ F6:下拉框要列哪些区域。查 DISTINCT 而不是把整表拉回来在内存里去重 ——
+//   表会一直长(报警历史是只增不减的),全表扫描不该由一次开下拉框触发。
+QStringList AlarmRecorder::distinctAreas() {
+    QStringList out;
+    if (!isOpen()) return out;
+    QSqlQuery q(*db_);
+    if (!q.exec(QStringLiteral(
+            "SELECT DISTINCT COALESCE(area, '') FROM alarm_history "
+            "ORDER BY 1 ASC"))) {
+        qWarning() << "[AlarmRecorder] distinctAreas 失败:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) out << q.value(0).toString();
+    return out;
 }
 
 int AlarmRecorder::totalCount() const {

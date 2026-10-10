@@ -78,6 +78,10 @@ struct AlarmConfigRow {
     double  threshold  = 0.0;
     int     minDurationMs = 500;
     double  hysteresis = 0.0;
+    // ★ F6(2026-10-10):区域 —— 现场的组织归属("一号泵房"/"反应釜区")。
+    //   手填 + 历史值补全,理由见 AlarmHistoryView.h "【区域】的拍板过程"。
+    //   空 = 未分配,老配置读回来就是空,不是"没这个字段"。
+    QString area;
     bool    shelved    = false;   // ★ F2-c:当前是否被屏蔽
 
     // 【非阈值报警】WriteFailChecker 这类不在表里,也【不该】出现在表里。
@@ -115,6 +119,7 @@ public:
     double  thresholdAt(int row) const;
     int     minDurationMsAt(int row) const;
     double  hysteresisAt(int row) const;
+    QString areaAt(int row) const;            // ★ F6:未分配返回空串
     bool    shelvedAt(int row) const;
     bool    editableAt(int row) const;
 
@@ -197,6 +202,9 @@ private:
     void fillFormFromRow(int row);
     void writeFormToRow(int row);
     void setFormEnabled(bool on);
+    // ★ F6:重建区域补全列表(数据源是 rows_,不是数据库)。
+    //   刻意不动当前正在编辑的文本 —— 用户打字打到一半被刷掉是很糟的体验。
+    void refreshAreaHistory();
     void updateInfo();
     // ★ 新增报警时取一个未被占用的占位名("新报警" / "新报警 2" / …)。
     //   名字是 checkers_ 的 key,重名会导致加载工程文件时静默覆盖。
@@ -260,6 +268,12 @@ private:
     QDoubleSpinBox* thresholdSpin_  = nullptr;
     QSpinBox*       minDurSpin_     = nullptr;
     QDoubleSpinBox* hysteresisSpin_ = nullptr;
+    // ★ F6:区域输入。【可编辑】下拉框 —— 既能打新名字,又能从已用过的区域里选。
+    //   做成只读下拉就得先有"区域清单"(另一套 UI + 工程顶层结构),
+    //   做成纯输入框则每次都要手打、一不小心就写出两个"一号泵房"。
+    //   这一条是"手填方案是清单方案的真子集"在界面上的落点:
+    //   将来要收窄成清单,只需把 editable 摘掉,schema 一个字都不用动。
+    QComboBox*      areaCombo_      = nullptr;
 
     QPushButton*    addBtn_     = nullptr;
     QPushButton*    removeBtn_  = nullptr;

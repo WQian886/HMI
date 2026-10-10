@@ -53,6 +53,10 @@ QJsonObject JsonSerializer::toJson(const CheckerConfig& cfg) {
     obj["threshold"]        = cfg.threshold;
     obj["min_duration_ms"]  = cfg.minDurationMs;
     obj["hysteresis"]       = cfg.hysteresis;   // ★ F2:滞回(老工程没这个字段也不影响读)
+    // ★ F6:区域。老工程没这个键 → 读回来是空串 → "未分配"。
+    //   写不写这一行都不会让老工程打不开,但【写出来】才能让配置对话框
+    //   的回灌读回自己刚存的值 —— 存了不读回来等于没存。
+    obj["area"]             = cfg.area;
     return obj;
 }
 
@@ -210,6 +214,10 @@ CheckerConfig JsonSerializer::checkerConfigFromJson(const QJsonObject& obj) {
     // ★ F2:滞回。老工程文件没这个键 → toDouble() 给 0.0,即"不启用"。
     //   【为什么默认必须是 0 而不是猜一个值】默认值猜错 = 静默改变所有老工程的报警行为。
     cfg.hysteresis    = obj["hysteresis"].toDouble(0.0);
+    // ★ F6:区域。老工程文件没这个键 → toString() 给空串 → 未分配。
+    //   同上,默认值必须老实地是空,不能猜一个区域名填进去 ——
+    //   猜出来的区域会出现在筛选下拉里,而那些报警其实不属于它。
+    cfg.area          = obj["area"].toString();
     return cfg;
 }
 

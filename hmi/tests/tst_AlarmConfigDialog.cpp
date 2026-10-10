@@ -64,6 +64,13 @@ class TestAlarmConfigDialog : public QObject {
     Q_OBJECT
 
 private slots:
+    // ---- ★ F6(2026-10-10):区域 ----
+    void areaColumn_exists();
+    void area_typedByUser_landsInDraft();
+    void area_survivesExportAndReload();
+    void area_survivesSaveToProjectFile();
+    void area_whitespaceIsTrimmed();
+    void area_defaultIsUnassigned();
     void init();
     void cleanup();
 
@@ -136,7 +143,11 @@ private:
                              double threshold, double hysteresis,
                              AlarmLevel level = AlarmLevel::Warning,
                              Direction dir = Direction::Above,
-                             int minDurMs = 500);
+                             int minDurMs = 500,
+                             // ★ F6:区域。默认值必须【老实地】是空串 —— 空 = 未分配,
+                             //   而未分配正是 F6 之前所有报警的真实状态。
+                             //   给个"默认区域"的话,area_defaultIsUnassigned 就永远测不出东西。
+                             const QString& area = {});
     // 建一个非阈值 checker(模拟 WriteFailChecker)
     void usePlainChecker(AlarmManager* mgr, const QString& name);
 
@@ -190,7 +201,8 @@ void TestAlarmConfigDialog::useThresholdChecker(AlarmManager* mgr, VariableManag
                                                 const QString& name, const QString& varName,
                                                 double threshold, double hysteresis,
                                                 AlarmLevel level, Direction dir,
-                                                int minDurMs) {
+                                                int minDurMs,
+                                                const QString& area) {
     Variable* v = varMgr->findVariable(varName);
     if (!v) {
         // 地址是 quint16(见 Variable.h:56-58),不是字符串。
@@ -207,6 +219,7 @@ void TestAlarmConfigDialog::useThresholdChecker(AlarmManager* mgr, VariableManag
     cfg.threshold     = threshold;
     cfg.minDurationMs = minDurMs;
     cfg.hysteresis    = hysteresis;   // ★ F2 新字段
+    cfg.area          = area;         // ★ F6 新字段(CheckerConfig 末尾,见 Alarm.h)
     // pollScheduler 传 nullptr:对话框只读 config_,不碰检测逻辑,
     // 所以本文件完全不依赖轮询 —— 这也是"配置面"和"检测面"该分开的理由。
     auto* checker = new ThresholdAlarmChecker(name, v, nullptr, cfg, mgr);
@@ -1534,6 +1547,167 @@ void TestAlarmConfigDialog::operator_cannotOpen() {
                                           qwhmi::auth::Permission::EditProject));
     // 数据本身仍能读出来 —— 读和改是两回事,不该因为权限把界面也锁死
     QCOMPARE(dlg.rowCount(), 1);
+}
+
+// ============================================================================
+// ★ F6:区域
+//
+// 【这一组要证明的是"链",不是"列"】
+//   区域信息一共要穿过五道门,任何一道断了用户都会看见一个【不报错的失败】:
+//     对话框读出来 → 表格显示 → 用户改 → 导出 JSON → 存进工程文件 → 重新读回来
+//   断在哪一道,界面都不会报错 —— 只是筛历史的时候"这个区域怎么是空的"。
+//   所以每条断言都只锁一段,合起来才是整条链。
+//
+// 【为什么【未分配】要单独测】
+//   F6 上线时,现场所有既有报警都没有区域。对话框默认必须是"未分配",
+//   而不是替用户编一个"默认区域" —— 编出来的区域会让人以为那条报警
+//   一直就属于那里,而它其实从没被归过类。
+// ============================================================================
+
+// 读:一条配了区域的报警,读出来必须是那个区域。
+void TestAlarmConfigDialog::areaColumn_exists() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("泵房温度高"), QStringLiteral("plc1.Temp"),
+                        80, 0, AlarmLevel::Warning, Direction::Above, 500,
+                        QStringLiteral("一号泵房"));
+
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    QCOMPARE(dlg.rowCount(), 1);
+    QCOMPARE(dlg.areaAt(0), QStringLiteral("一号泵房"));
+
+    // ★ 光断草稿不够 —— 表格是用户真正在看的那个。
+    //   rows_ 对、表格空,用户看到的还是一片空白,而接口全绿。
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    // 第 8 列(kColArea)。写死下标是有意的:列顺序变了这里就该红,
+    // 因为那正是"表格和草稿对不上"的现场。
+    QCOMPARE(table->columnCount(), 9);
+    QCOMPARE(table->item(0, 8)->text(), QStringLiteral("一号泵房"));
+}
+
+// 改:用户在区域框里打字,必须落进草稿和表格。
+// 【为什么必须走控件而不是直接改 rows_】
+//   rows_ 是 private 的,测试能改它,但那只证明"内存里能存"。
+//   用户改的是那个组合框 —— 连接漏了、信号选错了(isEditable 组合框打字时
+//   【不】发 currentIndexChanged),用户看着改了、一保存就没。
+void TestAlarmConfigDialog::area_typedByUser_landsInDraft() {
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Temp"), static_cast<quint16>(100),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+
+    auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigAreaCombo"));
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY2(combo, "找不到区域输入框");
+    QVERIFY(table);
+
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+    QCOMPARE(dlg.rowCount(), 1);
+
+    // ★ 用 setCurrentText 而不是 setCurrentIndex:
+    //   区域是自由文本,大部分情况下用户是在【打字】。
+    //   只测"从下拉里选一个已有的",就永远测不到打字这条路 ——
+    //   而 isEditable 组合框的坑恰好全在打字这条路上。
+    combo->setCurrentText(QStringLiteral("反应釜区"));
+
+    QCOMPARE(dlg.areaAt(0), QStringLiteral("反应釜区"));
+    QCOMPARE(table->item(0, 8)->text(), QStringLiteral("反应釜区"));
+}
+
+// 导出:区域必须跟着草稿一起进 JSON。
+// 【为什么单独断一条】导出用的是 JsonSerializer::toJson(cfg),
+//   而存盘走的是同一个函数 —— 但"用的是同一个函数"是我的判断,不是证据。
+void TestAlarmConfigDialog::area_survivesExportAndReload() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("泵房温度高"), QStringLiteral("plc1.Temp"),
+                        80, 0, AlarmLevel::Warning, Direction::Above, 500,
+                        QStringLiteral("一号泵房"));
+
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    const QJsonArray arr = QJsonDocument::fromJson(dlg.exportDraftToJson().toUtf8())
+                               .object()["alarms"].toArray();
+    QCOMPARE(arr.size(), 1);
+    const QJsonObject a = arr.first().toObject();
+    QVERIFY2(a.contains("area"), "导出的报警里没有 area 键");
+    QCOMPARE(a["area"].toString(), QStringLiteral("一号泵房"));
+
+    // ★ 再往前推一格:读回来也得还是它。
+    //   只断"JSON 里有这个键"不够 —— 键在、值空,是另一种更隐蔽的坏。
+    CheckerConfig back = JsonSerializer::checkerConfigFromJson(a);
+    QCOMPARE(back.area, QStringLiteral("一号泵房"));
+}
+
+// 存盘:写进真实工程文件、再读回来还在。
+// 理由同 save_resultReloadsThroughProject —— 只断言内存对象证明不了
+// QSaveFile 有没有把这段写坏,也证明不了重开工程时它还在。
+void TestAlarmConfigDialog::area_survivesSaveToProjectFile() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("泵房温度高"), QStringLiteral("plc1.Temp"),
+                        80, 0, AlarmLevel::Warning, Direction::Above, 500,
+                        QStringLiteral("一号泵房"));
+
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    const QString path = writeTempProject(sentinelProject());
+    QVERIFY(!path.isEmpty());
+
+    QString err;
+    QVERIFY2(dlg.saveDraftToProjectFile(path, &err), qPrintable(err));
+
+    // 落盘的那一段
+    const QJsonArray alarms = readJson(path)["alarms"].toArray();
+    QCOMPARE(alarms.size(), 1);
+    QCOMPARE(alarms.first().toObject()["area"].toString(), QStringLiteral("一号泵房"));
+
+    // ★ 工程文件本身还得打得开。区域键如果落在了 alarms[] 的外面、
+    //   或者多了一层对象,JSON 语法照样合法,但整个工程打不开。
+    Project proj(nullptr, nullptr, nullptr, nullptr, nullptr);
+    QVERIFY2(proj.loadFromFile(path), "存了区域之后工程文件反而读不回来了");
+}
+
+// 空白:用户手打常带空格("  一号泵房 ")。
+// 不去空白的话,库里会同时躺着 "一号泵房" 和 "一号泵房 ",
+// 而下拉补全会把两个都列出来,用户以为有两个区域,筛哪个都漏一半。
+void TestAlarmConfigDialog::area_whitespaceIsTrimmed() {
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Temp"), static_cast<quint16>(100),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    auto* combo = dlg.findChild<QComboBox*>(QStringLiteral("alarmConfigAreaCombo"));
+    QVERIFY(combo);
+
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+    combo->setCurrentText(QStringLiteral("   一号泵房   "));
+
+    // ★ 断"去掉空格后"的值,不是断非空。
+    //   不断具体值的话,一个只做了首尾去空白之外的"随便改改"也能过。
+    QCOMPARE(dlg.areaAt(0), QStringLiteral("一号泵房"));
+
+    // 只有空白的那个,应该被判成"没填",而不是变成一个名叫 "  " 的区域。
+    combo->setCurrentText(QStringLiteral("     "));
+    QVERIFY(dlg.areaAt(0).isEmpty());
+}
+
+// 什么都不填 → 未分配。
+// 【这条守的是"不要替用户做决定"】
+//   默认给个"一号泵房"或者"默认区域"看着贴心,实际后果是:
+//   现场几百条报警一夜之间全被归到同一个区域,而那不是任何人填的。
+void TestAlarmConfigDialog::area_defaultIsUnassigned() {
+    varMgr_->addVariable(new Variable(QStringLiteral("plc1.Temp"), static_cast<quint16>(100),
+                                      Variable::DataType::Float, Variable::Access::ReadOnly));
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+
+    // 草稿里是空串(真值,不 invent 一个词)
+    QVERIFY2(dlg.areaAt(0).isEmpty(), "没填区域却给草稿塞了个默认值");
+    // ★ 但表格必须显示成"未分配"这三个字,不能是一格空白。
+    //   空白格用户会以为是渲染坏了,会一直戳它;
+    //   "未分配"至少把"我知道它没归类"这件事说清楚了。
+    QCOMPARE(table->item(0, 8)->text(), QStringLiteral("未分配"));
+
+    // 存进工程文件时也是空,不是 "未分配" 这个中文字面量 ——
+    // 否则"未分配"会变成一个真的区域名,和用户真填的"未分配"混成一个。
+    const QJsonArray arr = QJsonDocument::fromJson(dlg.exportDraftToJson().toUtf8())
+                               .object()["alarms"].toArray();
+    QCOMPARE(arr.size(), 1);
+    QVERIFY(arr.first().toObject()["area"].toString().isEmpty());
 }
 
 QTEST_MAIN(TestAlarmConfigDialog)

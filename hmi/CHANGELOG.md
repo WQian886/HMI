@@ -3,6 +3,56 @@
 > 最后核对：**2026-10-10**（基于代码核对：`ctest` **66 个目标 66 通过**，
 > `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出）
 
+## [Unreleased] - 2026-10-10 (五)
+
+### F6 区域过滤 —— 卡了很久,因为它不是界面活,是改工程文件格式的决定
+
+Wqian 拍板:**手填自由文本 + 已用过的值做补全**。三个选项里
+（a 加 `area` 字段 / b 不做 / c 拿画面当区域复用）选了 a 的一个变体。
+
+三条理由：
+
+1. **不复用 `plcId`** —— 它是**通信归属**不是**组织归属**。
+   一台 PLC 常同时带一号泵房和二号泵房，一个区域也可能横跨两台 PLC。
+   **一个经常筛错的筛选框比没有更糟。**
+2. **不做工程级区域清单** —— 自由文本是清单方案的**真子集**：
+   现在只多一列 `TEXT`，将来想收窄成下拉清单只改 UI 不动 schema；
+   反过来先做清单、日后发现多数项目只有两三个区域，就得迁移第二次。
+3. 老库迁移不再是障碍 —— F2 已建好探测式加列。
+
+链路：`Alarm.area` / `CheckerConfig.area` → JSON → `ThresholdAlarmChecker`
+→ `AlarmRecorder` 落库（11 列）→ `AlarmHistoryView` 下拉筛选
+→ `AlarmConfigDialog` 表格 + 可编辑下拉 → `CsvExporter` 导出。
+
+**★ 落地时冒出来的额外要求（原始设计里没有）**
+老库里**全部**记录 `area` 都是 NULL。用户第一次用新版本，选「一号泵房」→ 0 行
+→ 他会得出「报警历史丢了」的结论，而真相是记录都在、只是没区域可分。
+**一个筛选器如果能把用户引向错误的结论，那它比没有这个功能更糟。**
+所以下拉里必须有「未分配」，而且必须真的能筛出来 ——
+区分靠 QString 的 **null（不筛）/ 空串（筛未分配）**。
+
+**★ 途中踩到一个真实的 Qt 坑：`QVariant` 把 null 和空串判成相等。**
+最初把区域值放进 `QComboBox::itemData`，`findData("")` 命中了索引 0 那项
+「全部」（data 是 `QString()`，null）—— **「筛未分配」静默退化成了「不筛」**。
+界面看不出任何异常。改成旁路一份 `QStringList areaValues_`（不过 `QVariant`），
+并在 `reloadAreaCombo` / `selectedArea` / `setAreaFilter` 里一律显式 `isNull()` 比较。
+**是测试逼出来的**：`areaFilter_unassignedBucketIsReachable` 期望 1 行、实得 2 行。
+
+**CSV 也补上了 area 列** —— 事故分析要的是「按区域透视」，
+而那是把 CSV 拖进 Excel 干的事。区域只进数据库不进 CSV，功能等于不存在。
+追加在**末尾**（插中间会让按列号取值的老脚本串列），
+未分配导出成**空**而不是「未分配」三个字（否则 Excel 透视里会多出一个假区域）。
+
+负向对照（拆掉实现重跑，红的是且仅是该红的）：
+`COALESCE` 去掉 → 只红 1 条；`unassigned()` 返回 null → 只红同一条；
+`insertAction` 不绑 area → 红 4 条；对话框导出丢 `cfg.area` → 红 2 条；
+去掉 `.trimmed()` → 只红 1 条；CSV 少 `area` 列 → 红 3 条且原有 4 条 CSV 用例**仍绿**。
+
+新增 18 条用例：`tst_AlarmRecorder` 5 + `tst_AlarmHistoryView` 4 +
+`tst_AlarmConfigDialog` 6 + `tst_CsvExporter` 3。
+测试**目标数**仍是 66（新增的是用例不是可执行文件）。
+`ctest` **66/66 通过**、`hmi.exe` 编译通过。
+
 ## [Unreleased] - 2026-10-10 (四)
 
 ### 报警历史库补上老库升级路径 —— 纯基建,不含 schema 语义变更

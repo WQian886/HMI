@@ -30,6 +30,25 @@ constexpr int kColAction   = 3;
 constexpr int kColVariable = 4;
 constexpr int kColValue    = 5;
 constexpr int kColThreshold = 6;
+constexpr int kColArea     = 7;   // ★ F6:区域。放在【最后】——
+//   放在中间会把它前面每一列的下标都挪一位,而 setHorizontalHeaderLabels
+//   / setItem 都靠这些 constexpr 对齐,漏改一处就是"值串到隔壁列"——
+//   那种 bug 界面上看着还挺像样,只是每列错一格。
+
+// ★ F6:区域列显示什么。
+//   ★ 【不能直接显示空串】空单元格在表格里就是"什么都没写",
+//     而用户看到一整列空白会以为"这列坏了"或者"这里没有区域信息"。
+//     实际含义是"这条报警没有分配区域"(老记录全部如此),
+//     写出来反而诚实 —— 而"未分配"是个能读懂的说法。
+//
+//   ★ 【返回 QString,不要返回 const char*】
+//     区域本来就是 QString,转 UTF-8 再在调用方 fromUtf8 回来是多余的一跳。
+//     而且写成 `area.toUtf8().constData()` 会拿到一个【当场析构的临时
+//     QByteArray】的指针 —— 返回后立刻悬垂,界面上的区域名会变成乱码,
+//     而且这种错不一定每次复现。
+QString areaDisplay(const QString& area) {
+    return area.isEmpty() ? QStringLiteral("未分配") : area;
+}
 
 const char* levelDisplay(int level) {
     switch (level) {
@@ -114,10 +133,10 @@ void AlarmHistoryView::setupUi() {
 
     table_ = new QTableWidget(this);
     table_->setObjectName(QStringLiteral("alarmHistoryTable"));
-    table_->setColumnCount(7);
+    table_->setColumnCount(8);
     table_->setHorizontalHeaderLabels(QStringList()
         << tr("时间") << tr("报警名") << tr("等级") << tr("动作")
-        << tr("关联变量") << tr("触发值") << tr("阈值"));
+        << tr("关联变量") << tr("触发值") << tr("阈值") << tr("区域"));
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     // ★ 拉伸【报警名】那一列,而不是最后一列。
     //   原来用的是 setStretchLastSection(true) —— 那是"把多余的宽度全给最后一列"。
@@ -238,10 +257,69 @@ void AlarmHistoryView::setupFilterRow(QWidget* parent, QVBoxLayout* layout) {
     levelCombo_->setToolTip(tr("按最低等级过滤:选「严重及以上」会同时显示危急。"));
     row2->addWidget(levelCombo_);
 
+    // ---- ★ F6:区域 ----
+    row2->addSpacing(12);
+    row2->addWidget(new QLabel(tr("区域:"), parent));
+    areaCombo_ = new QComboBox(parent);
+    areaCombo_->setObjectName(QStringLiteral("alarmHistoryAreaCombo"));
+    areaCombo_->setToolTip(
+        tr("按现场区域过滤。「未分配」是升级前记录所在的那一桶 —— "
+           "选它才看得见老记录,否则在新区域名下老记录会一条都不出现。"));
+    row2->addWidget(areaCombo_);
+
     row2->addStretch();
     outer->addLayout(row2);
 
+    reloadAreaCombo();
     layout->addLayout(outer);
+}
+
+// ★ F6:下拉框的数据源是 distinctAreas(),不是把表全拉回来去重。
+//   历史表只增不减,开一次下拉框扫全表在跑久了的机器上会卡。
+//
+// ★★★ 为什么选中值不走 QComboBox::itemData,要在旁边另存一份
+//
+//   QVariant 比较时把 null QString 和空 QString 视为【相等】。
+//   而"不筛"(null)和"筛未分配"(空串)恰恰就是这两种。
+//   于是 findData(unassigned()) 会命中第一项"全部"(它的 data 是 null),
+//   界面上看一切正常,实际筛的是"不筛" —— 而这种错【不会变红】:
+//   recorder 层的测试全绿(它直接调 query,没经过下拉框),
+//   界面测试如果只断"筛完条数对",也会被这一条单独抓住。
+//
+//   所以:下拉框只负责【显示】,真正的值存在旁路的 areaValues_ 里,
+//   两者下标一一对应。null/空串的区别原样保留,不过 QVariant。
+void AlarmHistoryView::reloadAreaCombo() {
+    if (!areaCombo_) return;
+    const QString keep = selectedArea();   // 重建前先记住选中项
+    areaCombo_->clear();
+    areaValues_.clear();
+
+    areaValues_ << QString();              // 索引 0 = 全部 = null = 不筛
+    areaCombo_->addItem(tr("全部"));
+
+    if (recorder_ && recorder_->isOpen()) {
+        for (const QString& a : recorder_->distinctAreas()) {
+            areaValues_ << a;
+            // ★ 空串那一项必须显示成"未分配"。
+            //   显示成空白项的话,用户看到的是一行没字的下拉选项 ——
+            //   既不知道它是什么,也不知道自己已经在按它筛了。
+            areaCombo_->addItem(a.isEmpty() ? tr("未分配") : a);
+        }
+    }
+
+    // ★ 在旁路数组里找,不用 findData —— 见上面那段关于 QVariant 的说明。
+    int idx = -1;
+    for (int i = 0; i < areaValues_.size(); ++i) {
+        // ★ 同理,这里必须显式比 isNull():否则 null 会跟"未分配"那项的空串配上,
+        //   重建后默认项悄悄变成"只看未分配"。
+        if (areaValues_.at(i).isNull() && keep.isNull()) { idx = i; break; }
+        if (!areaValues_.at(i).isNull() && areaValues_.at(i) == keep) { idx = i; break; }
+    }
+    // ★ idx == -1 是【正常】的:上次选的区域在新一版库里已经没有记录了
+    //   (比如用户改了区域名)。这时回到"全部",而不是留在一个空结果的选择上 ——
+    //   后者会让用户看着空表格以为"历史丢了"。
+    areaCombo_->setCurrentIndex(idx >= 0 ? idx : 0);
+    connect(areaCombo_, &QComboBox::currentIndexChanged, this, &AlarmHistoryView::refresh);
 }
 
 void AlarmHistoryView::applyShortRange(int hours) {
@@ -270,7 +348,8 @@ void AlarmHistoryView::refresh() {
     QVector<AlarmRecorder::Record> rows = recorder_->query(
         fromEdit_->dateTime().toMSecsSinceEpoch(),
         toEdit_->dateTime().toMSecsSinceEpoch(),
-        minLevel());
+        minLevel(),
+        selectedArea());
 
     // ★ 倒过来:最新的排在最上面。
     //   AlarmRecorder::query 是 ORDER BY action_at ASC(最旧在前)。
@@ -316,13 +395,16 @@ void AlarmHistoryView::refresh() {
         table_->setItem(i, kColVariable,  new QTableWidgetItem(r.variableName));
         table_->setItem(i, kColValue,     new QTableWidgetItem(r.triggerValue));
         table_->setItem(i, kColThreshold, new QTableWidgetItem(r.threshold));
+        // ★ F6:区域。空 → 显示"未分配",不显示空白单元格(理由见 areaDisplay)。
+        table_->setItem(i, kColArea,      new QTableWidgetItem(areaDisplay(r.area)));
     }
 
     // ★ 0 条必须说清楚是"这段时间没有记录",而不是留一张空表。
     //   空表有两种解释(没有报警 / 查错了),而用户分辨不了。
     if (rows.isEmpty()) {
         statusLabel_->setText(tr("该条件下没有记录。"
-                                 "如果是刚发生过报警,请检查时间范围是否选对、等级是否选高了。"));
+                                 "如果是刚发生过报警,请检查时间范围是否选对、等级是否选高了"
+                                 "(如果按区域筛过,老记录在「未分配」那一档里)。"));
         statusLabel_->setStyleSheet(QStringLiteral("color:#a60;"));
     } else {
         statusLabel_->setStyleSheet(QString());
@@ -365,5 +447,34 @@ QString AlarmHistoryView::statusText() const { return statusLabel_ ? statusLabel
 QDateTime AlarmHistoryView::from() const { return fromEdit_->dateTime(); }
 QDateTime AlarmHistoryView::to()   const { return toEdit_->dateTime(); }
 int       AlarmHistoryView::minLevel() const { return levelCombo_->currentData().toInt(); }
+
+// ★ F6:null = 不筛,空串 = 只看未分配。值取自旁路的 areaValues_,不走 itemData
+//   —— 理由见 reloadAreaCombo 里关于 QVariant 把 null 和空串判等的那段。
+QString AlarmHistoryView::selectedArea() const {
+    if (!areaCombo_) return QString();
+    const int i = areaCombo_->currentIndex();
+    return (i >= 0 && i < areaValues_.size()) ? areaValues_.at(i) : QString();
+}
+
+QString AlarmHistoryView::areaAt(int row) const {
+    auto* it = table_->item(row, kColArea);
+    return it ? it->text() : QString();
+}
+
+// 测试入口:选一个区域并立刻重查。
+void AlarmHistoryView::setAreaFilter(const QString& area) {
+    if (!areaCombo_) return;
+    int idx = -1;
+    for (int i = 0; i < areaValues_.size(); ++i) {
+        if (areaValues_.at(i).isNull() && area.isNull()) { idx = i; break; }
+        if (!areaValues_.at(i).isNull() && areaValues_.at(i) == area) { idx = i; break; }
+    }
+    if (idx >= 0) {
+        // setCurrentIndex 会触发 currentIndexChanged → refresh(),不用再调一次
+        areaCombo_->setCurrentIndex(idx);
+    } else {
+        refresh();
+    }
+}
 
 } // namespace qwhmi::history

@@ -45,6 +45,12 @@ private slots:
     void levelFilter_defaultExcludesInfoLevel();
     void levelCombo_isLabeledAsMinimumNotExactMatch();
 
+    // ---- ★ F6(2026-10-10):区域过滤 ----
+    void areaColumn_existsAndShowsLabelNotBlank();
+    void areaFilter_selectsOnlyThatArea();
+    void areaFilter_unassignedBucketIsReachable();
+    void areaCombo_alwaysHasAnAllOption();
+
     // ---- 不许有的东西 ----
     void table_isNotEditable();
     void noRecorder_disablesInsteadOfShowingEmptyTable();
@@ -52,7 +58,8 @@ private slots:
 private:
     // 造一条真实落库的报警:走 AlarmRecorder::setSource → AlarmManager 信号,
     // 和生产一模一样。用 fakeQSqlQuery 之类的手写 insert 测的是我自己的代码。
-    qint64 fireAlarm(const QString& name, AlarmLevel level, const QDateTime& when);
+    qint64 fireAlarm(const QString& name, AlarmLevel level, const QDateTime& when,
+                     const QString& area = {});
     bool   openRecorder();
 
     QString dbPath_;
@@ -95,7 +102,8 @@ bool TestAlarmHistoryView::openRecorder() {
 }
 
 qint64 TestAlarmHistoryView::fireAlarm(const QString& name, AlarmLevel level,
-                                       const QDateTime& when) {
+                                       const QDateTime& when,
+                                       const QString& area) {
     static qint64 next = 5000;
     const qint64 id = next++;
     // 直接建 checker 触发的路径:AlarmRecorder::onAlarmTriggered 会取
@@ -109,6 +117,10 @@ qint64 TestAlarmHistoryView::fireAlarm(const QString& name, AlarmLevel level,
     a.triggeredAt = when;
     a.triggerValue = QStringLiteral("88.5");
     a.threshold   = QStringLiteral("> 80.0");
+    // ★ F6:默认空 = 未分配。老记录全部是这一桶,所以默认值必须
+    //   老实地是空,不能给个"默认区域" —— 那会让"未分配"这一桶
+    //   在测试里看起来永远是空的,而它恰恰是老库的真实样子。
+    a.area        = area;
     // 绕开 checker 直接发信号:AlarmRecorder 订阅的是 AlarmManager 的信号,
     // 而这里要控制的是时间戳,不是检测逻辑。
     QMetaObject::invokeMethod(rec_, "onAlarmTriggered", Qt::DirectConnection,
@@ -290,6 +302,89 @@ void TestAlarmHistoryView::levelCombo_isLabeledAsMinimumNotExactMatch() {
             QVERIFY2(l.contains(QStringLiteral("以上")),
                      "等级选项必须写成「及以上」,它是下限不是精确匹配");
     }
+}
+
+// ============================================================================
+// ★ F6:区域过滤
+//
+// 【为什么这一组特别要测"未分配"】
+//   F6 上线前,库里【全部】记录都没有区域。用户第一次用新版本,
+//   在下拉里选了"一号泵房"→ 0 行 → 他会得出"报警历史丢了"的结论。
+//   而真相是那些记录都在、只是没区域可分。
+//   一个筛选器如果能把用户引向错误的结论,那它比没有这个功能更糟。
+// ============================================================================
+
+void TestAlarmHistoryView::areaColumn_existsAndShowsLabelNotBlank() {
+    QVERIFY(openRecorder());
+    fireAlarm(QStringLiteral("泵房温度高"), AlarmLevel::Critical,
+              QDateTime::currentDateTime());   // 不传 area = 未分配
+    qwhmi::history::AlarmHistoryView view(rec_);
+    view.refresh();
+    QCOMPARE(view.rowCount(), 1);
+
+    // ★ 断言"未分配"这个词,不是断言"非空"。
+    //   只断非空的话,写个空格、一个 "—",甚至渲染 bug 漏了这列,都能过。
+    QCOMPARE(view.areaAt(0), QStringLiteral("未分配"));
+}
+
+void TestAlarmHistoryView::areaFilter_selectsOnlyThatArea() {
+    QVERIFY(openRecorder());
+    const QDateTime now = QDateTime::currentDateTime();
+    fireAlarm(QStringLiteral("泵房温度高"), AlarmLevel::Critical, now,
+              QStringLiteral("一号泵房"));
+    fireAlarm(QStringLiteral("釜区压力高"), AlarmLevel::Critical, now,
+              QStringLiteral("反应釜区"));
+
+    qwhmi::history::AlarmHistoryView view(rec_);
+    view.refresh();
+    QCOMPARE(view.rowCount(), 2);
+
+    view.setAreaFilter(QStringLiteral("一号泵房"));
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(view.nameAt(0), QStringLiteral("泵房温度高"));
+
+    view.setAreaFilter(QStringLiteral("反应釜区"));
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(view.nameAt(0), QStringLiteral("釜区压力高"));
+}
+
+void TestAlarmHistoryView::areaFilter_unassignedBucketIsReachable() {
+    QVERIFY(openRecorder());
+    const QDateTime now = QDateTime::currentDateTime();
+    fireAlarm(QStringLiteral("泵房温度高"), AlarmLevel::Critical, now,
+              QStringLiteral("一号泵房"));
+    fireAlarm(QStringLiteral("老报警"),     AlarmLevel::Critical, now);   // 未分配
+
+    qwhmi::history::AlarmHistoryView view(rec_);
+
+    auto* combo = view.findChild<QComboBox*>(QStringLiteral("alarmHistoryAreaCombo"));
+    QVERIFY2(combo, "找不到区域下拉框");
+    // ★ 下拉里必须有一项的字面就是"未分配"。
+    //   显示成空白项的话,用户看到一行没字的选项,既不知道那是什么,
+    //   也不知道自己已经在按它筛了。
+    bool found = false;
+    for (int i = 0; i < combo->count(); ++i) {
+        if (combo->itemText(i) == QStringLiteral("未分配")) found = true;
+    }
+    QVERIFY2(found, "区域下拉里没有「未分配」这一项 —— 老记录就藏在这一桶里");
+
+    view.setAreaFilter(qwhmi::history::AlarmRecorder::unassigned());
+    QCOMPARE(view.rowCount(), 1);
+    QCOMPARE(view.nameAt(0), QStringLiteral("老报警"));
+}
+
+void TestAlarmHistoryView::areaCombo_alwaysHasAnAllOption() {
+    QVERIFY(openRecorder());
+    qwhmi::history::AlarmHistoryView view(rec_);
+
+    auto* combo = view.findChild<QComboBox*>(QStringLiteral("alarmHistoryAreaCombo"));
+    QVERIFY(combo);
+    // ★ 第一项必须是"全部"且默认选中。
+    //   一上来就按某个区域筛,用户会觉得"我的历史怎么少了一大半"。
+    QCOMPARE(combo->itemText(0), QStringLiteral("全部"));
+    // null = 不筛。断言 isNull 而不是 isEmpty —— 空串是"筛未分配",
+    // 两者搞混就是那个最坑的静默失败。
+    QVERIFY(view.selectedArea().isNull());
 }
 
 // ============================================================================

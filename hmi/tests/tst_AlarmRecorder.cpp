@@ -65,6 +65,13 @@ private slots:
     void freshDb_isNotTouchedByUpgrade();
     void upgrade_isIdempotent_reopenTwice();
 
+    // ★ F6(2026-10-10):区域过滤
+    void area_roundTripsFromAlarmToTable();
+    void area_filterSelectsOnlyThatArea();
+    void area_filterOnUnassigned_matchesNullColumn();
+    void area_notFiltering_returnsEverything();
+    void distinctAreas_includesUnassignedBucket();
+
 private:
     // ★ 公共 fixture:DB + Recorder + Manager + 1 个 TestChecker
     struct Fixture {
@@ -96,6 +103,9 @@ private:
             sampleAlarm.triggeredAt   = QDateTime::currentDateTime();
             sampleAlarm.triggerValue  = "85.5";
             sampleAlarm.threshold     = ">= 80.0";
+            // ★ F6:区域。留空 = 未分配,那正是老库升级后全部记录的样子 ——
+            //   所以这条 fixture 同时服务"有区域"和"没区域"两种用例,
+            //   需要区域的那几条自己设 sampleAlarm.area。
         }
         ~Fixture() {
             delete ar;
@@ -531,6 +541,33 @@ bool createLegacyDb(const QString& path, QString* err) {
     return true;
 }
 
+// ★ F6(2026-10-10):老库刻意缺哪些列 —— 【单一真相源,三条用例共用】
+//
+//   【为什么提成常量,而不是每处写死数字】
+//     原来三条用例各写死 "before.size() + 2"。F6 加了 area 列,三处同时红 ——
+//     而红的原因只是"数字变了",不是功能坏了。这时候人会去改数字,
+//     改着改着就没人再看断言到底在断什么了。
+//     提成常量之后:新增 kColumns 的一列 → 这里加一行 → 三处一起跟上,
+//     而【改动本身】(多了一列)仍然是断言能抓住的事实。
+//
+//   【什么时候要动这里】
+//     在 AlarmRecorder.cpp 的 kColumns 里加了新列,老库天然也没有它,
+//     所以这里必须跟着加。反过来,删列不用动这里(老库有,新库没有,
+//     那是另一回事,当前没有这种情况)。
+const QStringList kLegacyMissing = {
+    QStringLiteral("user"),        // F2 补
+    QStringLiteral("threshold"),   // F2 补
+    QStringLiteral("area"),        // F6 补
+};
+
+// 新库建表后应有的全部列 —— 顺序即 kColumns 的顺序
+const QStringList kFreshColumns = {
+    QStringLiteral("id"), QStringLiteral("alarm_id"), QStringLiteral("name"),
+    QStringLiteral("level"), QStringLiteral("action"), QStringLiteral("action_at"),
+    QStringLiteral("variable_name"), QStringLiteral("trigger_value"),
+    QStringLiteral("threshold"), QStringLiteral("user"), QStringLiteral("area"),
+};
+
 // 查表里有哪些列(PRAGMA table_info 的第 1 列是列名)
 QStringList columnsOf(const QString& path, const QString& table) {
     QStringList cols;
@@ -578,10 +615,11 @@ void TestAlarmRecorder::legacyDb_missingColumns_getsThemAdded() {
              qPrintable(QStringLiteral("造老库失败:%1").arg(err)));
     // 先确认老库确实是残缺的 —— 不然下面的绿可能只是"本来就有"
     const QStringList before = columnsOf(path, "alarm_history");
-    QVERIFY2(!before.contains(QStringLiteral("user")) &&
-             !before.contains(QStringLiteral("threshold")),
-             qPrintable(QStringLiteral("手搓的老库本该缺 user/threshold,实际列:%1")
-                            .arg(before.join(","))));
+    for (const QString& miss : kLegacyMissing) {
+        QVERIFY2(!before.contains(miss),
+                 qPrintable(QStringLiteral("手搓的老库本该缺 %1,实际列:%2")
+                                .arg(miss, before.join(","))));
+    }
 
     {
         AlarmRecorder ar;
@@ -589,13 +627,13 @@ void TestAlarmRecorder::legacyDb_missingColumns_getsThemAdded() {
     }
 
     const QStringList after = columnsOf(path, "alarm_history");
-    for (const QString& want : { "user", "threshold" }) {
+    for (const QString& want : kLegacyMissing) {
         QVERIFY2(after.contains(want),
                  qPrintable(QStringLiteral("升级后仍然缺列 %1,实际列:%2")
                                 .arg(want).arg(after.join(","))));
     }
-    // 反向:不该凭空多出列
-    QCOMPARE(after.size(), before.size() + 2);
+    // 反向:不该凭空多出列(只该补 kLegacyMissing 那些,一个不多一个不少)
+    QCOMPARE(after.size(), before.size() + kLegacyMissing.size());
 }
 
 // ★ 升级不能动老数据 —— 报警历史是事故追溯的凭据,升级把它清了就等于删证据
@@ -662,10 +700,8 @@ void TestAlarmRecorder::freshDb_isNotTouchedByUpgrade() {
     { AlarmRecorder ar; QVERIFY(ar.open(path)); }
     const QStringList cols = columnsOf(path, "alarm_history");
 
-    QCOMPARE(cols.size(), 10);
-    for (const QString& want : { "id", "alarm_id", "name", "level", "action",
-                                 "action_at", "variable_name", "trigger_value",
-                                 "threshold", "user" }) {
+    QCOMPARE(cols.size(), kFreshColumns.size());
+    for (const QString& want : kFreshColumns) {
         QVERIFY2(cols.contains(want),
                  qPrintable(QStringLiteral("新库缺列 %1,实际列:%2")
                                 .arg(want).arg(cols.join(","))));
@@ -689,8 +725,173 @@ void TestAlarmRecorder::upgrade_isIdempotent_reopenTwice() {
     const QStringList third = columnsOf(path, "alarm_history");
 
     QCOMPARE(second, third);
-    // 补过之后不该再翻倍 —— 不幂等的话这里会是 first+4
-    QCOMPARE(second.size(), first.size() + 2);
+    // 补过之后不该再翻倍 —— 不幂等的话这里会是 first+2×kLegacyMissing.size()
+    QCOMPARE(second.size(), first.size() + kLegacyMissing.size());
+}
+
+// ============================================================================
+// ★ F6(2026-10-10):区域过滤
+//
+// 【这条功能最容易出的三类错,各配一条用例】
+//   ① 存了读不回来 —— 配了区域,历史里查出来是空的
+//      → area_roundTripsFromAlarmToTable
+//   ② 筛不准 —— 选了"一号泵房"却把别处的也带出来
+//      → area_filterSelectsOnlyThatArea
+//   ③ ★"未分配"那个桶筛不出来 —— 这是本条功能最危险的一个洞:
+//      老库里【全部】记录 area 是 NULL。用户选"一号泵房"得到 0 行,
+//      他会以为"没有历史"。不专门测的话,这个洞会一路活到用户现场。
+//      → area_filterOnUnassigned_matchesNullColumn
+// ============================================================================
+
+void TestAlarmRecorder::area_roundTripsFromAlarmToTable() {
+    Fixture f;
+    f.sampleAlarm.area = QStringLiteral("一号泵房");
+
+    QMetaObject::invokeMethod(f.ar, "onAlarmTriggered",
+                              Qt::DirectConnection,
+                              Q_ARG(Alarm, f.sampleAlarm));
+
+    const auto recs = f.ar->query(QDateTime::currentMSecsSinceEpoch() - 60000,
+                                  QDateTime::currentMSecsSinceEpoch() + 60000);
+    QCOMPARE(recs.size(), 1);
+    // ★ 断言的是"读回来的那条",不是"表里有这么一列" ——
+    //   后者只证明 schema 变了,不证明数据流通了。
+    QCOMPARE(recs[0].area, QStringLiteral("一号泵房"));
+}
+
+void TestAlarmRecorder::area_filterSelectsOnlyThatArea() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/area.db";
+    AlarmRecorder ar;
+    QVERIFY(ar.open(path));
+
+    // 直接走 insertAction 的等价路径:用 manager 发两条不同区域的报警。
+    //   手工 INSERT 会绕过 Alarm → AlarmRecorder 这段数据流,那正是要测的东西。
+    AlarmManager mgr;
+    ar.setSource(&mgr);
+    TestChecker c1("泵房温度高", AlarmLevel::Critical, &mgr);
+    QVERIFY(mgr.addChecker(&c1));
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    auto emitAlarm = [&](const QString& name, const QString& area, qint64 id) {
+        Alarm a;
+        a.id_          = id;
+        a.name         = name;
+        a.variableName = QStringLiteral("plc1.Temperature");
+        a.level        = AlarmLevel::Critical;
+        a.state        = AlarmState::Active;
+        a.triggeredAt  = QDateTime::currentDateTime();
+        a.triggerValue = QStringLiteral("85.5");
+        a.threshold    = QStringLiteral(">= 80.0");
+        a.area         = area;
+        QMetaObject::invokeMethod(&ar, "onAlarmTriggered",
+                                  Qt::DirectConnection, Q_ARG(Alarm, a));
+    };
+    emitAlarm(QStringLiteral("泵房温度高"), QStringLiteral("一号泵房"), now + 1);
+    emitAlarm(QStringLiteral("釜区压力高"), QStringLiteral("反应釜区"), now + 2);
+    emitAlarm(QStringLiteral("老报警"),     QString(),                  now + 3);
+
+    const auto p1 = ar.query(now - 60000, now + 60000, 0, QStringLiteral("一号泵房"));
+    QCOMPARE(p1.size(), 1);
+    QCOMPARE(p1[0].name, QStringLiteral("泵房温度高"));
+
+    const auto p2 = ar.query(now - 60000, now + 60000, 0, QStringLiteral("反应釜区"));
+    QCOMPARE(p2.size(), 1);
+    QCOMPARE(p2[0].name, QStringLiteral("釜区压力高"));
+
+    // 不存在区域 → 0 行,不是"全给"(后者是这类筛选器最常见的实现错误)
+    const auto none = ar.query(now - 60000, now + 60000, 0, QStringLiteral("不存在的区"));
+    QCOMPARE(none.size(), 0);
+}
+
+void TestAlarmRecorder::area_filterOnUnassigned_matchesNullColumn() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/unassigned.db";
+    AlarmRecorder ar;
+    QVERIFY(ar.open(path));
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    auto emitAlarm = [&](const QString& area, qint64 id) {
+        Alarm a;
+        a.id_          = id;
+        a.name         = QStringLiteral("某报警");
+        a.variableName = QStringLiteral("plc1.Temperature");
+        a.level        = AlarmLevel::Critical;
+        a.state        = AlarmState::Active;
+        a.triggeredAt  = QDateTime::currentDateTime();
+        a.area         = area;
+        QMetaObject::invokeMethod(&ar, "onAlarmTriggered",
+                                  Qt::DirectConnection, Q_ARG(Alarm, a));
+    };
+    emitAlarm(QStringLiteral("一号泵房"), now + 1);
+    emitAlarm(QString(),                  now + 2);
+
+    // ★ 本条的正身:unassigned() 筛出来的必须【只有】那条没区域的。
+    //   写成空串直接传给 query() 也应该等价 —— 但那就绕过了具名入口,
+    //   而具名入口正是为了不让下一个人写出 null(退化成"不筛")。
+    const auto un = ar.query(now - 60000, now + 60000, 0, AlarmRecorder::unassigned());
+    QCOMPARE(un.size(), 1);
+    QCOMPARE(un[0].alarmId, now + 2);
+    QVERIFY(un[0].area.isEmpty());
+
+    // ★ 负向对照:unassigned() 必须是"空但非 null"。
+    //   写成 null 的话 query() 会当成不筛,这里就会返回 2 行。
+    QVERIFY(!AlarmRecorder::unassigned().isNull());
+    QVERIFY(AlarmRecorder::unassigned().isEmpty());
+}
+
+void TestAlarmRecorder::area_notFiltering_returnsEverything() {
+    Fixture f;
+    f.sampleAlarm.area = QStringLiteral("一号泵房");
+    QMetaObject::invokeMethod(f.ar, "onAlarmTriggered",
+                              Qt::DirectConnection, Q_ARG(Alarm, f.sampleAlarm));
+    Alarm a2 = f.sampleAlarm;
+    a2.id_  = f.sampleAlarm.id_ + 1;
+    a2.area = QString();
+    QMetaObject::invokeMethod(f.ar, "onAlarmTriggered",
+                              Qt::DirectConnection, Q_ARG(Alarm, a2));
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    // 不传 area(默认 null)→ 两条都在
+    QCOMPARE(f.ar->query(now - 60000, now + 60000).size(), 2);
+}
+
+void TestAlarmRecorder::distinctAreas_includesUnassignedBucket() {
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString path = tmp.path() + "/distinct.db";
+    AlarmRecorder ar;
+    QVERIFY(ar.open(path));
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    auto emitAlarm = [&](const QString& area, qint64 id) {
+        Alarm a;
+        a.id_         = id;
+        a.name        = QStringLiteral("某报警");
+        a.level       = AlarmLevel::Critical;
+        a.state       = AlarmState::Active;
+        a.triggeredAt = QDateTime::currentDateTime();
+        a.area        = area;
+        QMetaObject::invokeMethod(&ar, "onAlarmTriggered",
+                                  Qt::DirectConnection, Q_ARG(Alarm, a));
+    };
+    emitAlarm(QStringLiteral("一号泵房"), now + 1);
+    emitAlarm(QStringLiteral("一号泵房"), now + 2);   // 重复,不该出现两次
+    emitAlarm(QStringLiteral("反应釜区"), now + 3);
+    emitAlarm(QString(),                  now + 4);
+
+    const QStringList areas = ar.distinctAreas();
+    // ★ 必须【含空串】—— 那是"未分配"桶。老库里它是唯一的一桶,
+    //   不含它的话下拉框第一项是空的,用户根本不知道自己还能按它筛。
+    QVERIFY2(areas.contains(AlarmRecorder::unassigned()),
+             qPrintable(QStringLiteral("distinctAreas 没含未分配桶,实际:%1")
+                            .arg(areas.size())));
+    QVERIFY(areas.contains(QStringLiteral("一号泵房")));
+    QVERIFY(areas.contains(QStringLiteral("反应釜区")));
+    QCOMPARE(areas.count(QStringLiteral("一号泵房")), 1);
+    QCOMPARE(areas.size(), 3);
 }
 
 // ★ QTEST_GUILESS_MAIN(创建 QCoreApplication,SQLite 需要)

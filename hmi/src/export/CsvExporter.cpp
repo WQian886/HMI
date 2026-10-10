@@ -97,12 +97,19 @@ bool writeAlarmsCsv(qwhmi::history::AlarmRecorder* ar, const QDateTime& from, co
     out.setGenerateByteOrderMark(true);
 
     // ★ 表头
-    out << "alarm_id,name,level,action,action_at,variable_name,trigger_value,threshold,user\r\n";
+    // area 追加在【末尾】,理由同 AlarmRecorder::kColumns:
+    //   插在中间会让老的下游脚本(按列号取值的那些)全部串列。
+    //   末尾追加只影响"知道最后多了一列"的脚本,那正是加列的正常代价。
+    out << "alarm_id,name,level,action,action_at,variable_name,trigger_value,threshold,user,area\r\n";
 
     // ★ 4 个 action 的可读字符串
     static const char* kActionNames[] = {"triggered", "acknowledged", "recovered", "cleared"};
     static const char* kLevelNames[]  = {"Info", "Warning", "Critical", "Emergency"};
 
+    // ★ 注意:这里【不】带区域筛选(和 writeVariablesCsv 一样只按时间+等级)。
+    //   导出是"把这段时间的全量记录搬走",不是"把当前界面的筛选结果搬走"——
+    //   用户在筛选状态下点导出,拿到全量才可能自己再做透视。
+    //   这条是既有约定,不是这里顺手改的。
     const auto records = ar->query(from.toMSecsSinceEpoch(), to.toMSecsSinceEpoch(), minLevel);
     for (const auto& r : records) {
         const char* actionName = (r.action >= 0 && r.action < 4) ? kActionNames[r.action] : "?";
@@ -116,7 +123,11 @@ bool writeAlarmsCsv(qwhmi::history::AlarmRecorder* ar, const QDateTime& from, co
             << escapeCsvField(r.variableName) << ','
             << escapeCsvField(r.triggerValue) << ','
             << escapeCsvField(r.threshold) << ','
-            << escapeCsvField(r.user) << "\r\n";
+            << escapeCsvField(r.user) << ','
+            // ★ 未分配导出成【空】,不是"未分配"三个字。
+            //   用户拿到 CSV 是要拿去透视/按区域分组,"未分配"会被当成
+            //   一个真的区域名,还和用户手填的"未分配"混在一起。
+            << escapeCsvField(r.area) << "\r\n";
     }
 
     out.flush();

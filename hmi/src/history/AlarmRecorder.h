@@ -18,6 +18,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QDateTime>
 #include <QVector>
 #include <QPair>
@@ -57,9 +58,33 @@ public:
         QString   triggerValue;
         QString   threshold;
         QString   user;             // 谁 ack 的(预留)
+        // ★ F6(2026-10-10):区域。老行(升级前写的)这一列是 NULL → 空串,
+        //   界面上归入"未分配"。它【不是】"没有区域"这个信息本身 ——
+        //   老记录本来就没有这个维度,空着是诚实,填个猜的值才是撒谎。
+        QString   area;
     };
+    // ★ F6:area 的两种"空"含义不同,别混:
+    //     QString()  (null)  = 【不按区域筛】—— 默认,老调用点行为逐位不变
+    //     unassigned() (空串) = 【只看未分配】—— 老库里【全部】记录都是这一桶
+    //   为什么必须能筛"未分配":用户在一个老库上选"一号泵房"会得到 0 行,
+    //   他会以为"没有历史"——而真相是那些记录都在、只是没有区域。
+    //   那就是拿"筛选器"制造了一次静默失败。
+    //   取值请走 unassigned(),别自己写 QStringLiteral("") ——
+    //   null 与 empty 的区别太容易被下一个人"顺手清理"掉。
+    static QString unassigned();
+    //   ⚠ 实现不在头文件里,因为它依赖一个 Qt 的细节:
+    //     query() 用 isNull() 区分"不筛"和"筛未分配",所以 unassigned()
+    //     必须返回【空但非 null】的串 —— QStringLiteral("") 而不是 QString()。
+    //     写反了的话,"筛未分配"会退化成"不筛",而且【不报任何错】。
+
     QVector<Record> query(qint64 fromMs, qint64 toMs,
-                          int minLevel = 0);  // minLevel=0 全收
+                          int minLevel = 0,
+                          const QString& area = {});
+
+    // ★ F6:下拉框的数据源。SELECT DISTINCT,不把整表拉回内存去重。
+    //   【里面一定含空串】—— 那是"未分配"那一桶,老库里它是【唯一】的一桶。
+    //   界面要把它显示成"未分配"给用户看,不能显示成空白的一行。
+    QStringList distinctAreas();
 
     // ★ D.3:总报警次数(给 health 卡片用,后续 H 阶段)
     int totalCount() const;
@@ -85,7 +110,7 @@ private:
     bool insertAction(qint64 alarmId, const QString& name, int level, int action,
                       const QDateTime& at, const QString& varName = {},
                       const QString& triggerValue = {}, const QString& threshold = {},
-                      const QString& user = {});
+                      const QString& user = {}, const QString& area = {});
 
     QSqlDatabase* db_ = nullptr;
     AlarmManager* mgr_ = nullptr;

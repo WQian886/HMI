@@ -44,6 +44,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+// ★ F6:refreshAreaHistory 要读写【可编辑】下拉框里的行编辑框。
+//   QComboBox 只前向声明了 QLineEdit,拿到指针也不能调它的方法 ——
+//   报错是 C2027「使用了未定义类型」,离"你少 include 了"很远。
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSet>
@@ -66,6 +70,12 @@ constexpr int kColThreshold   = 4;
 constexpr int kColMinDur      = 5;
 constexpr int kColHysteresis  = 6;
 constexpr int kColShelved     = 7;
+constexpr int kColArea        = 8;   // ★ F6:区域
+//   ★ 加在【最后】而不是"关联变量"旁边(那才是逻辑上更顺的位置)。
+//     插在中间要把后面每一列的下标全挪一位,而 setItem / column() /
+//     on_itemChanged 都靠这些 constexpr 对齐 —— 漏改一处不会报错,
+//     只会让每列的值错一格,界面看着还挺像样。
+//     "看着像样"正是这类 bug 最难被发现的原因,不值得为排版顺序冒这个险。
 
 // 等级下拉的显示顺序:从最轻到最重(与 Alarm.h:17 枚举顺序一致)。
 // 【为什么不直接把 "Info"/"Warning" 当下拉文字】
@@ -183,15 +193,18 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     formGrid->setColumnStretch(3, 1);
     formGrid->setColumnStretch(5, 1);
     struct FormField { const char* label; QWidget* w; };
-    const FormField kFields[6] = {
+    const FormField kFields[7] = {
         { "关联变量:",   varCombo_ },
         { "等级:",       levelCombo_ },
         { "方向:",       dirCombo_ },
         { "阈值:",       thresholdSpin_ },
         { "最短持续:",   minDurSpin_ },
         { "滞回:",       hysteresisSpin_ },
+        // ★ F6:区域放第三行第一格。补这一格后网格从 2 行变 3 行,
+        //   formHint_ 的行号必须跟着往下挪 —— 见下面 addWidget(formHint_, ...)。
+        { "区域:",       areaCombo_ },
     };
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
         // 【每项都单独写死成 tr("字面量"),而不是 tr(变量)】
         //   lupdate 只能扫出字面量。用 kFields[i].label 这种变量,
         //   界面照常显示中文,但翻译工具永远扫不到它 ——
@@ -218,7 +231,7 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     formHint_ = new QLabel(paramBox);
     formHint_->setStyleSheet(QStringLiteral("color:#888;"));
     formHint_->setWordWrap(true);
-    formGrid->addWidget(formHint_, 2, 0, 1, 6);
+    formGrid->addWidget(formHint_, 3, 0, 1, 6);
 
     auto* btnRow = new QHBoxLayout;
     btnRow->setSpacing(8);
@@ -270,6 +283,11 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
     connect(thresholdSpin_,  &QDoubleSpinBox::valueChanged,    this, &AlarmConfigDialog::onApplyFieldEdits);
     connect(minDurSpin_,     &QSpinBox::valueChanged,          this, &AlarmConfigDialog::onApplyFieldEdits);
     connect(hysteresisSpin_, &QDoubleSpinBox::valueChanged,    this, &AlarmConfigDialog::onApplyFieldEdits);
+    // ★ F6:区域。currentTextChanged 而不是 currentIndexChanged ——
+    //   它是【可编辑】下拉,用户直接在里面打字,根本不产生"索引变化"。
+    //   连错信号的后果是:打字没反应,而从下拉里选才有反应 ——
+    //   一个只在某一半场景下生效的输入框,比没有还难排查。
+    connect(areaCombo_,      &QComboBox::currentTextChanged,   this, &AlarmConfigDialog::onApplyFieldEdits);
 
     connect(table_, &QTableWidget::itemSelectionChanged, this, [this]() {
         fillFormFromRow(table_->currentRow());
@@ -317,7 +335,7 @@ void AlarmConfigDialog::setupTable() {
     //   猜错就断言到别的行上,而测试还是绿的(同 tst_AlarmConfigDialog.h 头注释
     //   里"不反射 private 成员"同一个坑的另一面)。
     table_->setObjectName(QStringLiteral("alarmConfigTable"));
-    table_->setColumnCount(8);
+    table_->setColumnCount(9);
     // ★ 表头去掉单位,单位跟值走。
     //   原来写的是"最短持续(ms)",而单元格里是一个裸数字 500 ——
     //   单位只在表头,一滚动到看不见表头的地方就没了。
@@ -325,7 +343,8 @@ void AlarmConfigDialog::setupTable() {
     //   这样"这一格是什么"和"这一格是什么单位"分开了,列名也能短一截。
     table_->setHorizontalHeaderLabels(QStringList()
         << tr("报警名") << tr("关联变量") << tr("等级") << tr("方向")
-        << tr("阈值") << tr("最短持续") << tr("滞回") << tr("已屏蔽"));
+        << tr("阈值") << tr("最短持续") << tr("滞回") << tr("已屏蔽")
+        << tr("区域"));
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     // ★ 拉伸【报警名】,不是最后一列。
     //   原来用 setStretchLastSection(true),而最后一列是"已屏蔽" ——
@@ -363,9 +382,11 @@ void AlarmConfigDialog::setupForm() {
     varCombo_ = new QComboBox(this);
     levelCombo_ = new QComboBox(this);
     dirCombo_  = new QComboBox(this);
+    areaCombo_ = new QComboBox(this);
     varCombo_->setObjectName(QStringLiteral("alarmConfigVarCombo"));
     levelCombo_->setObjectName(QStringLiteral("alarmConfigLevelCombo"));
     dirCombo_->setObjectName(QStringLiteral("alarmConfigDirCombo"));
+    areaCombo_->setObjectName(QStringLiteral("alarmConfigAreaCombo"));
 
     for (const LevelItem& lv : kLevels) levelCombo_->addItem(tr(lv.text), QString::fromLatin1(lv.key));
     for (const DirItem& d : kDirections) dirCombo_->addItem(tr(d.text), QString::fromLatin1(d.key));
@@ -402,6 +423,23 @@ void AlarmConfigDialog::setupForm() {
            "Below 方向:回升到「阈值 + 滞回」才算恢复。\n"
            "填 0 = 不启用滞回(与旧版本行为一致)。\n"
            "注意:它不是阈值本身,而是阈值周围的「死区宽度」。"));
+
+    // ★ F6:区域 —— 可编辑下拉框。
+    //   【为什么可编辑】只读下拉就要求先有一份"区域清单"(另一套管理 UI +
+    //   工程顶层结构),纯输入框则每次手打、极易写出两个"一号泵房"。
+    //   可编辑下拉两头都要:能打新的,也能从已用过的里点。
+    //   【怎么补全已有区域】历史值来自 rows_ 里已经有的区域名,
+    //   而不是数据库 —— 这个对话框管的是工程里的报警配置,
+    //   而"已用过的区域"此刻就摆在 rows_ 里,不必去查 history.db。
+    //   将来若要收窄成工程级清单,只需 setEditable(false),schema 一个字不用动。
+    areaCombo_->setEditable(true);
+    areaCombo_->setInsertPolicy(QComboBox::NoInsert);   // 打错的名字不自动入库
+    areaCombo_->setToolTip(
+        tr("这条报警属于现场的哪个区域(如「一号泵房」「反应釜区」)。\n"
+           "留空 = 未分配。\n\n"
+           "区域只用于【报警历史的筛选和分组】,不影响报警是否触发、"
+           "也不改变触发时的处理逻辑。\n"
+           "从下拉里选可以避免手打时出现两个同名的区域。"));
 
     // 变量下拉:列出 varMgr 里所有变量。没有变量可选时对话框依然能开
     // (报警可能还没配变量),只是下拉为空。
@@ -493,6 +531,7 @@ void AlarmConfigDialog::reloadFromManager() {
             row.threshold     = cfg.threshold;
             row.minDurationMs = cfg.minDurationMs;
             row.hysteresis    = cfg.hysteresis;
+            row.area          = cfg.area;   // ★ F6:老配置读回来是空 = 未分配
             row.shelved       = alarmMgr_->isShelved(row.name);
             rows_.append(row);
         }
@@ -524,9 +563,15 @@ void AlarmConfigDialog::reloadFromManager() {
         put(kColMinDur,     r.editable ? minDurText(r.minDurationMs) : QString());
         put(kColHysteresis, r.editable ? QString::number(r.hysteresis, 'g', 6) : QString());
         put(kColShelved,    r.shelved ? tr("是") : QString());
+        // ★ F6:非阈值报警没有 CheckerConfig,也就没有区域 —— 显示"未分配"
+        //   而不是空白,理由同 AlarmHistoryView 的 areaDisplay。
+        put(kColArea,       r.area.isEmpty() ? tr("未分配") : r.area);
     }
 
     suppressItemChanged_ = false;
+
+    // ★ F6:补全列表要在 rows_ 填完之后才建 —— 它的数据源就是 rows_。
+    refreshAreaHistory();
 
     // ★ 隐藏项必须说出来。
     //   只显示能编辑的那些、悄悄少掉几条,用户会以为"工程里就这几条报警"——
@@ -576,6 +621,9 @@ void AlarmConfigDialog::setFormEnabled(bool on) {
     thresholdSpin_->setEnabled(on);
     minDurSpin_->setEnabled(on);
     hysteresisSpin_->setEnabled(on);
+    // ★ F6:区域。刻意【不】跟 hasVariables_ 挂钩 ——
+    //   区域跟工程里有没有变量无关,空工程照样能填"一号泵房"。
+    areaCombo_->setEnabled(on);
 
     // ★ 灰色必须带解释。
     //   这个函数是全文件【唯一】决定表单能不能用的地方,所以提示也只能写在这里 ——
@@ -621,7 +669,11 @@ void AlarmConfigDialog::fillFormFromRow(int row) {
     //   那时 writeFormToRow(row) 就会把数据写进错误的行。
     //   显式 block 让"用户改"和"程序填"两条路径彻底分开。
     const QList<QObject*> widgets = { varCombo_, levelCombo_, dirCombo_,
-                                     thresholdSpin_, minDurSpin_, hysteresisSpin_ };
+                                     thresholdSpin_, minDurSpin_, hysteresisSpin_,
+                                     // ★ F6:区域也要一起 block。
+                                     //   漏了它的话,填区域时会触发 onApplyFieldEdits,
+                                     //   而当前选中行还没切过来 —— 又是那个错行 bug。
+                                     areaCombo_ };
     for (QObject* w : widgets) w->blockSignals(true);
 
     // ★ 变量下拉:这一格【必须处理"找不到"的情况】,不能像别的控件那样
@@ -657,12 +709,47 @@ void AlarmConfigDialog::fillFormFromRow(int row) {
     thresholdSpin_->setValue(r.threshold);
     minDurSpin_->setValue(r.minDurationMs);
     hysteresisSpin_->setValue(r.hysteresis);
+    // ★ F6:setCurrentText 对【可编辑】下拉写的是行编辑框的内容,
+    //   所以"这一行的区域"即使不在补全列表里也照样显示得出来。
+    //   (用 setCurrentIndex 就会丢:不在列表里的值没有对应索引。)
+    //   这也是为什么这个控件必须是 editable —— 只读下拉装不下新区域。
+    areaCombo_->setCurrentText(r.area);
 
     for (QObject* w : widgets) w->blockSignals(false);
 
     // 非阈值报警:能看到,但不许改
     setFormEnabled(r.editable);
     removeBtn_->setEnabled(r.editable);
+}
+
+// ★ F6:重建区域补全列表。
+//   数据源是 rows_ 里已经有的区域名(去重 + 排序),不是数据库 ——
+//   这个对话框管的是工程里的报警配置,"已用过的区域"此刻就在 rows_ 里。
+//   ★ 重建时不能动当前文本:用户在编辑某个区域名的过程中,
+//     下拉列表刷新把他正在打的字冲掉,是很难受的。
+void AlarmConfigDialog::refreshAreaHistory() {
+    if (!areaCombo_) return;
+
+    QStringList seen;
+    for (const AlarmConfigRow& r : rows_) {
+        const QString a = r.area.trimmed();
+        if (!a.isEmpty() && !seen.contains(a)) seen << a;
+    }
+    seen.sort();
+
+    // 只清列表项,不动 lineEdit 里的当前文本
+    const bool blocked = areaCombo_->blockSignals(true);
+    QString current;
+    {
+        QLineEdit* le = areaCombo_->lineEdit();
+        if (le) current = le->text();
+    }
+    areaCombo_->clear();
+    areaCombo_->addItems(seen);
+    if (!current.isEmpty()) {
+        areaCombo_->setCurrentText(current);
+    }
+    areaCombo_->blockSignals(blocked);
 }
 
 void AlarmConfigDialog::writeFormToRow(int row) {
@@ -694,6 +781,11 @@ void AlarmConfigDialog::writeFormToRow(int row) {
     r.threshold     = thresholdSpin_->value();
     r.minDurationMs = minDurSpin_->value();
     r.hysteresis    = hysteresisSpin_->value();
+    // ★ F6:区域。currentText() 取的是行编辑框里的字,包括用户刚打的。
+    //   顺手 trim:同一个区域打成 "一号泵房 " 和 "一号泵房",
+    //   在历史筛选里就是两个桶 —— 而用户绝不会知道自己多了个空格。
+    //   这一行 trim 抵得上后面一整套"区域清单"UI 的防错能力。
+    r.area          = areaCombo_->currentText().trimmed();
 
     // ★ 写回表格。
     //   不回写的话,表格显示的还是改之前的值 —— 用户改了阈值但看着没变,
@@ -706,6 +798,11 @@ void AlarmConfigDialog::writeFormToRow(int row) {
         if (auto* it = table_->item(row, kColThreshold))  it->setText(QString::number(r.threshold, 'g', 6));
         if (auto* it = table_->item(row, kColMinDur))     it->setText(minDurText(r.minDurationMs));
         if (auto* it = table_->item(row, kColHysteresis)) it->setText(QString::number(r.hysteresis, 'g', 6));
+        // ★ F6:区域写回表格。空就显示"未分配" ——
+        //   空白单元格和一整列空白在表格里分不清"没配"还是"这列坏了"。
+        if (auto* it = table_->item(row, kColArea)) {
+            it->setText(r.area.isEmpty() ? tr("未分配") : r.area);
+        }
         suppressItemChanged_ = false;
     }
 }
@@ -789,6 +886,9 @@ void AlarmConfigDialog::onAdd() {
     put(kColMinDur,     minDurText(row.minDurationMs));
     put(kColHysteresis, QString::number(row.hysteresis, 'g', 6));
     put(kColShelved,    QString());
+    // ★ F6:新报警默认未分配。刻意【不】预填第一个区域 ——
+    //   预填会让"新增"看起来像"已经归到某个区了",而它其实没有依据。
+    put(kColArea,       tr("未分配"));
     suppressItemChanged_ = false;
 
     table_->selectRow(r);
@@ -1043,6 +1143,7 @@ bool AlarmConfigDialog::applyDraftToManager(QString* errorOut) {
         cfg.threshold     = r.threshold;
         cfg.minDurationMs = r.minDurationMs;
         cfg.hysteresis    = r.hysteresis;
+        cfg.area          = r.area;
 
         if (auto* tc = thresholdCheckerNamed(r.name)) {
             // ---- 已存在:就地改,不重建(重建会丢 currentId_,见头文件)----
@@ -1168,6 +1269,7 @@ QString AlarmConfigDialog::exportDraftToJson() const {
         cfg.threshold     = r.threshold;
         cfg.minDurationMs = r.minDurationMs;
         cfg.hysteresis    = r.hysteresis;
+        cfg.area          = r.area;
 
         QJsonObject obj = JsonSerializer::toJson(cfg);
         obj["name"]     = r.name;
@@ -1233,6 +1335,12 @@ double AlarmConfigDialog::hysteresisAt(int row) const {
 
 bool AlarmConfigDialog::shelvedAt(int row) const {
     return (row >= 0 && row < rows_.size()) ? rows_.at(row).shelved : false;
+}
+
+// ★ F6:草稿里的区域原值。刻意返回【空串】而不是表格里显示的"未分配" ——
+//   "未分配"是给人看的话,不是数据。测试要断的是"用户填的那个名字回来了"。
+QString AlarmConfigDialog::areaAt(int row) const {
+    return (row >= 0 && row < rows_.size()) ? rows_.at(row).area : QString();
 }
 
 bool AlarmConfigDialog::editableAt(int row) const {

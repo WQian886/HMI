@@ -45,6 +45,10 @@ ThresholdAlarmChecker::ThresholdAlarmChecker(const QString& alarmName,
         a.threshold     = (config_.direction == Direction::Above)
                           ? QString("> %1").arg(config_.threshold)
                           : QString("< %1").arg(config_.threshold);
+        // ★ F6:区域从配置原样抄过来。抄【触发那一刻】的 config_.area,
+        //   不是构造时的 —— setConfig() 能在运行中改配置(见 .h 里为什么不删了重建),
+        //   用户中途改了区域,下一条记录就该是新的那个,不是旧的。
+        a.area          = config_.area;
         emit triggered(a);
     });
 
