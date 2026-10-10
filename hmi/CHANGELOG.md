@@ -1,7 +1,47 @@
 # CHANGELOG
 
-> 最后核对：**2026-10-10**（基于代码核对：`ctest` **66 个目标 66 通过**，
+> 最后核对：**2026-10-10**（基于代码核对：`ctest` **67 个目标 67 通过**，
 > `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出）
+
+## [Unreleased] - 2026-10-10 (六)
+
+### TcpClient 重连:"放弃"之后客户端自己又活了(改善清单 #2)
+
+**新开 `tst_TcpClient`** —— `TcpClient` 从阶段 1 起就是核心类，
+此前**一个测试文件都没有**，重连/退避/放弃整套逻辑从没被验证过。
+
+Qt 连接失败时的信号顺序是**确定的**：`errorOccurred` 先，`disconnected` 紧跟其后，
+两个槽都调 `scheduleReconnect()`。平时靠 `reconnectTimer_->isActive()` 挡住第二条。
+但"重试到上限放弃"那条分支**故意没有启动定时器** —— 防护失效了；
+那条分支又顺手把 `retryCount_` 清成 0，于是紧接着的 `disconnected`
+看到 `retryCount_=0 < 5`，**又排了第 1 次重连**。
+
+后果不是"偶尔多试一次"：**每一轮放弃后都重启，客户端永远停在"重连中"，
+界面上"连接失败"一闪而过** —— 恰好是操作员最该看见的那句话。
+而且没有任何人按过重连按钮，是它自己活过来的。
+
+改法：加 `reconnectAbandoned_` 标志，置位后 `scheduleReconnect()` 直接返回。
+标志由 `connectTo()`（用户手动重连）和 `onSocketConnected()`（连上了）清掉 ——
+**不能做成永久状态**，那比原 bug 更严重（机器再也连不上）。
+
+负向对照：去掉守卫后，只有 `abandoned_thenDisconnected_doesNotRestartRetryCycle`
+和 `abandoned_emitsAbandonedOnlyOnce` 两条转红（`abandoned.count()` 变成 2 和 4，
+正是"放弃 → 重启 → 再放弃"的循环）；
+`abandoned_clearedWhenUserConnectsAgain` **保持绿**，证明反向没被误伤。
+
+### 改善清单 #10 复核结论：这条清单是错的，照做会让程序变慢
+
+清单原话"`setSocketOption` 每次都设 → 移到构造"，听起来是纯粹的清理。实测不是：
+在**未连接**的 `QTcpSocket` 上设 `LowDelayOption` 是 **no-op**，Qt 直接丢弃这个请求。
+把 `onSocketConnected` 里那行挪进构造函数后，连上再读 `socketOption` 拿到的是 **0**
+—— Nagle 根本没被关掉，每个小 Modbus 帧又慢 ~40ms，而**代码上看不出任何变化**。
+
+维持原样，并在构造函数处写了长注释防止下一轮再被"优化"回去。
+`lowDelayOption_mustBeSetAfterConnect` 用两个**与 TcpClient 无关的裸 socket 探针**
+隔离验证（第一次想直接在 TcpClient 上断言，被自己先红了一次：
+`onSocketConnected` 本来就在设 1，分不清是哪一次设的 —— 分不清来源的断言不算断言）。
+
+验证：`ctest` **67/67 通过**、`hmi.exe` 编译通过（6.67 MB）。
 
 ## [Unreleased] - 2026-10-10 (五)
 

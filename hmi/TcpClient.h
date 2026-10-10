@@ -77,6 +77,14 @@ private:
     QString lastHost_;                     // 上次连接目标
     quint16 lastPort_       = 0;
     bool    userInitiated_  = false;       // 区分"用户主动"vs"被动断开"
+    // ★ 改善清单 #2(2026-10-10):本轮重试是否已经"放弃"。
+    //   【为什么需要它】重试耗尽之后,紧跟着到达的 disconnected 会再调一次
+    //   scheduleReconnect,而"放弃"那条分支【没有启动定时器】,
+    //   所以靠 reconnectTimer_->isActive() 挡不住 —— 客户端会自己复活重连,
+    //   UI 永远停在"重连中","连接失败"一闪而过。
+    //   由 connectTo()(用户手动重连)和 onSocketConnected() 清掉。
+    //   【改动时连带看】scheduleReconnect() / connectTo() / onSocketConnected()
+    bool    reconnectAbandoned_ = false;
 
     // 阶段 1 第 2 练:心跳相关
     QTimer* heartbeatTimer_      = nullptr;   // 心跳定时器

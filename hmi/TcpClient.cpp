@@ -9,6 +9,15 @@ TcpClient::TcpClient(QObject* parent) : QObject(parent) {
     connect(socket_, &QTcpSocket::readyRead,    this, &TcpClient::onSocketReadyRead);
     connect(socket_, &QTcpSocket::errorOccurred,this, &TcpClient::onSocketError);
 
+    // ★ 改善清单 #10 —— 【查过了,不能挪,清单这条是错的】
+    //   清单原话是"setSocketOption 每次都设,挪到构造函数"。
+    //   实测(2026-10-10):在【未连接】的 QTcpSocket 上设 LowDelayOption 是 no-op ——
+    //   连上之后再读 socketOption(LowDelayOption) 拿到的仍然是 0,Qt 根本没保留这个请求。
+    //   也就是说按清单挪过去 = 悄悄把"关 Nagle"关掉了,每帧小 Modbus 请求又慢 ~40ms。
+    //   tst_TcpClient::lowDelayOption_mustBeSetAfterConnect 把这个事实钉住了,
+    //   免得下一轮又有人照清单把它"优化"回去。
+    //   设在 onSocketConnected 里是唯一实测有效的位置,保持原样。
+
     // 阶段 1 第 2 练:重连定时器(单次)
     reconnectTimer_ = new QTimer(this);
     reconnectTimer_->setSingleShot(true);
@@ -63,6 +72,9 @@ void TcpClient::connectTo(const QString& host, quint16 port) {
     reconnectTimer_->stop();
     retryCount_     = 0;
     userInitiated_  = false;
+    // ★ 改善清单 #2:上一轮"放弃"作废 —— 用户既然又主动连了,就得能重新退避。
+    //   不清的话这台机器永远停在 Failed,用户点一百次连接也没用。
+    reconnectAbandoned_ = false;
 
     // 存目标地址(重连要用)
     lastHost_ = host;
@@ -114,9 +126,13 @@ qint64 TcpClient::send(const QByteArray& data) {
 void TcpClient::onSocketConnected() {
     retryCount_      = 0;
     userInitiated_   = false;
+    reconnectAbandoned_ = false;   // ★ #2:连上了,"放弃"状态作废
     lastReceivedTime_ = QTime::currentTime();   // 初始化"上次收到"时间
     // 2026-07-09:关 Nagle —— Modbus 帧小(10-20 字节),默认 Nagle 会让它等 ~40ms 合并/ACK
     // 关掉后小包立即发,响应从 ~40ms 降到 < 1ms(本机回环)
+    //
+    // ★ 必须在【连上之后】设(改善清单 #10 查证结论)。
+    //   在未连接的 socket 上设是 no-op,Qt 不保留 —— 见构造函数里的长注释。
     socket_->setSocketOption(QAbstractSocket::LowDelayOption, 1);
     startHeartbeat();
 
@@ -174,6 +190,29 @@ void TcpClient::onSocketError(QAbstractSocket::SocketError err) {
 // ==================== 阶段 1 第 2 练:重连 ====================
 
 void TcpClient::scheduleReconnect() {
+    // ★ 改善清单 #2(2026-10-10)修:"放弃"必须是一个【粘住的状态】,而不是一次性的动作。
+    //
+    // 【原来错在哪 —— 这是个真 bug,不是"可能"]
+    //   Qt 连接失败时的信号顺序是【确定】的:errorOccurred 先,disconnected 紧跟其后,
+    //   两个槽都调 scheduleReconnect。正常情况下靠下面 isActive() 挡住第二条。
+    //   但"重试到上限"那条分支【故意没有启动定时器】,于是 isActive() 必然为 false,
+    //   而那条分支又顺手把 retryCount_ 清成了 0 ——
+    //   紧接着到达的 disconnected 看到 retryCount_=0 < maxRetries_,
+    //   就【又排了第 1 次重连】,UI 从"连接失败"又跳回"重连中(1/5)"。
+    //
+    //   而且这不是偶发:每一轮放弃后都会重启,所以客户端永远停在"重连中",
+    //   界面上"连接失败"的提示一闪而过 —— 恰好是操作员最需要看见的那句话。
+    //   没有任何人按过重连按钮,是它自己活过来的。
+    //
+    // 【改法】
+    //   加 reconnectAbandoned_ 标志,置位后本函数直接返回 —— 不再排新的,也不再重复通知。
+    //   标志由 connectTo()(用户手动重连)和 onSocketConnected()(连上了)清掉,
+    //   所以不会把客户端永久焊死在放弃状态 —— 那是比原 bug 更严重的坑,
+    //   tst_TcpClient::abandoned_clearedWhenUserConnectsAgain 专门盯这一条。
+    if (reconnectAbandoned_) {
+        return;
+    }
+
     // 防御重入:onSocketError + onSocketDisconnected 都可能调,避免重复启动定时器
     if (reconnectTimer_->isActive()) {
         return;   // 已有重连计划,不再累加 retryCount_、不再覆盖定时器
@@ -181,8 +220,12 @@ void TcpClient::scheduleReconnect() {
 
     if (retryCount_ >= maxRetries_) {
         // 重试到上限,放弃(通知 UI 进入 Failed 状态)
-        retryCount_ = 0;
+        // ★ 这里【不再清 retryCount_】:清掉就等于把"我已经放弃了"这个信息抹了,
+        //   而紧接着的 disconnected 正是靠这个计数判断要不要继续的。
+        //   计数本来就由 connectTo() / onSocketConnected() 清,不必多此一举。
+        reconnectAbandoned_ = true;
         emit reconnectAbandoned();   // 改:不再 emit errorOccurred(避免 hmi onTcpError 误设 Failed)
+        qDebug() << "[TcpClient] 重连放弃(已用完" << retryCount_ << "次),等用户手动重连";
         return;
     }
 
