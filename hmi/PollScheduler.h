@@ -81,8 +81,14 @@ private slots:
     void onTick();                                       // 100ms 一次扫描
     // ★ C.5:readFinished 也带 plcId(因为可能 N 个 driver 同时发 reply)
     void onDriverReadFinished(const QString& plcId, quint32 requestId, QVector<quint16> registers, bool success);
+    // ★ 2026-10-10:变量被删/被替换 → 把上面四个容器里的指针全部清干净。
+    //   理由见 .cpp 里同名函数的长注释(悬空指针当 key 存在哈希里,本身就是 UB)。
+    void onVariableReplaced(Variable* oldVar, Variable* newVar);
 
 private:
+    // 两个构造函数都要调 —— 信号连接跟有几个 driver 无关。
+    void connectVariableManager();
+
     VariableManager* varMgr_;
     // ★ C.5:从单 IPollDriver* 改成 QHash<QString, IPollDriver*>
     //   老代码 driver_ 单指针保留(兼容性指针),drivers_ 是新多 driver 哈希
@@ -103,4 +109,9 @@ private:
     // ★ C.5:reqId → 待更新变量列表(合并读用)+ plcId(哪个 driver 的 reply)
     QHash<quint32, QList<Variable*>> pending_;         // reqId → variables
     QHash<quint32, QString> pendingPlcId_;             // reqId → plcId(分派 readFinished 用)
+    // ★ 下面这四个容器都拿【裸 Variable*】当 key 或 value。
+    //   QObject 析构不会通知任何人"我的地址失效了" ——
+    //   所以谁把指针存起来,谁就得负责在变量消失时清理。
+    //   这就是 onVariableReplaced 存在的原因,改动它们时必须同步看那个函数。
+    //   (根治方案是改 QSharedPointer = 改善清单 #5,批次 3 才动。)
 };

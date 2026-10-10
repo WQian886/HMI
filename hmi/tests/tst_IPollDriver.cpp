@@ -36,6 +36,13 @@ public:
     bool nextReplySuccess = true;
     int sendReadCount = 0;
 
+    // ★ 2026-10-10:延迟回包开关。
+    //   默认 false = 同步立刻回(原有 20 条用例靠它,不依赖事件循环时序)。
+    //   打开后请求只记录不回,由测试自己调 flushReply() 决定什么时候回 ——
+    //   这才能造出"请求在途"那个窗口,而它正是悬空指针 bug 的必要条件。
+    bool manualReply = false;
+    QVector<quint32> heldRequestIds;
+
     void connectTo(const QString& host, quint16 port) override {
         lastHost = host;
         lastPort = port;
@@ -52,8 +59,25 @@ public:
     void sendReadRequest(const ReadRequest& req) override {
         lastReadReq = req;
         ++sendReadCount;
+        if (manualReply) {
+            heldRequestIds << req.requestId;
+            return;      // ★ 不回包,请求留在"在途"状态
+        }
         // 模拟立刻回复(同步)
         emit readFinished(req.requestId, nextReplyRegisters, nextReplySuccess);
+    }
+
+    // 把攒着的请求一次性回掉(或只回指定的那一个)
+    void flushReply(quint32 onlyThisId = 0) {
+        const QVector<quint32> ids = heldRequestIds;
+        heldRequestIds.clear();
+        for (quint32 id : ids) {
+            if (onlyThisId && id != onlyThisId) {
+                heldRequestIds << id;   // 没轮到的留下次
+                continue;
+            }
+            emit readFinished(id, nextReplyRegisters, nextReplySuccess);
+        }
     }
 
     bool sendWriteRequest(RegisterArea, int, int,
@@ -89,6 +113,12 @@ private slots:
 
     // 4 种 RegisterArea 都能路由
     void readRequest_passesAllFourAreas();
+
+    // ---- ★ 2026-10-10:变量在"请求在途"时被删/被替换 ----
+    void deletingVariableWhileRequestInFlight_doesNotCrash();
+    void deletingVariableWhileRequestInFlight_removedFromPending();
+    void replacingVariable_keepsItBeingPolled();
+    void deletingActiveVariable_removesItFromActiveSet();
 };
 
 void TestIPollDriver::init() {
@@ -241,6 +271,171 @@ void TestIPollDriver::readRequest_passesAllFourAreas() {
     req.requestId = 4;
     driver.sendReadRequest(req);
     QCOMPARE(driver.lastReadReq.area, RegisterArea::DiscreteInput);
+}
+
+// ============================================================================
+// ★ 2026-10-10:请求在途时变量被删 —— use-after-free
+//
+// 【真 bug,不是假设】
+//   PollScheduler 把【裸 Variable*】存进四个容器:
+//     nextPollAtMs_(key) / inFlight_(key) / activeVariables_(key) / pending_(value)
+//   而 QObject 析构【不通知任何人】。于是:
+//     1. tick 发出读请求,变量进了 pending_
+//     2. 用户在配置对话框里删掉这个变量 ← 常规操作
+//     3. PLC 回包到达,onDriverReadFinished 拿到悬空指针
+//     4. v->setQuality(...) / v->address() → use-after-free
+//
+//   两个条件都不罕见:轮询 100ms 一次、Modbus 往返几毫秒到几百毫秒,
+//   "请求在途"是【常态】而不是极端情况。
+//
+// 【为什么测试要专门造"延迟回包"】
+//   MockDriver 默认同步立刻回包 —— 那样 sendReadRequest 返回时请求已经不在
+//   pending_ 里了,"在途"这个窗口根本不存在,测不到任何东西。
+//   manualReply 开关让测试自己掌握回包时机,窗口才是真的。
+//
+// 【这些用例怎么才算数】
+//   1 号直接跑,不崩就算过 —— 但它只在 AddressSanitizer 下能真正证伪;
+//   所以 2/3/4 号断的是【可观察的后果】,不依赖内存检查器。
+// ============================================================================
+
+void TestIPollDriver::deletingVariableWhileRequestInFlight_doesNotCrash() {
+    VariableManager vm;
+    MockDriver driver;
+    driver.connectTo("127.0.0.1", 502);
+    driver.manualReply = true;            // ★ 请求发出去但不回
+
+    auto* v = new Variable(QStringLiteral("Speed"), 0x0002,
+                           Variable::DataType::UInt16,
+                           Variable::Access::ReadWrite, &vm);
+    vm.addVariable(v);
+
+    PollScheduler ps(&vm, &driver);
+    ps.setAllActive();
+    ps.start();
+    QTest::qWait(250);                    // 让它真的发出去
+    ps.stop();
+
+    QVERIFY2(driver.sendReadCount >= 1, "请求根本没发出去,后面测的不是在途窗口");
+    QVERIFY(!driver.heldRequestIds.isEmpty());
+
+    // ★ 在途期间删掉变量 —— 这一步以前会让 PollScheduler 的容器里留下悬空指针
+    QVERIFY(vm.removeVariable(QStringLiteral("Speed")));
+
+    // ★ 回包到达。这在修复前是对已释放内存调用 v->setQuality()。
+    //   不断言具体值 —— 这一条的作用是"跑到这里不崩"。
+    driver.nextReplyRegisters = {4321};
+    driver.flushReply();
+
+    // ★ 变量确实已经不在了(证明上面那次 removeVariable 是真删,不是摆设)
+    QCOMPARE(vm.count(), 0);
+    QVERIFY(vm.findVariable(QStringLiteral("Speed")) == nullptr);
+}
+
+void TestIPollDriver::deletingVariableWhileRequestInFlight_removedFromPending() {
+    // 上一条的加强版:不只"不崩",还得证明【后续 tick 不再碰它】。
+    //
+    // 悬空指针留在 QHash 的 key 里,危害不止于这一次解引用 ——
+    // 下一轮 onTick 遍历 nextPollAtMs_ 时会重算哈希,同样踩已释放内存。
+    // 所以这里多跑几轮 tick,证明清理是【彻底】的而不是【一次性绕过】。
+    VariableManager vm;
+    MockDriver driver;
+    driver.connectTo("127.0.0.1", 502);
+    driver.manualReply = true;
+
+    auto* v = new Variable(QStringLiteral("Speed"), 0x0002,
+                           Variable::DataType::UInt16,
+                           Variable::Access::ReadWrite, &vm);
+    vm.addVariable(v);
+
+    PollScheduler ps(&vm, &driver);
+    ps.setAllActive();
+    ps.start();
+    QTest::qWait(250);
+    QVERIFY(!driver.heldRequestIds.isEmpty());   // ★ 确认请求确实还在途
+
+    QVERIFY(vm.removeVariable(QStringLiteral("Speed")));
+
+    // 回包 + 再跑几轮:两件事都要经得起
+    driver.flushReply();
+    const int afterDelete = driver.sendReadCount;
+    QTest::qWait(350);      // 3+ 轮 tick,内部哈希容器会被反复遍历/重排
+
+    // ★ 变量没了,一个变量都没有,就不该再发任何读请求。
+    //   这条比"地址对不对"更硬:悬空 key 留在哈希里时,任何一次遍历/重排
+    //   都可能踩到它,而症状(偶尔崩)恰恰是最难复现的那种。
+    QCOMPARE(vm.count(), 0);
+    QCOMPARE(driver.sendReadCount, afterDelete);
+}
+
+void TestIPollDriver::replacingVariable_keepsItBeingPolled() {
+    // 同名【替换】:新的变量必须【继续被轮询】。
+    //
+    // ★ 这是删除路径和替换路径的唯一区别,也是最容易漏的一处:
+    //   如果清理时只 remove 不 insert,替换一个正在显示的变量之后,
+    //   UI 上的控件会【永久停止刷新】,而界面上看不出任何异常 ——
+    //   用户看到的是一个"死掉"的画面,不会想到跟变量替换有关。
+    VariableManager vm;
+    MockDriver driver;
+    driver.connectTo("127.0.0.1", 502);
+
+    auto* v1 = new Variable(QStringLiteral("Speed"), 0x0002,
+                            Variable::DataType::UInt16,
+                            Variable::Access::ReadWrite, &vm);
+    vm.addVariable(v1);
+
+    PollScheduler ps(&vm, &driver);
+    ps.setAllActive();
+
+    // 同名替换 → emit variableReplaced(v1, v2)
+    auto* v2 = new Variable(QStringLiteral("Speed"), 0x0002,
+                            Variable::DataType::UInt16,
+                            Variable::Access::ReadWrite, &vm);
+    QVERIFY(vm.addVariable(v2));
+    QCOMPARE(vm.findVariable(QStringLiteral("Speed")), v2);
+
+    // ★ 替换之后还得能读到值 —— 这就是"还在被轮询"的可观察证据。
+    driver.nextReplyRegisters = {777};
+    ps.start();
+    QTest::qWait(250);
+    ps.stop();
+
+    QVERIFY2(driver.sendReadCount >= 1, "替换之后完全不再轮询了 —— 画面会永久停住");
+    QCOMPARE(v2->value().toUInt(), quint16(777));
+}
+
+void TestIPollDriver::deletingActiveVariable_removesItFromActiveSet() {
+    // 删掉一个正在显示(active)的变量之后,新变量不能被加进 active 集合。
+    // 反过来讲:删除之后 active 集合里不该再有那个地址对应的变量 ——
+    // 表现就是"再加一个新变量,它的第一帧数据永远不来"。
+    VariableManager vm;
+    MockDriver driver;
+    driver.connectTo("127.0.0.1", 502);
+
+    auto* v = new Variable(QStringLiteral("Speed"), 0x0002,
+                           Variable::DataType::UInt16,
+                           Variable::Access::ReadWrite, &vm);
+    vm.addVariable(v);
+
+    PollScheduler ps(&vm, &driver);
+    ps.setAllActive();
+
+    QVERIFY(vm.removeVariable(QStringLiteral("Speed")));
+
+    // 删掉之后再加一个【别的】变量,它必须能被正常轮询 ——
+    // 证明 active 集合的清理没有把整个机制弄坏。
+    auto* v2 = new Variable(QStringLiteral("Temp"), 0x0003,
+                            Variable::DataType::UInt16,
+                            Variable::Access::ReadWrite, &vm);
+    vm.addVariable(v2);
+    ps.setAllActive();
+
+    driver.nextReplyRegisters = {999};
+    ps.start();
+    QTest::qWait(250);
+    ps.stop();
+
+    QVERIFY2(driver.sendReadCount >= 1, "删掉一个变量之后,别的变量也不再被轮询了");
+    QCOMPARE(v2->value().toUInt(), quint16(999));
 }
 
 QTEST_MAIN(TestIPollDriver)

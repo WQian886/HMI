@@ -67,6 +67,27 @@ bool VariableManager::removeVariable(const QString& name) {
 
     Variable* v = it.value();
     vars_.erase(it);    // 先从 hash 移除
+
+    // ★ 改善清单 #6/#7(2026-10-10):删变量必须广播 variableReplaced(v, nullptr)
+    //
+    // 【这个函数原来什么都不 emit,是真 bug】
+    //   manager 删掉变量时,那些【把 Variable* 存起来、稍后再解引用】的模块
+    //   —— WriteScheduler::pending_、TrendWidget —— 手里的指针当场变悬空。
+    //   WriteScheduler::onWriteReply 会 v->clearDirty():
+    //   写请求在途(几十~几百毫秒)时用户在界面上删了这个变量,
+    //   PLC 回包一到就是 use-after-free。
+    //
+    // 【为什么一直没被发现】
+    //   同名【替换】会 emit、clear() 也早就 emit(2026-08-07,而且写清了理由),
+    //   唯独这个函数漏了 —— 三个入口长得一样、两个会通知一个不会。
+    //   而 loadFromFile 走的是 clear() 不是本函数,所以"正常流程"永远碰不到,
+    //   只有【用户在界面上删变量】才碰得到。
+    //
+    // 【顺序不能反】
+    //   emit 必须在 delete 之前 —— 监听者可能要读 oldVar 的字段做最后处理
+    //   (addVariable 的替换分支也是这个顺序,不是巧合)。
+    emit variableReplaced(v, nullptr);
+
     delete v;           // 再 delete(QObject 析构会从父对象 child list 移除自己)
     return true;
 }

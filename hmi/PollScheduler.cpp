@@ -15,6 +15,10 @@
 #include <QVariant>
 #include <algorithm>
 #include <cstring>  // memcpy (Float register 组合用)
+// ★ 2026-10-10:用 hmiAlarm 分类打日志,不用裸 qDebug。
+//   跟 VariableManager.cpp / ActionManager.cpp 同一套分类,方便现场
+//   用 QT_LOGGING_RULES 单独调高报警相关日志。
+#include "logging/Logging.h"
 
 // ★ C.5:单 driver 构造 → 包成 QHash{"plc1": driver}(老工程兼容)
 PollScheduler::PollScheduler(VariableManager* mgr,
@@ -27,6 +31,7 @@ PollScheduler::PollScheduler(VariableManager* mgr,
     }
     timer_.setInterval(100);  // 100ms tick 一次
     connect(&timer_, &QTimer::timeout, this, &PollScheduler::onTick);
+    connectVariableManager();
 }
 
 // ★ C.5:多 driver 构造
@@ -40,6 +45,66 @@ PollScheduler::PollScheduler(VariableManager* mgr,
     }
     timer_.setInterval(100);
     connect(&timer_, &QTimer::timeout, this, &PollScheduler::onTick);
+    connectVariableManager();
+}
+
+// ★ 2026-10-10:连 variableReplaced —— 本类第一次订阅这个信号。
+//
+//   【之前没有,为什么现在要】
+//   本类把【裸 Variable*】存进四个容器:nextPollAtMs_(key)、inFlight_(key)、
+//   activeVariables_(key)、pending_(value 列表)。而 QObject 析构不通知任何人。
+//   于是"读请求在途 + 用户删掉该变量"→ onDriverReadFinished 拿到悬空指针,
+//   v->setQuality(...) / v->address() 直接 use-after-free。
+//
+//   【为什么这不是臆想出来的场景】
+//   轮询周期 100ms、Modbus 往返几毫秒到几百毫秒 —— 请求在途是【常态】,
+//   不是极端情况。而"用户在界面上删变量"是配置对话框里的常规操作。
+//   两个都不罕见,叠加起来就是一次迟早会发生的崩溃。
+void PollScheduler::connectVariableManager() {
+    if (!varMgr_) return;
+    connect(varMgr_, &VariableManager::variableReplaced,
+            this, &PollScheduler::onVariableReplaced);
+}
+
+void PollScheduler::onVariableReplaced(Variable* oldVar, Variable* newVar) {
+    if (!oldVar) return;
+
+    // ① nextPollAtMs_:它【就是 key】—— 悬空 key留在 QHash 里,后续任何
+    //   哈希运算(insert / operator[] / 遍历 rehash)都会解引用已释放内存。
+    //   所以这不是"读到脏数据",是"容器本身坏掉"。
+    nextPollAtMs_.remove(oldVar);
+
+    // ② inFlight_:同样是 key,同上
+    inFlight_.remove(oldVar);
+
+    // ③ activeVariables_:UI 切屏幕时调 add/removeActiveVariable 建的集合,也是 key
+    activeVariables_.remove(oldVar);
+    //   newVar 非空(同名替换)时把它接回去 —— 否则替换一个正在显示的变量,
+    //   UI 上的控件会【永久停止刷新】,而界面上看不出任何异常。
+    //   这是替换路径和删除路径的唯一区别,漏了它就是引入一个新 bug。
+    if (newVar) activeVariables_.insert(newVar);
+
+    // ④ pending_:reqId → 变量列表。删掉的是列表【里的一个元素】,
+    //   reqId 本身还得留着 —— 回包到达时 onDriverReadFinished 会 take 它。
+    //   ★ 这里只能"换/删元素",不能 erase 整个 reqId:
+    //     erase 了的话 onDriverReadFinished 拿到空 batch 直接 return,
+    //     而 TCP 层那一帧已经收下、没法退回去了。
+    for (auto it = pending_.begin(); it != pending_.end(); ++it) {
+        QList<Variable*>& batch = it.value();
+        for (int i = 0; i < batch.size(); ++i) {
+            if (batch.at(i) != oldVar) continue;
+            if (newVar) {
+                batch[i] = newVar;   // 同名替换:换个指针,继续等这个变量
+            } else {
+                batch.removeAt(i);   // 删除:这一项已经不存在了
+                --i;                  // ★ removeAt 让后续元素左移,不减 i 会跳过下一个
+            }
+        }
+    }
+
+    qCDebug(hmiAlarm) << "[PollScheduler] 变量被"
+                      << (newVar ? QStringLiteral("替换") : QStringLiteral("删除"))
+                      << ",已清理" << (newVar ? 3 : 4) << "个容器中的指针";
 }
 
 // ★ C.5:运行时添加 driver
