@@ -114,7 +114,11 @@ Qt signal/slot 是层间唯一的调度机制。详见 [`docs/专题/2026-08-09_
 > ⚠ VS 2026 的 `vcvars64.bat` 漏了 `ucrt`,会报 `C1083: 无法打开包括文件 "stddef.h"`。
 > 修法(改 `hmi.vcxproj.user`)和两条**无效解**见 [`docs/现状.md` 第六节](docs/现状.md)。
 
-> ⚠ `CMakeLists.txt` 已过期(缺 `Binding.cpp` / `WriteScheduler.cpp`),cmake 构建会 LNK2019。**以 vcxproj 为准。**
+> ✅ **2026-10-13 实测更正**:这条「CMakeLists 已过期、以 vcxproj 为准」的旧结论**已经过期了**。
+> `CMakeLists.txt` 里 `Binding.cpp` / `WriteScheduler.cpp` **都早已补齐**(第 43/44 行),
+> 且 `src/` 下的新文件有 `file(GLOB ... CONFIGURE_DEPENDS)` 兜底捡入;
+> `build.ps1`(cmake + Ninja)实测构建出 `hmi.exe` 6.67 MB,`ctest` **67/67 通过**。
+> 两条构建路径(vcxproj / cmake)现在都能用 —— **这行是历史记录,不是当前状态**。
 
 **测试**:用 Modbus Slave 模拟器(Windows 桌面软件)验证。
 
