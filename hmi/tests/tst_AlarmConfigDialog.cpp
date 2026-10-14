@@ -117,6 +117,12 @@ private slots:
     void apply_addsBrandNewAlarm();
     void apply_deletesAlarmRemovedFromDraft();
     void apply_syncsShelvedState();
+    void shelveColumn_isUserCheckableNotReadOnlyText();
+    void checkingShelveBox_appliesToRunningManager();
+    void uncheckingShelveBox_appliesUnshelveToRunningManager();
+    void checkingShelveBox_withoutApply_doesNotTouchRunning();
+    void shelve_isNeverWrittenIntoProjectJson();
+    void newRow_shelveCellIsAlsoCheckable();
     void apply_rejectsUnknownVariableAndChangesNothing();
     void apply_rejectsDuplicateNamesAndChangesNothing();
     void apply_withoutPollSchedulerRefusesToAdd();
@@ -1137,6 +1143,250 @@ void TestAlarmConfigDialog::apply_syncsShelvedState() {
     // 草稿里仍是"已屏蔽" → 运行中也应仍是屏蔽的(不能被应用动作顺手清掉)
     QVERIFY2(mgr_->isShelved(QStringLiteral("温度高")),
              "应用草稿把用户的屏蔽状态弄丢了 —— 这是 F2-c 明令禁止的");
+}
+
+// ---- 屏蔽列可勾选(2026-10-14)----
+//
+// 【这条要守住的是什么】
+//   修复前"已屏蔽"那一列是纯只读文字,用户改不动,于是 applyToRunning()
+//   里那段同步屏蔽状态的分支永远走不到 —— UI 上看着有这一列,
+//   实际上这个功能没有任何入口。
+//   所以下面几条不是"测一个勾选框",是测【勾了之后真的会生效】。
+
+// 勾选框要真的画得出来。修复前那一格是只读文字,没设 CheckStateRole。
+void TestAlarmConfigDialog::shelveColumn_isUserCheckableNotReadOnlyText() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+
+    // 找到"已屏蔽"那一列 —— 按表头文字找,不写死列号,
+    // 免得以后插列时这条用例悄悄指到别的列上(还照样绿)。
+    int col = -1;
+    for (int c = 0; c < table->columnCount(); ++c) {
+        if (table->horizontalHeaderItem(c)
+            && table->horizontalHeaderItem(c)->text() == QStringLiteral("已屏蔽")) {
+            col = c;
+        }
+    }
+    QVERIFY2(col >= 0, "表头里找不到「已屏蔽」这一列");
+
+    auto* item = table->item(0, col);
+    QVERIFY(item);
+
+    // ★ 真正让这一格变成勾选框的是【有没有设过 CheckStateRole】,
+    //   不是 ItemIsUserCheckable 标志 —— 那个标志 QTableWidgetItem
+    //   【默认就带着】,断言它等于什么都没断言(负向对照实测:
+    //   把生产代码里的 "| Qt::ItemIsUserCheckable" 删掉,本用例照样全绿)。
+    //   样式是按 CheckStateRole 画勾选框的:这个角色没值 → 只画文字或不画,
+    //   点了也没反应。修复前"已屏蔽"那列恰恰就是这个状态。
+    QVERIFY2(item->data(Qt::CheckStateRole).isValid(),
+             "「已屏蔽」那一格没设 CheckStateRole —— 表格不会画勾选框,"
+             "点了也没反应,于是 applyToRunning() 里的屏蔽同步分支永远走不到");
+    QVERIFY(!item->flags().testFlag(Qt::ItemIsEditable));
+    QCOMPARE(item->text(), QString());   // 不显示"是" —— 避免两套表示
+}
+
+// 核心用例:勾上 → 草稿变了 → 应用后运行中真的被屏蔽。
+//
+// ★ 这里的勾选是【真的用鼠标点那一格】,不是 setCheckState()。
+//   【为什么不能直接 setCheckState】
+//   setCheckState 是程序写值 —— 它绕过了"这一格到底能不能点"这件事。
+//   实测:把 Qt::ItemIsUserCheckable 去掉之后,本文件里所有 setCheckState
+//   的用例【照样全绿】(负向对照跑出来的)。
+//   而用户能不能真的点得动,恰恰是这次要修的东西。
+//   直接写值的断言测的是"数据通路",不是"用户通路" ——
+//   而这次的用户报障正是"界面上那一列看得见、点不动"。
+void TestAlarmConfigDialog::checkingShelveBox_appliesToRunningManager() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    QVERIFY(!mgr_->isShelved(QStringLiteral("温度高")));
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+
+    int col = -1;
+    for (int c = 0; c < table->columnCount(); ++c) {
+        if (table->horizontalHeaderItem(c)
+            && table->horizontalHeaderItem(c)->text() == QStringLiteral("已屏蔽")) {
+            col = c;
+        }
+    }
+    QVERIFY(col >= 0);
+    QCOMPARE(table->item(0, col)->checkState(), Qt::Unchecked);
+
+    // ★ 真点击勾选框。用户要点的就是那个小方块。
+    //   【为什么不直接点整格中心】
+    //   QStyledItemDelegate::editorEvent 只在鼠标落在
+    //   SE_ItemViewItemCheckIndicator 算出来的那个矩形里才 toggle ——
+    //   点格子正中(哪怕正在这个可勾选的格子上)什么也不会发生。
+    //   这不是本项目的怪癖,是 Qt 对所有勾选列的统一行为。
+    //   写死一个偏移量(比如"往左 10 像素")会在别的 DPI/样式下打到别处,
+    //   所以这里向 style 要那个矩形的真实位置。
+    //
+    //   ★ HasCheckIndicator 这一行【不能省】—— 负向对照实测:
+    //     本机(Qt 6.8.3 + fusion 样式 + offscreen 平台)去掉它,
+    //     subElementRect 返回 QRect(0,0 0x0),直接点格子正中什么也不会发生;
+    //     加回它,返回 QRect(814,5 14x14),点得中。
+    //     也就是说这个标志位就是"这一格画不画勾选框"的总开关。
+    QStyleOptionViewItem opt;
+    opt.initFrom(table);   // 参数必须是视图:QTableWidgetItem 不是 QWidget
+    opt.rect = table->visualItemRect(table->item(0, col));
+    opt.state = QStyle::State_Enabled | QStyle::State_Active;
+    opt.features |= QStyleOptionViewItem::HasCheckIndicator;
+    const QRect checkRect = table->style()->subElementRect(
+        QStyle::SE_ItemViewItemCheckIndicator, &opt, table);
+    QVERIFY2(checkRect.isValid() && !checkRect.isEmpty(),
+             "算不出勾选框的位置 —— 这台机器的样式不给 indicator,"
+             "这条用例没法验证真实点击路径");
+
+    // opt.rect 就是 visualItemRect(已是 viewport 坐标),
+    // 所以 subElementRect 返回的也是 viewport 坐标,直接点它的中心即可。
+    QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      checkRect.center());
+
+    QVERIFY2(table->item(0, col)->checkState() == Qt::Checked,
+             "鼠标点了一下,勾选框没打勾 —— "
+             "这一列对用户仍然是点不动的(检查有没有 setCheckState)");
+
+    // 勾了但还没点"应用":运行中【必须还没变】。
+    // 草稿语义:改了先不生效,点【应用到运行中】才生效。
+    QVERIFY2(!mgr_->isShelved(QStringLiteral("温度高")),
+             "勾选框一勾就改了运行中状态 —— 用户还没点「应用到运行中」");
+
+    // 草稿必须记下来了(这是中间那一步,断了的话 apply 无从判断)
+    QVERIFY2(dlg.shelvedAt(0), "点了勾但草稿没记 —— apply() 会以为用户没改过");
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+    QVERIFY2(mgr_->isShelved(QStringLiteral("温度高")),
+             "点了应用但运行中没被屏蔽 —— 用户的操作被吞了");
+}
+
+// 反向:取消勾选 → 应用后运行中真的解除屏蔽。
+// 只测"能屏蔽"不测"能解除",那这个功能就是个单向门 ——
+// 而 F2-c 明写"屏蔽必须能撤销(不是单向门)"。
+void TestAlarmConfigDialog::uncheckingShelveBox_appliesUnshelveToRunningManager() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    QVERIFY(mgr_->shelve(QStringLiteral("温度高")));
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+
+    int col = -1;
+    for (int c = 0; c < table->columnCount(); ++c) {
+        if (table->horizontalHeaderItem(c)
+            && table->horizontalHeaderItem(c)->text() == QStringLiteral("已屏蔽")) {
+            col = c;
+        }
+    }
+    QVERIFY(col >= 0);
+
+    QVERIFY(dlg.shelvedAt(0));   // 草稿读进来时是屏蔽态
+    table->item(0, col)->setCheckState(Qt::Unchecked);
+    QVERIFY(!dlg.shelvedAt(0));
+
+    QString err;
+    QVERIFY2(dlg.applyDraftToManager(&err), qPrintable(err));
+    QVERIFY2(!mgr_->isShelved(QStringLiteral("温度高")),
+             "取消了勾选但解除不了屏蔽 —— F2-c 明写屏蔽必须可撤销");
+}
+
+// ★ 新增出来的那一行,「已屏蔽」也必须是能点的勾选框。
+//   这不是重复上面那条 —— onAdd() 有【自己一套填表代码】(put() 那一支),
+//   和 reloadFromManager() 不是同一段。两处只要漏一处,那条漏的就复现了:
+//   从工程里读进来的报警能勾,新加的勾不动。
+//   实测:onAdd() 原来对这一列调的是 put(kColShelved, QString()),
+//   而 put() 从不设 CheckStateRole —— 那一格画不出勾选框。
+void TestAlarmConfigDialog::newRow_shelveCellIsAlsoCheckable() {
+    AlarmConfigDialog dlg(mgr_, varMgr_);
+    clickButton(&dlg, QStringLiteral("alarmConfigAddBtn"));
+    QCOMPARE(dlg.rowCount(), 1);
+
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+    int col = -1;
+    for (int c = 0; c < table->columnCount(); ++c) {
+        if (table->horizontalHeaderItem(c)
+            && table->horizontalHeaderItem(c)->text() == QStringLiteral("已屏蔽")) {
+            col = c;
+        }
+    }
+    QVERIFY2(col >= 0, "表头里找不到「已屏蔽」这一列");
+
+    auto* item = table->item(0, col);
+    QVERIFY(item);
+    QVERIFY2(item->data(Qt::CheckStateRole).isValid(),
+             "新增行的「已屏蔽」画不出勾选框 —— onAdd() 的填表代码漏了这一列");
+    QCOMPARE(item->checkState(), Qt::Unchecked);   // 新报警默认未屏蔽
+}
+
+// 草稿语义:勾了不点应用,运行中不许变。
+// 这条单独立一条,因为它是上面那条最容易写漏的一半。
+void TestAlarmConfigDialog::checkingShelveBox_withoutApply_doesNotTouchRunning() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+    QVERIFY(!mgr_->isShelved(QStringLiteral("温度高")));
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+
+    int col = -1;
+    for (int c = 0; c < table->columnCount(); ++c) {
+        if (table->horizontalHeaderItem(c)
+            && table->horizontalHeaderItem(c)->text() == QStringLiteral("已屏蔽")) {
+            col = c;
+        }
+    }
+    QVERIFY(col >= 0);
+
+    table->item(0, col)->setCheckState(Qt::Checked);
+    QVERIFY(dlg.shelvedAt(0));   // 草稿变了
+
+    // 全程没调 applyDraftToManager。
+    QVERIFY2(!mgr_->isShelved(QStringLiteral("温度高")),
+             "没点「应用到运行中」就改了运行中状态 —— "
+             "那用户改了 5 项还没应用,其中 1 项已经悄悄生效了");
+}
+
+// 屏蔽【不落盘】:勾了再存工程文件,导出的 alarms[] 里不能出现 shelved。
+// 这条守的是一个具体的误解 —— 头注释原来就写着"手改 JSON 里的
+// alarms[].shelved",那是假的(CheckerConfig 根本没这个字段),
+// 照着它写代码的人会去 JsonSerializer 里找一个不存在的键。
+void TestAlarmConfigDialog::shelve_isNeverWrittenIntoProjectJson() {
+    useThresholdChecker(mgr_, varMgr_, QStringLiteral("温度高"), QStringLiteral("plc1.Temp"), 80, 0);
+
+    PollScheduler* poll = new PollScheduler(nullptr, nullptr);
+    AlarmConfigDialog dlg(mgr_, varMgr_, poll);
+    dlg.show();
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("alarmConfigTable"));
+    QVERIFY(table);
+
+    int col = -1;
+    for (int c = 0; c < table->columnCount(); ++c) {
+        if (table->horizontalHeaderItem(c)
+            && table->horizontalHeaderItem(c)->text() == QStringLiteral("已屏蔽")) {
+            col = c;
+        }
+    }
+    QVERIFY(col >= 0);
+    table->item(0, col)->setCheckState(Qt::Checked);
+
+    const QString json = dlg.exportDraftToJson();
+    QVERIFY2(!json.contains(QStringLiteral("shelved")),
+             "导出的工程 JSON 里出现了 shelved 字段 —— "
+             "屏蔽是纯运行期状态(AlarmManager::shelved_),从不落盘。"
+             "一旦落盘,换工程时上一台的屏蔽名单会跟着过来");
 }
 
 // ---- 失败路径:必须整体不动 ----

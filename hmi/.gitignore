@@ -101,3 +101,10 @@ build_ninja/
 # 阶段 D · D.2 QCustomPlot 第三方库 — 只跟源码 + 许可证,docs/examples 不进库
 3rdparty/qcustomplot/documentation/
 3rdparty/qcustomplot/examples/
+
+# ===== 阶段 I 路 安装包(2026-10-14) =====
+# install_root/ 是 windeployqt 的产物(35 个文件 / 31 MB),每次打包重新生成,
+# 不进版本库 —— [.gitignore] 里 *.exe/*.dll 已经挡住了二进制,
+# 但 plugins/ 那些 .json/.conf 等文本文件会漏进来,所以显式整目录排除。
+installer/install_root/
+installer/Output/

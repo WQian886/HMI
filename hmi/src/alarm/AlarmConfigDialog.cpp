@@ -313,10 +313,24 @@ AlarmConfigDialog::AlarmConfigDialog(AlarmManager* mgr,
         // 程序性填表也会发这个信号 —— 那时不该回写,否则 fillFormFromRow
         // 里的 blockSignals 只挡住了表单,挡不住表格。
         if (suppressItemChanged_) return;
-        if (!item || item->column() != kColName) return;
+        if (!item) return;
+        if (item->column() != kColName && item->column() != kColShelved) return;
         const int row = table_->row(item);
         if (row < 0 || row >= rows_.size()) return;
-        rows_[row].name = item->text();
+
+        if (item->column() == kColName) {
+            rows_[row].name = item->text();
+        } else {
+            // ★ 屏蔽勾选回写。
+            //   【为什么不直接在这里 shelve/unshelve】
+            //   这个对话框的草稿语义是"改了先不生效,点【应用到运行中】才生效"。
+            //   在勾选的一瞬间就去改运行中状态,等于另开一条绕过"应用"的生效路径 ——
+            //   用户改了 5 项还没点应用,其中 1 项已经生效了,而界面上
+            //   "应用到运行中"那个按钮还在,他会以为什么都没发生。
+            //   跟其他列保持同一条规则:勾选只改草稿,apply() 才落地。
+            rows_[row].shelved = (item->checkState() == Qt::Checked);
+            updateInfo();
+        }
     });
 
     reloadFromManager();
@@ -562,7 +576,42 @@ void AlarmConfigDialog::reloadFromManager() {
         put(kColThreshold,  r.editable ? QString::number(r.threshold, 'g', 6) : QString());
         put(kColMinDur,     r.editable ? minDurText(r.minDurationMs) : QString());
         put(kColHysteresis, r.editable ? QString::number(r.hysteresis, 'g', 6) : QString());
-        put(kColShelved,    r.shelved ? tr("是") : QString());
+
+        // ★ 屏蔽列做成【勾选框】,不是"是"/空的文字。
+        //   【原来这里是纯只读的文字】,于是 apply() 里那段
+        //   "if (isShelved(name) != r.shelved) shelve/unshelve"
+        //   (见下面 applyToRunning 的⑥)永远走不到 —— 用户在这个对话框里
+        //   根本没法改屏蔽状态,只能关掉对话框去改 JSON。
+        //   那一列【显示得出、改不动】,正是本项目反复吃的"看起来能做"假象。
+        //
+        //   【为什么用勾选框而不是双击改文字】
+        //   屏蔽是布尔量,勾选框一眼能看出状态、单击就能切,
+        //   而文字格要双击进编辑模式才知道现在是"是"还是空。
+        //   而且这一列的值不参与任何手输解析 —— 用 checkboxState 走,
+        //   不会有"用户打了个别的字,apply 时当成真"这种歧义。
+        //
+        //   【为什么非阈值报警(WriteFailChecker)也能勾】
+        //   屏蔽拦在 AlarmManager 层,按【名字】查 checkers_,
+        //   而 WriteFailChecker 同样注册在 checkers_ 里(见 reloadFromManager:
+        //   它只是 dynamic_cast 不到 ThresholdAlarmChecker 才标 editable=false)。
+        //   所以"不能改参数"不等于"不能屏蔽" —— 写失败报警恰恰最需要屏蔽。
+        {
+            auto* item = new QTableWidgetItem;
+            // ★ 【真正把这一格变成勾选框的是下面那行 setCheckState】——
+            //   不是这里的 ItemIsUserCheckable 标志。那个标志
+            //   QTableWidgetItem 默认就带着(负向对照实测:删掉它,
+            //   测试全绿),显式写出来只是把"这一格要能勾"这层意图
+            //   摆在明面上,别让人以为去掉也没关系。
+            //   样式是按 CheckStateRole(有没有值)决定画不画勾选框的,
+            //   没值就画不出来,点了也没反应 —— 修复前就是那个状态。
+            item->setFlags((item->flags() | Qt::ItemIsUserCheckable)
+                           & ~Qt::ItemIsEditable);
+            item->setCheckState(r.shelved ? Qt::Checked : Qt::Unchecked);
+            // ★ 不设文字:勾选框自己会画。留个空串而不是 "是",
+            //   否则表格里出现"☑ 是"这种两套表示,读起来像两个字段。
+            item->setText(QString());
+            table_->setItem(i, kColShelved, item);
+        }
         // ★ F6:非阈值报警没有 CheckerConfig,也就没有区域 —— 显示"未分配"
         //   而不是空白,理由同 AlarmHistoryView 的 areaDisplay。
         put(kColArea,       r.area.isEmpty() ? tr("未分配") : r.area);
@@ -885,7 +934,18 @@ void AlarmConfigDialog::onAdd() {
     put(kColThreshold,  QString::number(row.threshold, 'g', 6));
     put(kColMinDur,     minDurText(row.minDurationMs));
     put(kColHysteresis, QString::number(row.hysteresis, 'g', 6));
-    put(kColShelved,    QString());
+    // ★ 屏蔽列不能走 put():put 只处理"清掉可编辑 + 按列给名字开编辑",
+    //   它不会设 CheckStateRole —— 那一格就画不出勾选框,用户点不动。
+    //   【这一条是被测试逼出来的,不是想出来的】新增行原本也走 put(),
+    //   结果从工程读进来的能勾、新加的勾不动 —— 两套填表代码各漏一处。
+    //   和 reloadFromManager 里同一列保持一致(见那里的说明)。
+    {
+        auto* sh = new QTableWidgetItem;
+        sh->setFlags((sh->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
+        sh->setCheckState(Qt::Unchecked);   // 新报警默认未屏蔽
+        sh->setText(QString());
+        table_->setItem(r, kColShelved, sh);
+    }
     // ★ F6:新报警默认未分配。刻意【不】预填第一个区域 ——
     //   预填会让"新增"看起来像"已经归到某个区了",而它其实没有依据。
     put(kColArea,       tr("未分配"));

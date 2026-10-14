@@ -26,9 +26,20 @@
 // ★ 为什么这个对话框必须存在(而不是"继续手改 JSON")
 //   F2 滞回、F2-c 屏蔽都已经落地了,但【没有任何入口能配它们】:
 //     hysteresis 只能手改 JSON 里的 "hysteresis" 键(JsonSerializer.cpp:55)
-//     shelve     只能手改 JSON 里的 alarms[].shelved
+//     shelve     ★ 只能改运行中的状态,手改 JSON 也改不了(见下)
 //   报警配置是一线工程师每天要动的东西,让它只存在于 JSON 里
 //   等于这个功能对真实用户不存在。
+//
+// ★ 【更正一条我自己写错的注释】(2026-10-14)
+//   这里原来写的是 "shelve 只能手改 JSON 里的 alarms[].shelved" ——
+//   **那是假的,而且是本项目最危险的一种假**:照着这句话去找,
+//   会在 JsonSerializer 里找一个根本不存在的字段。
+//   实测:exportDraftToJson() 走的是 CheckerConfig -> JsonSerializer::toJson,
+//   而 CheckerConfig 里【没有 shelved 这个字段】;
+//   AlarmManager 的 shelved_ 是纯运行期集合(AlarmManager.h:178),
+//   换工程 / clearAll() 就没了,**从来不落盘**。
+//   所以屏蔽的真实入口就是本对话框的这一列勾选框 ——
+//   也就是说,在给它做成可勾选之前,**这个功能在 UI 上根本不存在**。
 //
 // ★ 权限
 //   要 EditProject(Permission.h:35)。这条权限枚举定义了但从没人调用过 ——
