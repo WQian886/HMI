@@ -90,11 +90,23 @@ param(
     # 把 MaxMemRatio 拧到 1.0001,内存曲线必须判红。
     # 一个拧到底都不红的判据,等于没有判据。
     # 默认值的来由见下面各自的使用处。
-    [double] $MaxMemRatio    = 2.0,   # 内存超过这个倍数才考虑 FAIL
+    [double] $MaxMemRatio    = 2.0,   # 私有内存超过这个倍数才考虑 FAIL
     [double] $MaxMemPerHour  = 20.0,  # 且每小时涨超过这么多 MB 才算 FAIL(倍数+斜率双条件)
     [double] $WarnMemRatio   = 1.3,   # 超过这个倍数先给 WARN
-    [int]    $MaxHandleDelta = 50,    # 句柄净增超过这个数判 FAIL
-    [int]    $WarnHandleDelta= 10
+    [int]    $MaxHandleDelta = 50,    # 句柄【峰值净增】超过这个数判 FAIL(不是首尾差)
+    [int]    $WarnHandleDelta= 10,
+
+    # ---- idle 检测(2026-10-14 第一轮跑完加的)--------------------------
+    #  为什么加:第一轮 6 分钟跑出 PASS,但同一份数据里 CPU 只从 11.97s
+    #  涨到 13.91s —— 6 分钟才 1.94s,约 0.5% 单核。进程当时停在登录框,
+    #  根本没进业务。一个 idle 进程本来就不涨内存,"没涨"验不出任何东西,
+    #  报 PASS 是把"没能力验"说成"验过了"。这比假绿更隐蔽:
+    #  假绿是量错了,这个是压根没量。
+    #
+    #  默认值 5.0 的来由:第一轮实测 idle 约 0.5%。真正跑着报警引擎 +
+    #  Modbus 轮询的 HMI,CPU 至少要高一个数量级。5.0 留足了余量,
+    #  又不会把"低负载但确实在跑"的现场误判成 idle。
+    [double] $MinCpuPercent = 5.0     # 低于这个占用率判定为 idle
 )
 
 $ErrorActionPreference = 'Stop'
@@ -336,21 +348,74 @@ if ($newCrash.Count -gt 0) {
 #  只看倍数,一个刚启动就分配 200MB 的进程会被误判成泄漏;
 #  只看斜率,缓慢爬升 0.1MB/小时的慢性泄漏永远抓不到(它 100 小时才翻倍)。
 #  两个一起要,才既不误报又不漏报。
-$memRatio = if ($first.WorkingSetMB -gt 0) { $lastN.WorkingSetMB / $first.WorkingSetMB } else { 0 }
-$hdlDelta = $lastN.Handles - $first.Handles
-$memPerHr = ($lastN.WorkingSetMB - $first.WorkingSetMB) / ($spanMin / 60.0)
+#
+#  ★ 2026-10-14 改判据基准:WorkingSetMB → PrivateMB
+#    第一轮实测把这条判据说穿了:
+#        工作集 141.38 → 127.72 MB,斜率 -146.4 MB/小时
+#        私有内存 46.43 → 46.43 MB,全程平
+#    那个 -146.4 不是程序释放了什么,是 Windows 把工作集还给操作系统
+#    (采样中途 11:05:59 一次掉了 13.6 MB,私有内存纹丝不动就是证据)。
+#    按它外推 24h 会得出"-3.5 GB"这种荒谬数,判据没被骗(阈值只看涨),
+#    但它证明的是"没涨",不是"稳" —— 而工作集这个量本来就不该拿来判泄漏:
+#    它含共享页,会被系统随时回收。私有内存才是"这个进程自己占了多少"。
+#    工作集保留在报告里,但只作参考,不参与判定。
+$memRatio = if ($first.PrivateMB -gt 0) { $lastN.PrivateMB / $first.PrivateMB } else { 0 }
+$memPerHr = ($lastN.PrivateMB - $first.PrivateMB) / ($spanMin / 60.0)
+$wsPerHr = ($lastN.WorkingSetMB - $first.WorkingSetMB) / ($spanMin / 60.0)
 
-$memState = 'PASS'
-if ($memRatio -gt $MaxMemRatio -and $memPerHr -gt $MaxMemPerHour) { $memState = 'FAIL' }
+# ★ idle 检测:由相邻采样点的 CPU 增量算平均占用率。
+#   取【全程平均】而不是峰值 —— 峰值会被一次性的启动/加载尖峰顶高,
+#   让一个实际在闲置的进程蒙混过关。
+$cpuSpan = $lastN.CpuSeconds - $first.CpuSeconds
+$cpuPct  = if ($spanMin -gt 0) { ($cpuSpan / ($spanMin * 60.0)) * 100.0 } else { 0 }
+$isIdle  = ($cpuPct -lt $MinCpuPercent)
+
+# idle 时降级为 UNKNOWN:不是"通过",是"这一轮没有资格下结论"。
+# 一个没登录、没连 PLC、没跑报警引擎的进程,内存当然不涨 ——
+# 拿它的平稳去证明"程序不泄漏"是偷换前提。
+if ($isIdle) {
+    $memState = 'UNKNOWN'
+} elseif ($memRatio -gt $MaxMemRatio -and $memPerHr -gt $MaxMemPerHour) { $memState = 'FAIL' }
 elseif ($memRatio -gt $WarnMemRatio) { $memState = 'WARN' }
-Verdict 'SOAK-2' '内存曲线' $memState ("{0} -> {1} MB ({2:N2}x),斜率 {3:N1} MB/小时;线程 {4}->{5};阈值 {6}x & {7}MB/h" -f `
-    $first.WorkingSetMB, $lastN.WorkingSetMB, $memRatio, $memPerHr, $first.Threads, $lastN.Threads,
+else { $memState = 'PASS' }
+
+$memTxt = ("私有内存 {0} -> {1} MB ({2:N3}x),斜率 {3:N2} MB/小时;线程 {4}->{5};阈值 {6}x & {7}MB/h" -f `
+    $first.PrivateMB, $lastN.PrivateMB, $memRatio, $memPerHr, $first.Threads, $lastN.Threads,
     $MaxMemRatio, $MaxMemPerHour)
+if ($isIdle) {
+    $memTxt += ("`n        ★ 本轮进程平均 CPU 仅 {0:N2}%,低于阈值 {1}% —— 判定为 idle。" -f $cpuPct, $MinCpuPercent)
+    $memTxt += "`n        idle 进程本来就不涨内存,这一轮【不构成对程序稳定性的验收】。"
+    $memTxt += "`n        要真验,先登录进主界面、连上 PLC,让报警引擎和轮询跑起来再重跑。"
+}
+$memTxt += ("`n        参考(不参与判定):工作集 {0} -> {1} MB,斜率 {2:N1} MB/小时 —— 这个量会被 Windows 回收" -f `
+    $first.WorkingSetMB, $lastN.WorkingSetMB, $wsPerHr)
+Verdict 'SOAK-2' '内存曲线' $memState $memTxt
+
+# ★ 句柄/线程改用【峰值净增】而不是首尾差。
+#   第一轮实测:句柄 813 → 817 → 813,首尾相等,老算法报"净增 0,PASS"。
+#   但中途确实多过 4 个句柄、3 个线程 —— 首尾相等把"涨过又落回去"盖住了。
+#   泄漏常常正是这种形状(周期性建资源、用完释放),只看首尾永远看不见。
+#   峰值法还能区分"一路单调涨"(真泄漏)和"来回抖动"(正常业务)。
+$hdlMax = ($samples | Measure-Object Handles -Maximum).Maximum
+$thrMax = ($samples | Measure-Object Threads  -Maximum).Maximum
+$hdlPeak = $hdlMax - $first.Handles
+$thrPeak = $thrMax - $first.Threads
+$hdlNet  = $lastN.Handles - $first.Handles
 
 $hdlState = 'PASS'
-if ($hdlDelta -gt $MaxHandleDelta) { $hdlState = 'FAIL' } elseif ($hdlDelta -gt $WarnHandleDelta) { $hdlState = 'WARN' }
-Verdict 'SOAK-3' '句柄/线程' $hdlState ("句柄 {0} -> {1}({2:+#;-#;0});线程 {3} -> {4}" -f `
-    $first.Handles, $lastN.Handles, $hdlDelta, $first.Threads, $lastN.Threads)
+if ($isIdle) {
+    $hdlState = 'UNKNOWN'
+} elseif ($hdlPeak -gt $MaxHandleDelta) { $hdlState = 'FAIL' }
+elseif ($hdlPeak -gt $WarnHandleDelta) { $hdlState = 'WARN' }
+
+$hdlTxt = ("句柄 首{0}/峰{1}/尾{2}(峰值净增 {3},首尾差 {4});线程 首{5}/峰{6}/尾{7}" -f `
+    $first.Handles, $hdlMax, $lastN.Handles, $hdlPeak, $hdlNet,
+    $first.Threads, $thrMax, $lastN.Threads)
+if ($hdlPeak -gt 0 -and $hdlNet -eq 0) {
+    $hdlTxt += "`n        ★ 中途涨过又落回去了 —— 首尾相等会把它掩盖成'没变',所以这里报峰值。"
+}
+if ($isIdle) { $hdlTxt += "`n        (同 SOAK-2:进程 idle,本轮不构成验收)" }
+Verdict 'SOAK-3' '句柄/线程' $hdlState $hdlTxt
 
 # --- 4. 日志 ---
 $lines = @(Get-LogTail 0)
@@ -396,6 +461,16 @@ Say ""
 Say "采样点 $tick 个,跨度 $([math]::Round($spanMin,1)) 分钟" 'Gray'
 Say "样本: $csvPath" 'Gray'
 Say "判定: $reportPath" 'Gray'
+
+# ★ idle 横幅:放最显眼的位置。这轮如果 idle,上面所有 UNKNOWN 都是同一个原因,
+#   不单独说一句的话,读报告的人容易只扫到别的 PASS 就以为验过了。
+if ($isIdle) {
+    Say "" ; Say "════════════════════════════════════════════════════" 'Red'
+    Say ("★ 本轮没有结论(进程 idle,平均 CPU {0:N2}%)" -f $cpuPct) 'Red'
+    Say "  进程没在跑业务 —— 资源曲线平坦是必然的,不是'稳定'的证据。" 'Red'
+    Say "  先登录进主界面并连上 PLC,再重跑。退出码 4 表示'没验成'。" 'Red'
+    Say "════════════════════════════════════════════════════" 'Red'
+}
 Say "" ; Say "⚠ 外推警告:上面 24h 的数字是拿 $spanMin 分钟的线性斜率乘出来的。" 'Yellow'
 Say "  泄漏通常不是线性的(定时器累积、缓存到阈值才涨),线性外推会【低估】。" 'Yellow'
 Say "  想真知道 24 小时什么样,就得真跑 24 小时。" 'Yellow'
@@ -405,8 +480,17 @@ Say "  想真知道 24 小时什么样,就得真跑 24 小时。" 'Yellow'
 #   任何拿 $LASTEXITCODE 做门禁的东西(CI、定时任务、一行 if 判断)
 #   都会把一次 FAIL 读成成功 —— 报告里红着,程序说"没事"。
 #   报告给人看,退出码给机器判,两个必须一致。
+#
+#   ★ 2026-10-14 新增 exit 4 = 本轮没有结论。
+#   idle 时所有资源判据都是 UNKNOWN,拿 0 告诉调用方"验过了"是撒谎:
+#   调用方无法区分"验过没问题"和"根本没能力验"。
+#   给它一个专属码,想把它当门禁的人必须显式决定怎么办(通常是不该算通过)。
+#   4 不与 1/3 冲突,调用方可以分别对待"验出问题"和"没验成"。
 $failCount = @($report | Where-Object { $_ -match '^\[FAIL\]' }).Count
 $warnCount = @($report | Where-Object { $_ -match '^\[WARN\]' }).Count
+$unkCount  = @($report | Where-Object { $_ -match '^\[UNKNOWN\]' }).Count
+
 if ($failCount -gt 0) { exit 1 }
 if ($warnCount -gt 0) { exit 3 }
+if ($unkCount  -gt 0) { exit 4 }
 exit 0
