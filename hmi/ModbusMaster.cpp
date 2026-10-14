@@ -38,6 +38,9 @@ ModbusMaster::ModbusMaster(QObject* parent) : QObject(parent) {
     timeoutTimer_ = new QTimer(this);
     // ★ IMPROVE-A8(2026-07-29):50ms → 100ms,跟 PollScheduler/WriteScheduler 对齐(都是 100ms tick)
     //   100ms 精度下超时检测仍 30 tick 才超 3s,完全够
+    // ★ 2026-10-14:【这一行是全项目唯一的真实定义处】。
+    //   槽声明 ModbusMaster.h:71 原写"50ms 周期扫"一直没人改,跟这里对不上 ——
+    //   两处数字打架最容易让人按旧注释去"修"这里。已把 .h 那处改成 100ms。
     timeoutTimer_->setInterval(100);
     connect(timeoutTimer_, &QTimer::timeout, this, &ModbusMaster::onTimeoutScan);
     timeoutTimer_->start();

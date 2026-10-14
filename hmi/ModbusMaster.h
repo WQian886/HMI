@@ -68,7 +68,12 @@ private slots:
     // TCP 数据到达 → 拆 MBAP 头 + 按 type 分发拆帧
     void onTcpReadyRead(const QByteArray& data);
 
-    // 50ms 周期扫 pending_,超时请求清理
+    // 100ms 周期扫 pending_,超时请求清理
+    // ★ 2026-10-14 更正:这里原来写的是 50ms,早就不准了 ——
+    //   ModbusMaster.cpp:41 是 timeoutTimer_->setInterval(100),
+    //   同类两个文件两个数字。定这个数的是 IMPROVE-A8(2026-07-29),
+    //   为了跟 PollScheduler / WriteScheduler 的 100ms tick 对齐。
+    //   改任何一处记得两处一起改。
     void onTimeoutScan();
 
 private:

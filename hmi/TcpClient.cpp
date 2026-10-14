@@ -152,8 +152,18 @@ void TcpClient::onSocketDisconnected() {
     // 原因:onSocketError 已经先调了 scheduleReconnect(决定 UI 橙/红)
     //      如果这里再 emit disconnected → hmi 端 onTcpDisconnected 会把 UI 覆盖成 Disconnected(灰)
     // 修复:被动断开时,onSocketError 已经接管了所有事(状态由 scheduleReconnect 决定)
-    //      主动调 scheduleReconnect(让重连机制接管),靠 isActive 防重入
-    scheduleReconnect();   // 防重入检查:isActive 时 return,无副作用
+    //      主动调 scheduleReconnect(让重连机制接管)
+    //
+    // ★★ 2026-10-14 更正下面这行注释(原来写"靠 isActive 防重入",已过期):
+    //   scheduleReconnect 里有【两道】闸,顺序是
+    //     第 1 道  reconnectAbandoned_   ← 真正的第一道闸
+    //     第 2 道  reconnectTimer_->isActive()
+    //   2026-10-10 修 #2 之前只有第 2 道。修完之后【第 1 道才是关键】——
+    //   "重试到上限放弃"那条分支故意不启动定时器,isActive() 必然为 false,
+    //   单靠它挡不住紧跟其后的 disconnected。
+    //   (完整推理见 scheduleReconnect 里 #2 的长注释)
+    //   别照着旧注释以为"这里只受 isActive 保护" —— 那会漏掉放弃态的粘住语义。
+    scheduleReconnect();
 }
 
 void TcpClient::onSocketReadyRead() {
