@@ -95,31 +95,122 @@ quint8 ModbusMaster::typeToWriteFc(QModbusDataUnit::RegisterType type, bool sing
 }
 
 // ============================================================
+// 大端写入 —— 改善清单 #13(2026-10-14)
+// ============================================================
+//
+// 【为什么有这个小函数】改之前全文件有 10 处
+// `body.append(static_cast<char>((x >> 8) & 0xFF)); body.append(...(x & 0xFF));`
+// ——同一件事抄了 10 遍,而"字节序反了"正好是这段代码最容易犯又最难看的错。
+// 收成一个具名函数之后:要错只能错一次,而且 grep appendBE16 就能找全。
+//
+// 【为什么是 qToBigEndian】它在 Qt 里是【无条件】大端(不像 qFromLittleEndian
+// 依赖宿主字节序),语义就是"协议要的那个顺序"。
+//
+// 【为什么不直接 qToBigEndian 到 QByteArray】qToBigEndian 的签名要 uchar*,
+// 指向一个已分配好的 2 字节缓冲区,不能往可能尚未分配内存的 QByteArray 上写。
+// 所以先落到栈上 2 字节,再 append 进去。
+static inline void appendBE16(QByteArray& out, quint16 v) {
+    uchar be[2];
+    qToBigEndian<quint16>(v, be);
+    out.append(reinterpret_cast<const char*>(be), 2);
+}
+
+// ============================================================
+// PDU body 组装(★ 2026-10-14 从 sendReadRequest / sendWriteRequest 提取)
+// ============================================================
+//
+// 【为什么要提取成静态函数】原来这两段内联在发送函数里,而发送函数要真连上
+// PLC 才走得到 —— 于是本机没有 PLC 时,PDU 的每一个字节都【从未被验证过】。
+// 协议字节序错了是从站"一直超时"或 Illegal Data Value 的经典原因,
+// 而这类问题在真机联调前根本发现不了。提成静态纯函数后离线可断言完整 body。
+//
+// 【byteCount 的取法】0x0F 多线圈是 ceil(N/8) 向上取整(9 个线圈 = 2 字节,
+// 不是 1 字节 —— 截断会把第 9 个线圈整条丢掉)。0x10 多寄存器是 N*2。
+// 两者不能混用,见下面那句 2026-07-13 的教训注释。
+
+// 读请求 body = addr(2) + count(2)
+QByteArray ModbusMaster::buildReadBody(quint16 addr, quint16 count) {
+    QByteArray body;
+    body.reserve(4);
+    appendBE16(body, addr);
+    appendBE16(body, count);
+    return body;
+}
+
+// 写请求 body(格式随 fc 变,见头文件注释)
+QByteArray ModbusMaster::buildWriteBody(quint8 fc, quint16 addr, const QList<quint16>& values) {
+    QByteArray body;
+    const int n = values.size();
+
+    // 写单(0x05 线圈 / 0x06 保持寄存器):body = addr(2) + value(2)
+    // 只有 1 个值时才走这条 —— 由调用方按 values.size()==1 判定 fc。
+    if (n == 1) {
+        body.reserve(4);
+        appendBE16(body, addr);
+        appendBE16(body, values.first());
+        return body;
+    }
+
+    body.reserve(5 + n * 2);
+    appendBE16(body, addr);
+    appendBE16(body, quint16(n));
+
+    if (fc == 0x0F) {
+        // 0x0F 多线圈 → bit-pack
+        // 协议:byteCount = ceil(N/8),每字节 8 个线圈(LSB first),余下 bit 补 0
+        // 2026-07-13 阶段 2 第 7 练:之前误用 0x10 格式发 0x0F,ModbusSlave 报
+        // Illegal Data Value —— 这条注释别删,它记的是一次真实联调事故。
+        const int byteCount = (n + 7) / 8;  // 向上取整
+        body.append(static_cast<char>(byteCount));
+        QByteArray coils(byteCount, '\x00');  // 默认 0(余下 bit 也是 0)
+        for (int i = 0; i < n; ++i) {
+            // 只取最低位:输 0/1/0xFF00/0x0000 都接受,统一按 BOOL 解释
+            if (values.at(i) & 0x01) {
+                coils[i / 8] = coils[i / 8] | static_cast<char>(0x01 << (i % 8));
+            }
+        }
+        body.append(coils);
+    } else {
+        // 0x10 多寄存器:每值 2 字节大端
+        body.append(static_cast<char>(n * 2));
+        for (quint16 v : values) {
+            appendBE16(body, v);
+        }
+    }
+    return body;
+}
+
+// ============================================================
 // 帧组装 helper
 // ============================================================
 // 2026-07-07 新增:所有功能码走同一个 frame builder
+//
+// ★ 2026-10-14(改善清单 #13):手写移位换成 qToBigEndian。
+//   【改动前先把字节钉成基线】—— tst_ModbusFrame.cpp。
+//   在此之前 ModbusMaster 组出来的字节【零测试覆盖】,而"零行为变化"
+//   这句话没有任何东西能证明。协议字节序错了是从站不响应的经典原因,
+//   现场表现是"一直超时",而且本机没有 PLC 时根本验不了。
+//   负向对照(改坏 → 必须变红 → 还原)已跑:
+//     · TID 改成小端   → 2 条用例红
+//     · Length 把自己算进去 → 4 条用例红
+//
+//   【为什么 qToBigEndian 更该用】
+//   手写 `static_cast<char>((x >> 8) & 0xFF)` 要人心里记着"先高后低",
+//   而"高低字节反了"正好就是上面那条负向对照 —— 一个肉眼很难在
+//   几十行里发现的错误。qToBigEndian 把这件事交给一个具名函数,
+//   而且它在 Qt 里是【无条件】大端,不像 qFromLittleEndian 那样依赖宿主字节序。
 QByteArray ModbusMaster::buildFrame(quint16 tid, int serverAddress, quint8 fc, const QByteArray& pduBody) {
     // MBAP 头 7 字节:Transaction ID(2) + Protocol(2=0) + Length(2) + Unit ID(1)
-    // Length = 后续字节数(UID 1 + PDU fc 1 + body)
+    // Length = 后续字节数(UID 1 + PDU fc 1 + body),【不含 Length 自己那 2 字节】
     QByteArray frame;
     frame.reserve(7 + pduBody.size() + 1);
 
-    // TID
-    frame.append(static_cast<char>((tid >> 8) & 0xFF));
-    frame.append(static_cast<char>(tid & 0xFF));
-    // Protocol
-    frame.append('\x00');
-    frame.append('\x00');
-    // Length
-    quint16 len = 1 + 1 + pduBody.size();  // UID + FC + body
-    frame.append(static_cast<char>((len >> 8) & 0xFF));
-    frame.append(static_cast<char>(len & 0xFF));
-    // Unit ID
-    frame.append(static_cast<char>(serverAddress & 0xFF));
-    // FC
-    frame.append(static_cast<char>(fc));
-    // body (addr + data)
-    frame.append(pduBody);
+    appendBE16(frame, tid);                                    // Transaction ID
+    appendBE16(frame, 0x0000);                                 // Protocol(恒 0)
+    appendBE16(frame, quint16(1 + 1 + pduBody.size()));        // Length = UID + FC + body
+    frame.append(static_cast<char>(serverAddress & 0xFF));      // Unit ID(1 字节)
+    frame.append(static_cast<char>(fc));                        // Function Code
+    frame.append(pduBody);                                      // PDU body(addr + data)
 
     return frame;
 }
@@ -155,14 +246,11 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
         return nullptr;
     }
 
-    // 组 PDU body:addr(2) + count(2)
-    QByteArray body;
+    // 组 PDU body:addr(2) + count(2)  —— ★ 2026-10-14 提取成 buildReadBody()
+    //   【为什么提取】这段要真连上 PLC 才走得到,离线测不到;
+    //   而 PDU 字节序错了是从站报 Illegal Data Value 的经典原因。
     int addr = readUnit.startAddress();
-    body.append(static_cast<char>((addr >> 8) & 0xFF));
-    body.append(static_cast<char>(addr & 0xFF));
-    int count = readUnit.valueCount();
-    body.append(static_cast<char>((count >> 8) & 0xFF));
-    body.append(static_cast<char>(count & 0xFF));
+    QByteArray body = buildReadBody(quint16(addr), quint16(readUnit.valueCount()));
 
     // ★ BUGFIX-A1(2026-07-30):改回 quint16,跟 buildFrame 形参对齐(防 0xFFFF+ 截断)
     quint16 tid = ++nextTid_;
@@ -189,7 +277,7 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
 
     qDebug() << "[ModbusMaster] 已发读 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID=" << tid << "slave=" << serverAddress
-             << "addr=" << addr << "count=" << count
+             << "addr=" << addr << "count=" << readUnit.valueCount()
              << "reqId=" << requestId
              << "frame=" << frame.toHex(' ').toUpper();
 
@@ -227,7 +315,6 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
 
     // 单写 vs 多写:Coils/Holding 时按 value 数量决定
     quint8 fc;
-    QByteArray body;
     int addr = writeUnit.startAddress();
     const auto& values = writeUnit.values();
 
@@ -238,46 +325,9 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
         return nullptr;
     }
 
-    if (single) {
-        // 写单:body = addr(2) + value(2)
-        body.append(static_cast<char>((addr >> 8) & 0xFF));
-        body.append(static_cast<char>(addr & 0xFF));
-        quint16 v = values.first();
-        body.append(static_cast<char>((v >> 8) & 0xFF));
-        body.append(static_cast<char>(v & 0xFF));
-    } else {
-        // 写多:按 fc 分开处理
-        // 0x0F 多线圈:body = addr(2) + count(2) + byteCount(1) + bit-packed bytes(LSB first)
-        // 0x10 多寄存器:body = addr(2) + count(2) + byteCount(1) + values(N*2 字节,大端)
-        // 2026-07-13 阶段 2 第 7 练:之前误用 0x10 格式发 0x0F,ModbusSlave 报 Illegal Data Value
-        body.append(static_cast<char>((addr >> 8) & 0xFF));
-        body.append(static_cast<char>(addr & 0xFF));
-        body.append(static_cast<char>((values.size() >> 8) & 0xFF));
-        body.append(static_cast<char>(values.size() & 0xFF));
-
-        if (fc == 0x0F) {
-            // 2026-07-13 阶段 2 第 7 练:0x0F 写多线圈 → bit-pack
-            // 协议:byteCount = ceil(N/8),每字节 8 个线圈(LSB first),余下 bit 补 0
-            int n = values.size();
-            int byteCount = (n + 7) / 8;  // 向上取整
-            body.append(static_cast<char>(byteCount));
-            QByteArray coils(byteCount, '\x00');  // 默认 0(余下 bit 也是 0)
-            for (int i = 0; i < n; ++i) {
-                // 只取最低位:输 0/1/0xFF00/0x0000 都接受,统一按 BOOL 解释
-                if (values.at(i) & 0x01) {
-                    coils[i / 8] = coils[i / 8] | static_cast<char>(0x01 << (i % 8));
-                }
-            }
-            body.append(coils);
-        } else {
-            // 0x10 多寄存器:每值 2 字节大端
-            body.append(static_cast<char>(values.size() * 2));
-            for (quint16 v : values) {
-                body.append(static_cast<char>((v >> 8) & 0xFF));
-                body.append(static_cast<char>(v & 0xFF));
-            }
-        }
-    }
+    // ★ 2026-10-14:body 组装提取成 buildWriteBody(),理由同 buildReadBody。
+    //   原本这段 40 行内联在这里,离线一条都测不到。
+    QByteArray body = buildWriteBody(fc, quint16(addr), values);
 
     // ★ BUGFIX-A1(2026-07-30):改回 quint16,跟 buildFrame 形参对齐(防 0xFFFF+ 截断)
     quint16 tid = ++nextTid_;

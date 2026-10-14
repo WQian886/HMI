@@ -209,6 +209,11 @@ add_hmi_test(tst_IPollDriver)
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
 add_hmi_test(tst_TcpClient)
+# ★ 2026-10-14:ModbusMaster 帧组装基线(改善清单 #13)
+#   ModbusMaster 从阶段 2 就是核心类,此前 69 个测试目标里【零个】
+#   断言过它组出来的任何一个字节 —— 而清单把 #13 标成"零行为变化"。
+#   没有这层钉子,"零行为变化"只是一句没人验证过的话。
+add_hmi_test(tst_ModbusFrame)
 # 阶段 C · C.4 协议选择 UX 锁(教训 1.5)
 add_hmi_test(tst_ProtocolSwitch)
 # ★ 2026-10-10:协议可用性(UI 置灰 S7/EIP 的查表)

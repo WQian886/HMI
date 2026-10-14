@@ -110,6 +110,7 @@ private:
 	QByteArray buildFrame(quint16 tid, int serverAddress, quint8 fc, const QByteArray& pduBody);// 组装请求帧
 	void handleReadResponse(quint8 fc, Pending* req, const QByteArray& frame);// 处理读响应帧
 	void handleWriteResponse(quint8 fc, Pending* req, const QByteArray& frame);// 处理写响应帧
+	// (buildFrameForTest 在下面 public 段 —— 见那里的说明)
 
 	// ★ IMPROVE-B5(2026-07-29):错误收尾 helper,5 处重复 setError/setFinished/deleteLater 提一处
 	//   【背景】异常响应 / 帧太短 / 数据不足 / echo 错 等错误路径都重复:
@@ -126,6 +127,42 @@ private:
 public:
     // 阶段 4.3.0 调试暴露:WriteScheduler 用它判断"上一帧未完成"避免自己撞自己
     int pendingCount() const { return pending_.size(); }
+
+    // ★ 2026-10-14:buildFrame 的测试出口(改善清单 #13)。
+    //   【为什么需要】ModbusMaster 从阶段 2 起就是核心类,69 个测试目标里
+    //   【零个】断言过它组出来的任何一个字节 —— 直到要做 #13
+    //   (把手写大端 static_cast<char>((x>>8)&0xFF) 换成 qToBigEndian)才发现:
+    //   清单把 #13 标成"纯可读性,零行为变化",而这句话【没有任何测试支撑】,
+    //   没有任何东西能证明换完字节一样。这正是本项目反复吃的
+    //   "看起来安全的重构":改了没人知道,坏了也没人知道。
+    //   先把这个出口加上、把现字节钉成基线,再动生产代码。
+    //
+    //   【边界】只暴露纯函数式的帧组装,不碰 pending_/tcp_/socket,
+    //   所以不需要真连 PLC 就能断言完整 MBAP 头。
+    //   见 tests/tst_ModbusFrame.cpp。
+    QByteArray buildFrameForTest(quint16 tid, int serverAddress, quint8 fc, const QByteArray& pduBody) {
+        return buildFrame(tid, serverAddress, fc, pduBody);
+    }
+
+    // ★ 2026-10-14:PDU body 组装(改善清单 #13 从 sendReadRequest/sendWriteRequest 里提取)
+    //
+    //   【为什么要提取】这两段原来是内联在两个发送函数里的,加上 buildFrame,
+    //   全文件有 10 处手写 `static_cast<char>((x >> 8) & 0xFF)`。
+    //   内联在发送函数里还有个更实际的后果:**离线测不到** ——
+    //   它们要真连上 PLC 才走得到,所以本机没有 PLC 时这些字节从来没被验证过。
+    //   提成静态函数后不需要连接就能断言完整 body。
+    //
+    //   【提成静态(不依赖实例)】它们只用到入参,不碰 pending_/tcp_,
+    //   所以是纯函数 —— 纯函数才值得单测。
+    //
+    //   读请求 body = addr(2) + count(2)
+    static QByteArray buildReadBody(quint16 addr, quint16 count);
+
+    // 写请求 body,按 fc 分两种格式(见 .cpp 里那句"之前误用 0x10 格式发 0x0F"的注释):
+    //   0x05/0x06 写单   = addr(2) + value(2)
+    //   0x0F 多线圈      = addr(2) + count(2) + byteCount(1) + bit-packed(LSB first)
+    //   0x10 多寄存器    = addr(2) + count(2) + byteCount(1) + values(N*2,大端)
+    static QByteArray buildWriteBody(quint8 fc, quint16 addr, const QList<quint16>& values);
 
 private:
     TcpClient* tcp_ = nullptr;
