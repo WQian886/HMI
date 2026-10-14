@@ -154,20 +154,54 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/crash/CrashHandler.cpp
 )
 
+# ============================================================
+# ★★ 2026-10-14:核心源抽成静态库(解决 CI 编不完)
+#
+# 【问题】上面这 78 个源文件原本被【每一个】测试目标各编一遍。
+#   72 个测试 × 78 个源 + AUTOMOC 产物 = 5904 个编译目标。
+#   CI(2 核 runner)实测:编到 [4352/5904] = 74% 就撞上 120 分钟超时线,
+#   日志末尾 "ninja: build stopped: interrupted by user"。
+#   按实测吞吐(0.61 个/秒)推算,编完需 160 分钟 + 开销 ≈ 164 分钟。
+#   ★ 注意:【换 Ninja 生成器没能解决这个问题】——
+#     换完主程序编译从 4.5 分降到 2.6 分(确实更快),
+#     但整体吞吐仍被 2 核 runner 的硬件差距锁死(CI 比本机慢 7 倍)。
+#     详见 .github/workflows/build.yml 里那段实测记录。
+#
+# 【凭什么认为抽库能解决】—— 按【字节】实测(build_ninja,5762 obj / 3834 MB):
+#     qcustomplot.cpp        72 份 × 13.5 MB = 973 MB  = 25.2%  ← 3rdparty,最重
+#     核心源 moc 产物        72 份 ×  8.4 MB = 606 MB  = 15.6%
+#     其余核心源             72 份 ×  ~1 MB = ~1725 MB = 44.3%
+#     各测试自己的 tst_*.cpp 各 1 份                  =  1.5%  ← 这不是冗余
+#   这三项都是【每份完全一样】的重复编译,静态库化后各只编 1 次。
+#
+# ★ 这里记一条我今天犯的错(免得下一个人重蹈):
+#   我一度用"核心源占编译【次数】的 98.5%"推出"时间能省 98.5%,
+#   CI 164 分钟能降到 3 分钟"—— 【那是拿次数当时间】,不成立。
+#   次数和耗时权重完全不同(moc 和 qcustomplot 的体积能顶几十个普通源)。
+#   要估时间必须按【字节】或【实测时长】,不能按出现次数。
+#   上面这张表是按字节量的,可用;按次数算的那句不可用。
+# ============================================================
+add_library(hmi_core STATIC ${HMI_CORE_SOURCES})
+target_compile_options(hmi_core PRIVATE /utf-8)
+target_link_libraries(hmi_core PUBLIC
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets   # ★ B4:UIPermission.cpp 需要 QAbstractButton / QAction
+    Qt6::Network   # ★ C.0:Project.cpp 间接 include QTcpSocket(TcpClient.h)
+    Qt6::SerialBus  # ★ C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 依赖)
+    Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库 + HistoryRecorder
+    Qt6::PrintSupport  # ★ D.2(2026-09-20):QCustomPlot 需要 QPrinter
+)
+
 function(add_hmi_test test_name)
+    # ★ 现在只编这一个测试自己的源,核心源由 hmi_core 提供。
+    #   Qt6::Test 仍要单独链(核心源不用它,但测试本身要)。
     add_executable(${test_name}
         ${test_name}.cpp
-        ${HMI_CORE_SOURCES}
     )
     target_link_libraries(${test_name} PRIVATE
-        Qt6::Core
-        Qt6::Gui
+        hmi_core
         Qt6::Test
-        Qt6::Widgets   # ★ B4:UIPermission.cpp 需要 QAbstractButton / QAction
-        Qt6::Network   # ★ C.0:Project.cpp 间接 include QTcpSocket(TcpClient.h)
-        Qt6::SerialBus  # ★ C.0:PollScheduler.h include QModbusDataUnit(ThresholdAlarmChecker 依赖)
-        Qt6::Sql        # ★ D.1(2026-09-18):SQLite 历史库 + HistoryRecorder
-        Qt6::PrintSupport  # ★ D.2(2026-09-20):QCustomPlot 需要 QPrinter
     )
     target_compile_options(${test_name} PRIVATE /utf-8)
     add_test(NAME ${test_name} COMMAND ${test_name})
@@ -175,10 +209,10 @@ endfunction()
 
 # ★ 2026-10-10:把协议下拉框真的渲染出来存 PNG(见 tst_ProtocolComboShot.cpp 头注)
 #   不用 add_hmi_test,因为它要额外的 UiTools 和两个路径宏。
-add_executable(tst_ProtocolComboShot tst_ProtocolComboShot.cpp ${HMI_CORE_SOURCES})
+add_executable(tst_ProtocolComboShot tst_ProtocolComboShot.cpp)
 target_link_libraries(tst_ProtocolComboShot PRIVATE
+    hmi_core
     Qt6::Core Qt6::Gui Qt6::Test Qt6::Widgets Qt6::UiTools
-    Qt6::Network Qt6::SerialBus Qt6::Sql Qt6::PrintSupport
 )
 target_compile_options(tst_ProtocolComboShot PRIVATE /utf-8)
 target_compile_definitions(tst_ProtocolComboShot PRIVATE
