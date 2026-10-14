@@ -9,7 +9,10 @@
 //     → 写 pending.txt(下次启动读这个,知道有未处理 dump)
 //   下次启动 main() → hasPendingDump() → 弹"上次异常退出" → takePendingDump()
 //
-// dump 文件大小:几 MB 到几十 MB(取决于程序内存);位置 %APPDATA%/HMI/crash/
+// dump 文件大小:几 MB 到几十 MB(取决于程序内存)
+// 位置:%LOCALAPPDATA%/QianWei/HMI/crash/
+//   (原注释写的是 %APPDATA%/HMI/crash/ —— 两个地方都不对:Qt 的
+//    AppLocalDataLocation 落在 Local 而非 Roaming,且中间还有一层 org。)
 //
 // 详见:CrashHandler.h 和 docs/阶段A_工程化基线.md
 // ============================================================================
@@ -99,8 +102,32 @@ void install() {
 }
 
 QString dumpDirectory() {
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    return base + QStringLiteral("/crash");
+    // 覆盖开关 HMI_CRASH_DIR。存在的理由有两个,都实在:
+    //   · 运维:客户现场的 dump 要收集到已知路径,靠猜 %LOCALAPPDATA% 不现实
+    //   · 测试:tst_CrashHandler 会 takePendingDump(),那【会删 marker】。
+    //     不隔离的话,测试一跑就把现场那个真实的 pending.txt 删了。
+    //   两条路径都要求它【显式】,不会有人不小心设上。
+    const QByteArray overrideDir = qgetenv("HMI_CRASH_DIR");
+    if (!overrideDir.isEmpty()) {
+        return QFile::decodeName(overrideDir);
+    }
+
+    // ★ 用 GenericDataLocation(纯环境变量)+ 本模块常量拼,
+    //   【不读 QCoreApplication 的 org/app 全局状态】。
+    //
+    //   原来用的是 AppLocalDataLocation —— 那个值含 <org>/<app>,
+    //   取决于调用方什么时候设好了 org/app。而写 dump 的时刻
+    //   (崩溃瞬间,org/app 早设好了)和读标记的时刻(启动最早期,
+    //   main() 还没设)拿到的就是两个不同的目录,于是标记永远读不到。
+    //   整件事静默发生 28 天,现场那个 pending.txt 就是证据。
+    //
+    //   改成纯函数之后,"调用方的调用顺序"再也不可能影响 dump 去哪 ——
+    //   这比单纯把 main() 的语句调个顺序更可靠:顺序是被注释约束着的,
+    //   而纯函数是被测试守着的。
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    return base + QLatin1Char('/') + QLatin1String(kOrgName)
+         + QLatin1Char('/') + QLatin1String(kAppName)
+         + QStringLiteral("/crash");
 }
 
 bool hasPendingDump() {

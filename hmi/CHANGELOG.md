@@ -1,9 +1,95 @@
 # CHANGELOG
 
-> 最后核对：**2026-10-14**（基于代码核对：`ctest` **68 个目标 68 通过**，
+> 最后核对：**2026-10-14**（基于代码核对：`ctest` **69 个目标 69 通过**，
 > `hmi.vcxproj` 经 **MSBuild** 编译通过、`hmi.exe` 产出 6.68 MB）
 
 ## [Unreleased] - 2026-10-14
+
+### fix(crash): 崩溃 dump 的消费端断了 28 天 —— 写和读的不是同一个目录
+
+`crash/pending.txt` 停在 `2026-09-16T09:34:10` / `exception_code=0xC0000005`,
+**92 次启动从它身边走过,全程零报错**。
+
+根因不是逻辑 bug,是**路径算错了地方**。`dumpDirectory()` 用
+`QStandardPaths::AppLocalDataLocation`,它含 `<org>/<app>`,而 `main.cpp`
+把 `setOrganizationName/setApplicationName` 排在 `crash::install()` /
+`hasPendingDump()` **后面**:
+
+| 时机 | org/app | 落点 |
+|---|---|---|
+| **崩溃发生的那一瞬间** | ✅ 早已设好 | `AppData/Local/QianWei/HMI/crash/` ← dump 真在这 |
+| 启动时 `hasPendingDump()` | ❌ 未设 | `AppData/Local/crash/` ← 从没写进去过 |
+
+`AppData/Local/crash/` 这个空壳 **2026-09-08 16:28:38 就建好了** ——
+正是本项目第一次运行的时间,说明这个顺序 bug 从第一天起就在。
+
+叠加的第二个问题:`main.cpp` 原本在 `QApplication` 构造**之前**就
+`QMessageBox box; ... box.exec();`。`QMessageBox` 是 `QWidget`,
+没有 `QApplication` 实例构造即 abort —— **就算路径对了,弹框自己也会打死进程**。
+
+**为什么 28 天没人发现**:`CrashHandler.cpp` 此前**零测试覆盖** ——
+它根本不在 `hmi/tests/CMakeLists.txt` 的 `HMI_CORE_SOURCES` 里。
+「写 dump」和「崩了有人知道」是两件事,后者从没被测过。
+
+修法(不是简单调 `main()` 顺序):把 dump 路径改成**纯函数** ——
+`GenericDataLocation` + 常量拼接,完全不读 `QCoreApplication` 的全局状态。
+**顺序是靠注释约束的,纯函数是靠测试守着的**;只要"调用方什么时候设了什么"
+还会漂移,漂移的后果就是崩了却没留下任何可分析的现场。
+
+- org/app 收成 `crash::kOrgName` / `kAppName`,`main.cpp` 也从那儿取
+- `main.cpp`:元数据提到最前;弹框挪到 `QApplication` + SingleInstance 之后
+  (后者顺带防止**第二实例把主实例该报的崩溃信息吃掉**)
+- 新增 `HMI_CRASH_DIR` 覆盖开关:运维收集现场 dump / 测试隔离都用它
+
+⚠ **本次修复中我弄坏的东西,如实记**:新写的 `tst_CrashHandler.cpp` 最初在
+`cleanupTestCase` 里写了 `QDir(crash::dumpDirectory()).removeRecursively()`。
+上一轮运行 `initTestCase` 的隔离护栏**判红了**,而 Qt **不会**因为
+`initTestCase` 失败就跳过 `cleanupTestCase` —— 那句递归删除对着**真实的**
+`QianWei/HMI/crash/` 执行,**删掉了现场的 `pending.txt` 与那个 366 KB 的 dump**。
+日志、审计、`history.db`、`users.json` 未受影响。
+
+教训:**护栏只保护它自己所在的函数,不够。** 测试不配拥有"递归删除任意路径"
+的能力,已整句删除,改用 per-test 的 `init()` 钩子重新锁隔离。
+
+新增 `tst_CrashHandler`(6 条)。`ctest` **69/69 通过**。
+负向对照 3 组,先绿后红再撤销:
+
+| 变异 | 结果 |
+|---|---|
+| `dumpDirectory()` 改回 `AppLocalDataLocation` | 1 条红(精确) |
+| `takePendingDump()` 不删标记 | **4 条红** |
+| 去掉 `HMI_CRASH_DIR` 覆盖 | `initTestCase` 即拦下,测试体一个未跑,真实目录未被创建 |
+
+顺带更正头注释:原写「位置 `%APPDATA%/HMI/crash/`」,两处都错
+(`AppLocalDataLocation` 落在 **Local** 而非 Roaming,且中间还有一层 org)。
+
+### feat(scripts): 24h 长跑验收脚手架
+
+新增 `scripts/long_run.ps1`,把 `docs/现状.md` 里挂了许久的
+「F2 未真验证 —— 24h 长跑」变成五条带数字的判据
+(崩溃上报 / 内存曲线 / 句柄线程 / 日志体量 / 日志滚动),
+退出码 PASS→0 / WARN→3 / FAIL→1。
+
+开工前先量现状,发现四条路径**从来没被真正跑过**:崩溃上报链条(见上)、
+日志滚动分支(最大日志 42.6 KB vs 阈值 100 MB,差 2400 倍)、
+**5 周 127 次启动**(一次启动一个日志文件)、资源曲线无基线。
+
+脚手架自身被负向对照逮到 3 个问题,其中一个是最坏的一类:崩溃窗口原写成
+「现在往前推运行时长」,比实际运行时间短一截,**开头几秒内真发生的崩溃会被
+漏掉报 PASS**(假阴性)。已改为以基线时刻为界。
+
+⚠ **仍未验证**:没有 PLC 就没有 `hmi.comm` 日志,「24h 不掉线」验不了,
+脚本会明说这一点,不含糊过去。
+
+### fix(scripts): 给 `build.ps1` / `build_tests.ps1` 补 UTF-8 BOM
+
+两个脚本各有 104 / 116 个汉字却**都没有 BOM**。PowerShell 5.1 对无 BOM 的
+`.ps1` 按系统 ANSI 代码页(本机 936/GBK)解码,而 **GBK 解码 UTF-8 字节会把
+紧跟其后的 ASCII 引号吞进双字节字符**,导致字符串引号配对崩掉。
+新写的 `long_run.ps1` 当初就是这么炸的 —— 26 个语法错。
+两个老脚本只是**侥幸没崩**(取决于中文有没有贴着引号)。已补 BOM + CRLF 并实跑验证。
+
+**凡是带中文的 `.ps1` 在这台机器上都需要 BOM。**
 
 ### 两套报警 UI 合并到一个配色权威(Wqian 拍板:抽公共层,统一到"本档变亮")
 

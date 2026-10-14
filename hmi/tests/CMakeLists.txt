@@ -142,6 +142,9 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/editor/RuntimeCanvas.cpp
     # ★ E.7(2026-09-30):复制/粘贴/删除的 Undo
     ${HMI_SRC_DIR}/src/editor/ControlListCommand.cpp
+    # ★ 崩溃 dump(2026-10-14):此前【零测试覆盖】,pending.txt 静默失效 28 天没人发现。
+    #   写 dump 和"崩了有人知道"是两回事,后者一直没被测过。详见 tst_CrashHandler.cpp 头注释。
+    ${HMI_SRC_DIR}/src/crash/CrashHandler.cpp
 )
 
 function(add_hmi_test test_name)
@@ -310,5 +313,10 @@ add_hmi_test(tst_ControlBackgroundImage)
 #   F3 卖点是"加新变量 = 改 JSON 一行",实测发现报错不含变量名/字段、
 #   未知字段静默丢弃、失败留半个工程三件事。见 tst_JsonLoadDiagnostics.cpp 头注释。
 add_hmi_test(tst_JsonLoadDiagnostics)
+
+# ★ 崩溃 dump 消费端(2026-10-14)。修的是"pending.txt 写了 28 天没人读"那条:
+#   dumpDirectory() 依赖调用方先设好 org/app,而 main() 当时把元数据排在
+#   install()/hasPendingDump()【后面】,于是写和读落在两个不同目录。
+add_hmi_test(tst_CrashHandler)
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

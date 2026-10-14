@@ -1,4 +1,4 @@
-# build_tests.ps1 -- 单元测试构建/运行(主程序 build.ps1 的测试版)
+﻿# build_tests.ps1 -- 单元测试构建/运行(主程序 build.ps1 的测试版)
 #
 # 用法:
 #   powershell -ExecutionPolicy Bypass -File .\build_tests.ps1              # 编译全部测试

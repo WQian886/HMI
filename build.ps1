@@ -1,4 +1,4 @@
-# build.ps1 -- PowerShell 5.1 兼容版
+﻿# build.ps1 -- PowerShell 5.1 兼容版
 #
 # 用法(在 Developer PowerShell for VS 2022 或任何 shell 里都可以):
 #   powershell -ExecutionPolicy Bypass -File .\build.ps1           # build

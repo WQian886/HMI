@@ -112,3 +112,9 @@ docs/HMI工程档案.md
 # Python 字节码(2026-10-10):scripts/check_vcxproj_writeback.py 要 import sync_vcxproj,跑一次就生成一份
 __pycache__/
 *.pyc
+
+# ===== 长跑验收产物(2026-10-14)=====
+# scripts/long_run.ps1 每次跑在 soaks/<时间戳>/ 下落 samples.csv + verdict.txt。
+# 这些是【一次运行的测量结果】,不是源码 —— 混进版本库只会让 git log 里
+# 塞满每次跑的数字,却看不出代码改了什么。真要留证据,连同时间戳一起 commit。
+soaks/

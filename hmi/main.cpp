@@ -4,16 +4,33 @@
 // 文件职责:整合所有 A 阶段子系统,定义程序启动顺序(顺序很重要)。
 //
 // 启动顺序(WHY THIS ORDER):
-//   1. crash::install()             —— 第一行,捕获未来任何崩溃
-//   2. crash::hasPendingDump()      —— 检测上次崩溃,弹对话框(用户先看)
-//   3. instance::tryBecomePrimary() —— 单实例,失败就退出(已把参数传给主实例)
-//   4. QCoreApplication 元数据       —— org/app 名(QSettings / QStandardPaths 用)
-//   5. QApplication + 命令行解析    —— 必须有 QApplication 才能用 QCommandLineParser
-//   6. --install-autostart/--remove-autostart 自启快捷命令(不进入主循环)
-//   7. logging 配置加载 + registerCategories() —— 装消息处理器
+//   1. QCoreApplication 元数据        —— org/app 名
+//   2. crash::install()               —— 尽早捕获未来任何崩溃
+//   3. instance::tryBecomePrimary()   —— 单实例,失败就退出(已把参数传给主实例)
+//   4. QApplication + 命令行解析      —— 必须有 QApplication 才能用 QCommandLineParser
+//   5. --install-autostart/--remove-autostart 自启快捷命令(不进入主循环)
+//   6. logging 配置加载 + registerCategories() —— 装消息处理器
+//   7. crash::hasPendingDump() → 弹"上次异常退出"对话框
 //   8. 主窗口 + 托盘 + 信号连接
 //   9. 根据 --minimize 决定是否显示主窗口
 //  10. app.exec() 进入事件循环
+//
+// ★ 2026-10-14 调整了两处,都是被实测逼出来的,别改回去:
+//
+//   (a) 元数据从第 4 步提到【第 1 步】
+//       原本 dump 目录靠 QStandardPaths::AppLocalDataLocation 算,含 <org>/<app>。
+//       结果:崩溃瞬间(org/app 已设)写到 QianWei/HMI/crash/,而启动早期
+//       (还没设)去 AppData/Local/crash/ 找 —— 写一个目录、读另一个目录。
+//       pending.txt 因此静默失效 28 天,全程零报错。
+//       现在 CrashHandler::dumpDirectory() 本身已是纯函数(见 CrashHandler.h),
+//       顺序不再决定路径;这里提前设元数据,是为了让日志/历史库的路径
+//       从一开始就正确,并顺手废掉 2026-09-08 就建起来的那个空壳目录。
+//
+//   (b) "上次异常退出"弹框从第 2 步挪到第 7 步
+//       QMessageBox 是 QWidget,在 QApplication 之前构造会直接 abort ——
+//       旧顺序下就算路径对了,弹框本身也会把进程打死。
+//       挪到 SingleInstance 之后还有第二个好处:第二实例不该把
+//       主实例该报的崩溃信息吃掉。
 //
 // 关键命令行参数:
 //   --minimize          启动后最小化到托盘
@@ -60,32 +77,19 @@ int main(int argc, char *argv[])
 {
     using namespace qwhmi;
 
-    // 1. 崩溃处理
+    // 1. App 元数据 —— 【刻意放在最前面】
+    //    日志、历史库、以及崩溃 dump 的目录都由 org/app 推导。
+    //    放在后面的话,崩溃处理看到的是另一个目录(2026-10-14 修的就是这个)。
+    //    这几个 setter 是静态的,不需要 QCoreApplication 实例,放最前面没有代价。
+    //    名字取自 crash::kOrgName / kAppName —— 全项目唯一出处,不许各写各的。
+    QCoreApplication::setOrganizationName(QString::fromLatin1(crash::kOrgName));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("qianwei.com"));
+    QCoreApplication::setApplicationName(QString::fromLatin1(crash::kAppName));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+
+    // 2. 崩溃处理
     crash::install();
     qCInfo(hmiApp) << "[main-early] crash::install OK";
-
-    // 2. 检查上次是否有崩溃 dump
-    if (crash::hasPendingDump()) {
-        const auto info = crash::takePendingDump();
-        QMessageBox box;
-        box.setIcon(QMessageBox::Critical);
-        box.setWindowTitle(QObject::tr("上次异常退出"));
-        box.setText(QObject::tr(
-            "HMI 上次运行异常退出。"
-            "时间: %1"
-            "异常: %2"
-            "Dump: %3"
-            "是否打开 dump 文件所在目录?")
-            .arg(info.timestamp.isEmpty() ? QStringLiteral("(未知)") : info.timestamp,
-                 info.exceptionCode.isEmpty() ? QStringLiteral("(未知)") : info.exceptionCode,
-                 info.path.isEmpty() ? QStringLiteral("(未生成)") : info.path));
-        box.setStandardButtons(QMessageBox::Open | QMessageBox::Ignore);
-        box.setDefaultButton(QMessageBox::Ignore);
-        if (box.exec() == QMessageBox::Open) {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(
-                QFileInfo(info.path).absolutePath()));
-        }
-    }
 
     // 3. 单实例检测
     instance::SingleInstance instance;
@@ -100,12 +104,6 @@ int main(int argc, char *argv[])
         return 0;
     }
     qCInfo(hmiApp) << "[main-early] become primary OK";
-
-    // 4. App 元数据
-    QCoreApplication::setOrganizationName(QStringLiteral("QianWei"));
-    QCoreApplication::setOrganizationDomain(QStringLiteral("qianwei.com"));
-    QCoreApplication::setApplicationName(QStringLiteral("HMI"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
 
     QApplication app(argc, argv);
     qCInfo(hmiApp) << "[main-early] QApplication created";
@@ -158,6 +156,38 @@ int main(int argc, char *argv[])
     qCInfo(hmiApp) << "===== HMI 启动 ====="
                    << "version=" << QCoreApplication::applicationVersion()
                    << "build=" << __DATE__ << __TIME__;
+
+    // 7. 检查上次是否有崩溃 dump
+    //    ★ 位置是挪过来的,两处都是实测逼出来的:
+    //      · 必须在 QApplication 之后 —— QMessageBox 是 QWidget,
+    //        没有 QApplication 实例就构造会直接 abort。旧顺序下就算
+    //        路径对了,弹框自己也会把进程打死。
+    //      · 必须在 SingleInstance 之后 —— 否则第二个实例启动时会把
+    //        主实例该报的崩溃信息吃掉,用户永远看不到。
+    //    放在日志就绪之后,用户点"打开目录"万一出问题也有日志可查。
+    if (crash::hasPendingDump()) {
+        const auto info = crash::takePendingDump();
+        qCWarning(hmiApp) << "[main] 发现上次崩溃 dump:"
+                          << info.timestamp << info.exceptionCode << info.path;
+        QMessageBox box;
+        box.setIcon(QMessageBox::Critical);
+        box.setWindowTitle(QObject::tr("上次异常退出"));
+        box.setText(QObject::tr(
+            "HMI 上次运行异常退出。"
+            "时间: %1"
+            "异常: %2"
+            "Dump: %3"
+            "是否打开 dump 文件所在目录?")
+            .arg(info.timestamp.isEmpty() ? QStringLiteral("(未知)") : info.timestamp,
+                 info.exceptionCode.isEmpty() ? QStringLiteral("(未知)") : info.exceptionCode,
+                 info.path.isEmpty() ? QStringLiteral("(未生成)") : info.path));
+        box.setStandardButtons(QMessageBox::Open | QMessageBox::Ignore);
+        box.setDefaultButton(QMessageBox::Ignore);
+        if (box.exec() == QMessageBox::Open) {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(
+                QFileInfo(info.path).absolutePath()));
+        }
+    }
 
     // ★ B2.2(2026-09-17):UserManager 提到 main 局部(从原 B1.3 嵌套块挪出)
     //   理由:signals 自动存盘 / CurrentUser.login / InactivityWatcher 都要活到 main 退出
