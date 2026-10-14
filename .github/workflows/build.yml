@@ -42,6 +42,30 @@ jobs:
     #        剩下 80% 花在这 67 个测试各自的 tst_*.cpp + moc + uic 上,
     #        那不是冗余,是真实工作量 —— 别指望 C 方案能一把解决超时。
     #        在那之前,先把超时抬到能跑完,拿到一次真实的绿灯基线。
+    #
+    # ★★ 2026-10-14:抬到 120 之后【一次绿都没拿到】,而且现在是系统性失败。
+    #   gh run list 实测,最近 7 次:
+    #     5 次 cancelled,时长全是 2h0m2x —— 精确卡在超时线上;
+    #     1 次 success,1h44m8s —— 只是【比这条线早了几分钟】;
+    #     其余 in_progress。
+    #   翻 38520431885 的日志("The job has exceeded the maximum
+    #   execution time of 2h0m0s"),时间账实测如下:
+    #
+    #     14:08:04  runner 起来
+    #     14:09:18  开始编主程序
+    #     14:13:46  编完主程序        → 只花 4.5 分钟
+    #     14:13:55  开始编 71 个测试目标
+    #     16:08:30  被掐,死时正在编 EditorMainWindow.cpp
+    #                —— 测试一个都还没开始跑    → 吃了 114.5 分钟
+    #
+    #   ★ 也就是说:整个 CI 的【95% 时间花在编测试目标上】,
+    #     而超时线是 120 分钟。71 个目标已经用到 114.5 分钟,
+    #     【没有余量了】—— 每加一个测试目标,就离被掐更近一步。
+    #     那个 1h44m 的 success 不是"跑通了",是【挤进去了】。
+    #
+    #   本机同样从零编,Ninja 只要约 20 分钟,CI 上 VS generator 要 114+。
+    #   慢 5 倍多。这就是上面"真正的根治是让 CI 用 Ninja"的实测依据 ——
+    #   那条诊断一直是对的,只是【诊断完一直没执行】。
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -72,17 +96,30 @@ jobs:
       #   hmi/CMakeLists.txt 里那句硬编码的 set(CMAKE_PREFIX_PATH "D:/Qt/6.8.3/...")
       #   在这里【不会】顶掉它 —— 实测过:硬编码成不存在的路径,find_package 仍能
       #   从环境变量回落找到 Qt 6.8.3。所以本地那句硬编码是"丑但无害",没动它。
+      # ★★ 2026-10-14:生成器从 "Visual Studio 17 2022" 换成 Ninja。
+      #   依据是上面那段实测时间账:VS generator 编 71 个测试目标吃了
+      #   114.5 分钟还没编完(超时的 95% 都花在这),本机 Ninja 只要约 20 分钟。
+      #   MSBuild 的调度粒度比 Ninja 粗很多 —— VS generator 把每个 target
+      #   当独立 project,依赖图被拆散,并行度上不去。
+      #
+      #   Ninja 是【单配置】生成器:构建类型在 configure 时定,不是 --config。
+      #   所以下面两处的 --config Debug 全删,换成 -DCMAKE_BUILD_TYPE=Debug。
+      #   ★ 原先我以为"ctest 那边的 -C Debug 留着就会让 ctest 找不到 exe"。
+      #     实测否掉了:Ninja 下加不加 -C Debug 都能列出 71 个目标、
+      #     都能真跑通(本机用 CI 的完整参数各跑了一遍)。
+      #     所以那处 -C 也一并删了 —— 不是因为它有害,而是单配置生成器
+      #     下它本来就没有意义,留着只会让人以为这里有讲究。
       - name: Configure (主程序)
-        run: cmake -S hmi -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S hmi -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
-        run: cmake --build build --config Debug --parallel
+        run: cmake --build build --parallel
 
       - name: Configure (tests)
-        run: cmake -S hmi/tests -B build-tests -G "Visual Studio 17 2022" -A x64
+        run: cmake -S hmi/tests -B build-tests -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build tests
-        run: cmake --build build-tests --config Debug --parallel
+        run: cmake --build build-tests --parallel
 
       - name: Run tests
         working-directory: build-tests
@@ -106,16 +143,26 @@ jobs:
         #     但它【确实会被编译】,所以它照样占一整份 HMI_CORE_SOURCES。
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --output-on-failure -C Debug
+        # ★ 删掉了原来的 -C Debug。Ninja 是单配置生成器,没有"配置"可选。
+        #   实测:加不加它都能列出 71 个目标、都能跑通(见上面注释)。
+        run: ctest --output-on-failure
 
       - name: Upload hmi.exe
         uses: actions/upload-artifact@v4
         with:
           name: hmi-windows-debug
-          # ★ 路径由实测得来:VS generator 生成的是 build\Debug\hmi.exe。
+          # ★ 路径由实测得来:VS generator 生成的是 build\Debug\hmi.exe,
+          #   换 Ninja 后是 build\hmi.exe(单配置,没有 Debug 子目录)。
+          #   ★ 这个路径是【本机实测】出来的:用 CI 的完整参数
+          #     (cmake -S hmi -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug)
+          #     编一遍,build\hmi.exe 存在、build\Debug\hmi.exe 不存在。
+          #     产物路径必须跟着生成器一起改 —— 换了 Ninja 却留着
+          #     build/Debug/,配下面 if-no-files-found: error 应该是会红的
+          #     (这一条【未实测】,upload 步骤本地跑不了;但既然有 error 兜底,
+          #      路径错了 CI 一定会报,不会是又一次"悄悄传了个空")。
           #   原来写的 build/bin/Debug/hmi.exe 配合 `warn` = 产物从来没上传过,
           #   而且 CI 不会因此变红 —— 又一个"看起来在跑,其实没跑"。
-          path: build/Debug/hmi.exe
+          path: build/hmi.exe
           # ★ 从 warn 改成 error。
           #   产物传不上去必须让 CI 红,否则这个 step 和没有一样,
           #   而"传不上去"正是下游拿到过期二进制的源头。
