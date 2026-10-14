@@ -10,6 +10,9 @@
 #pragma once
 
 #include "widgets/base/ControlBase.h"
+// ★ 2026-10-14:配色决策已上移到公共层(两套报警 UI 各写了一套,必然漂)。
+//   本头文件要用 qwhmi::alarm::RowVisualState 做私有方法的返回类型,所以必须包含。
+#include "alarm/AlarmRowPalette.h"
 #include <QHash>
 #include <QtGlobal>   // qint64(QHash 已间接拉入,这里显式 include 更明确)
 
@@ -21,12 +24,23 @@
 class AlarmManager;
 struct Alarm;
 class AlarmChecker;  // 不直接用,只为 moc 完整
+// ★ 2026-10-14:updateAlarmRow 收 AlarmState、levelAt 返回 AlarmLevel。
+//   只前向声明就够 —— 形参/返回值按值传,声明处不需要完整定义。
+enum class AlarmState;
+enum class AlarmLevel;
 
 class QTableWidget;
 class QGraphicsProxyWidget;
 class QWidget;
 class QLabel;
 class QTimer;
+// ★ 必须和上面几个一样声明在【全局作用域】。
+//   写成 `class QPushButton*` 出现在 namespace qwhmi::widgets 内部的话,
+//   等于把 QPushButton 注入本 namespace,声明出 qwhmi::widgets::QPushButton ——
+//   于是 .cpp 里真正的 ::QPushButton 找不到,报的是
+//   "使用了未定义类型 qwhmi::widgets::QPushButton"。
+//   本文件头注释记的 elaborated 形式陷阱,同一个坑第二次踩到。
+class QPushButton;
 
 namespace qwhmi::widgets {
 
@@ -44,6 +58,14 @@ public:
 
     // 立即刷新一次(读 current activeAlarms_)
     void refreshNow();
+
+    // ★ 2026-10-14:一次确认全部未确认报警(按钮直接调这个)。
+    //   【公开出来是为了让测试打的是生产代码】——
+    //   按钮连的是同一个函数,不是测试专用入口。
+    void acknowledgeAll();
+    // ★ 2026-10-14:"全部确认"按钮此刻该不该可点(测试断言用)。
+    //   没有未确认时它必须是灰的:一直亮着的按钮按下去没反应,像坏了。
+    bool ackAllEnabled() const;
 
     // ===== ★ F3(2026-09-30):给测试/宿主看的只读访问器 =====
     //   为什么要暴露:计数、配色、确认这三样都是【看得见的行为】,
@@ -99,8 +121,14 @@ private slots:
 
 private:
     void addAlarmRow(const Alarm& alarm);
-    void updateAlarmRow(qint64 id, const QString& stateText);
+    // ★ 2026-10-14:收 AlarmState 而不是状态文字字符串 —— 文字与配色都由它派生,
+    //   不存在"文字说已确认、配色说未确认"这种各说各话。详见 .cpp。
+    void updateAlarmRow(qint64 id, AlarmState st);
     int  findRowByAlarmId(qint64 id) const;
+    // ★ 2026-10-14:从行里读回等级 / 视觉状态(读 UserRole,不解析文字)。
+    //   缺失时向"更像未处理报警"的方向兜底 + qCWarning,理由见 .cpp。
+    AlarmLevel levelAt(int row) const;
+    qwhmi::alarm::RowVisualState visualStateAt(int row) const;
     // ★ F3:重算"未确认"计数并刷新标签。所有会改变确认状态的路径都要过这里。
     void refreshCount();
     // ★ F3/F3-b:把某一行按等级+状态+闪烁相位重新上色。
@@ -131,6 +159,8 @@ private:
 
     QWidget*              container_ = nullptr;   // ★ F3:承载 计数标签 + 表格 的父 widget
     QLabel*               countLabel_ = nullptr;  // ★ F3:未确认计数
+    // ★ 2026-10-14:"全部确认"按钮。与 countLabel_ 同一行(计数在左,按钮在右)。
+    QPushButton*           ackAllButton_ = nullptr;
     QTableWidget*         table_ = nullptr;
     QGraphicsProxyWidget* proxy_ = nullptr;
     AlarmManager*         alarmMgr_ = nullptr;

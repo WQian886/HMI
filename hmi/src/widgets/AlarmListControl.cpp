@@ -5,14 +5,19 @@
 #include "widgets/AlarmListControl.h"
 #include "../../Alarm.h"
 #include "../../AlarmManager.h"
+#include "alarm/AlarmRowPalette.h"
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
+#include "logging/Logging.h"   // hmiAlarm(qCWarning 用)
 
 #include <QColor>
+#include <QDebug>
 #include <QTimer>
 #include <QGraphicsProxyWidget>
 #include <QHeaderView>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
@@ -24,35 +29,47 @@ namespace {
 // ★ 2026-10-10:报警名那一列的下标(时间/报警名/等级/值/状态)。
 //   写常量而不是裸 1:这一列的宽度取决于用户自己起什么名,是唯一有理由吃余量的列。
 constexpr int kColName = 1;
+constexpr int kColLevel = 2;
+constexpr int kColStatus = 4;
 
-// ★ F3:4 档等级 → (文字, 底色, 字色)
+// ★ 等级 → 显示文字
 //
-// 【为什么以前只有 Critical/Emergency 有颜色】原来只给这两档上了红底,
-//   Info / Warning 跟"这一行没有报警"长得一模一样 —— 白底黑字。
-//   而报警列表里【每一行都是报警】,没有"没报警"这个参照物。
-//   结果就是:操作员扫一眼列表,真正跳出来的只有红色的两档,
-//   Warning(该去现场看一眼)跟 Info(记一下就行)在视觉上完全等价。
-//   这是本项目第 N 次"代码里写了但用户看不到差别"。
-//
-// 【为什么用低饱和底色而不是纯饱和色】工业屏常年亮着,大面积高饱和红/黄
-//   看久了刺眼还容易和"这行被选中"混淆。底色压到浅色调,靠字色定对比,
-//   四档之间的色相差异仍能一眼分出。
-struct LevelStyle { QString text; QColor bg; QColor fg; };
-
-LevelStyle styleFor(AlarmLevel level) {
+//   【文字留在本地,只有【颜色】上移到 AlarmRowPalette】
+//   理由:两套 UI 现在一个显示英文、一个显示中文(主画面 hmi.cpp 的 alarmLevelName),
+//   那是产品的一处口径不一致 —— 但它【不是颜色】。文字是各界面自己的呈现选择,
+//   而"哪一档该是什么颜色、哪一档该闪"是全产品一条规则,必须只有一处说了算。
+//   把两者混在一个函数里,改语言就会顺手改到配色。
+//   ★ 统一文字语言是另一件事,已记在 docs/现状.md,不在本次范围。
+QString levelText(AlarmLevel level) {
     switch (level) {
-        // 信息 —— 冷灰蓝,最不显眼,符合"知会一声"的定位
-        case AlarmLevel::Info:     return {"Info",     QColor(222, 232, 242), QColor( 40,  60,  90)};
-        // 警告 —— 黄,对应现场该去看一眼
-        case AlarmLevel::Warning:  return {"Warning",  QColor(255, 240, 190), QColor(120,  80,   0)};
-        // 严重 —— 橙红
-        case AlarmLevel::Critical: return {"Critical", QColor(255, 205, 195), QColor(150,  20,  10)};
-        // 危急 —— 深红 + 白字(最深 = 最重)。对比度 5.34:1。
-        //   ★ 静止时它是唯一用白字的档;F3-b 闪烁的【亮相半拍】会换成深字,
-        //     原因见 repaintRow 里那段 —— 亮底配白字只有 3.33:1,字会看不清。
-        case AlarmLevel::Emergency:return {"Emergency",QColor(205,  40,  40), QColor(255, 255, 255)};
+        case AlarmLevel::Info:      return QStringLiteral("Info");
+        case AlarmLevel::Warning:   return QStringLiteral("Warning");
+        case AlarmLevel::Critical:  return QStringLiteral("Critical");
+        case AlarmLevel::Emergency: return QStringLiteral("Emergency");
     }
-    return {"?", QColor(), QColor(Qt::black)};   // 不该到这
+    return QStringLiteral("?");   // 不该到这
+}
+
+// ★ 业务状态 → 状态列文字
+//
+//   ★ 文字从【AlarmState】派生,颜色从【它映射出的视觉状态】派生 ——
+//     两者出自同一个 st,不可能各说各话。
+//     原来 addAlarmRow 写 "Acknowledged ? 已确认 : 未确认",
+//     updateAlarmRow 又从调用点收一个字符串("已确认"/"已恢复")——
+//     文字有两个来源,就可能不一致,而"文字说已确认、颜色说未确认"
+//     会让那一行既灰着又在闪,操作员看不出该管哪条。
+//
+//   ★ 注意 Cleared(已恢复)不要被写成"未确认":F1 修完之后
+//     恢复的记录会先进 archived_ 再从 activeAlarms_ 移除,
+//     所以表里本来不该再有 Cleared —— 但万一有一行(clearAll 后的残留半截行),
+//     显示"未确认"就是在一本正经地撒谎。
+QString stateTextFor(AlarmState st) {
+    switch (st) {
+        case AlarmState::Active:       return QStringLiteral("未确认");
+        case AlarmState::Acknowledged: return QStringLiteral("已确认");
+        case AlarmState::Cleared:      return QStringLiteral("已恢复");
+    }
+    return QStringLiteral("?");   // 不该到这
 }
 
 } // namespace
@@ -81,7 +98,26 @@ AlarmListControl::AlarmListControl(QGraphicsItem* parent)
     //   空白 = "这个功能没装/没数据",0 = "确实没有未处理的"。
     //   这两件事必须区分开,否则又是一个"看不出是没数据还是没事"的静默失败。
     countLabel_->setText(QStringLiteral("未确认:0"));
-    lay->addWidget(countLabel_);
+
+    // ★ 2026-10-14:计数行右侧放一个"全部确认"按钮。
+    //   为什么是按钮而不是右键菜单:这个控件跑在触摸屏上,
+    //   而右键菜单在触摸屏上要么够不着、要么要点两次。
+    //   为什么需要它:现场一次异常往往同时来七八条,
+    //   只有双击单条的话操作员得挨个点,而他此时最该做的是去现场看一眼。
+    ackAllButton_ = new QPushButton(QStringLiteral("全部确认"));
+    ackAllButton_->setAutoDefault(false);
+    ackAllButton_->setFocusPolicy(Qt::NoFocus);
+    // ★ 没有未确认时要灰掉 —— 否则按钮一直亮着,
+    //   按下去只会得到"当前没有未确认的报警",像坏了。
+    ackAllButton_->setEnabled(false);
+    connect(ackAllButton_, &QPushButton::clicked, this, &AlarmListControl::acknowledgeAll);
+
+    auto* countRow = new QHBoxLayout;
+    countRow->setContentsMargins(0, 0, 0, 0);
+    countRow->setSpacing(4);
+    countRow->addWidget(countLabel_, 1);        // 计数占满剩余宽度
+    countRow->addWidget(ackAllButton_, 0);      // 按钮按内容宽
+    lay->addLayout(countRow);
 
     table_ = new QTableWidget;
     table_->setColumnCount(5);
@@ -233,8 +269,15 @@ void AlarmListControl::addAlarmRow(const Alarm& alarm) {
 
     table_->setItem(row, 0, new QTableWidgetItem(alarm.triggeredAt.toString("HH:mm:ss")));
     table_->setItem(row, 1, new QTableWidgetItem(alarm.name));
-    table_->setItem(row, 2, new QTableWidgetItem(styleFor(alarm.level).text));
+
+    // ★ 2026-10-14:等级列除了文字,还要带 enum(UserRole)。
+    //   配色不再从文字反查档位 —— 见 AlarmRowPalette.h 里"为什么必须存"三条。
+    auto* levelItem = new QTableWidgetItem(levelText(alarm.level));
+    levelItem->setData(qwhmi::alarm::kLevelRole, static_cast<int>(alarm.level));
+    table_->setItem(row, kColLevel, levelItem);
+
     table_->setItem(row, 3, new QTableWidgetItem(alarm.triggerValue));
+
     // ★ F3:状态文字【按 Alarm 自带的 state 填,不是无脑写"未确认"】。
     //   原来这里写死"未确认"。refreshNow() 在重画时会走这里 ——
     //   而 activeAlarms_ 里【确实存在已经确认过但还没恢复的报警】
@@ -244,9 +287,10 @@ void AlarmListControl::addAlarmRow(const Alarm& alarm) {
     //   而 acknowledge 第二次会返回 false(状态已不是 Active),
     //   界面"点了没反应" —— 又是静默失败。
     //   等级列的颜色同理,由 repaintRow 统一按当前状态重刷。
-    table_->setItem(row, 4, new QTableWidgetItem(
-        alarm.state == AlarmState::Acknowledged ? QStringLiteral("已确认")
-                                                : QStringLiteral("未确认")));
+    auto* statusItem = new QTableWidgetItem(stateTextFor(alarm.state));
+    statusItem->setData(qwhmi::alarm::kStateRole,
+                        static_cast<int>(qwhmi::alarm::visualStateFor(alarm.state)));
+    table_->setItem(row, kColStatus, statusItem);
     repaintRow(row);
     refreshCount();
     // ★ F3-b:新来一条可能"该闪",也可能来的是已确认的。
@@ -264,92 +308,63 @@ void AlarmListControl::addAlarmRow(const Alarm& alarm) {
 void AlarmListControl::repaintRow(int row) {
     if (!table_) return;
     if (row < 0 || row >= table_->rowCount()) return;
-    auto* levelItem = table_->item(row, 2);
-    auto* statusItem = table_->item(row, 4);
-    if (!levelItem || !statusItem) return;
-
-    const QString level = levelItem->text();
-    const QString status = statusItem->text();
-
-    // 由"等级文字"反查档位。存 enum 会更严谨,但要多存一个 UserRole,
-    // 而等级列的文字本来就是 styleFor 的产物,两者必然一致。
-    QColor bg, fg;
-    if      (level == "Emergency") { bg = QColor(205,  40,  40); fg = QColor(255,255,255); }
-    else if (level == "Critical")  { bg = QColor(255, 205, 195); fg = QColor(150, 20, 10); }
-    else if (level == "Warning")   { bg = QColor(255, 240, 190); fg = QColor(120, 80,   0); }
-    else                            { bg = QColor(222, 232, 242); fg = QColor( 40, 60,  90); }  // Info
-
-    // 已确认 / 已恢复 → 灰底。让"还没处理的"自己跳出来。
-    if (status != QStringLiteral("未确认")) {
-        bg = QColor(240, 240, 240);
-        fg = QColor(120, 120, 120);
-    }
-
-    // ★ F3-b(2026-10-08):闪烁。
-    //
-    // 【关键设计:闪的是【亮度】,不是【换一套颜色】】
-    //   下面这一段是唯一改动行颜色的地方(repaintRow 是配色唯一入口),
-    //   闪烁只是在这里多算一个"亮相"的底色。
-    //   ★ 为什么不写成"闪的时候直接填红色":
-    //     那样危急/严重/警告会共用一个红 —— 而"哪一档"正是颜色在表达的信息。
-    //     操作员靠颜色分轻重,闪一下就分不出来了,闪烁反而害事。
-    //   所以亮相 = 本档底色【加深】,暗相 = 本档底色原样。
-    //   于是:闪 = 在说"这条还没处理";颜色深浅 = 在说"这条有多重"。
-    //   两件事各走各的通道,不会互相覆盖。
-    //
-    // 【为什么只闪"未确认 + 严重/危急"】
-    //   和 hmi.cpp:1492 的判据完全一致,不能各闪各的。
-    //   已确认的还在闪 = 骗操作员去处理一条已经处理过的;
-    //   信息/警告闪 = 现场最吵的一直在闪,真出事的那条就淹了。
-    if (status == QStringLiteral("未确认")
-        && (level == QStringLiteral("Critical") || level == QStringLiteral("Emergency"))) {
-        if (blinkOn_) {
-            // 亮相:亮度大幅变化,让余光也能捕捉到。
-            //
-            // ★【这里踩过一次坑,记下来】
-            //   最初写的是"亮红 #f05a5a + 白字",注释还写着"保证对比度不降"。
-            //   拿 WCAG 公式算了一遍才发现是假的:
-            //     暗相 #cd2828 + 白字 = 5.34:1
-            //     亮相 #f05a5a + 白字 = 3.33:1   ← 掉了 2 个点
-            //   也就是说闪烁最亮的那一瞬间,字恰恰是最难读的一瞬 ——
-            //   而那正是操作员最想看清内容的时候。
-            //   根因:底色一旦大幅提亮,白字必然失效,两者不能同时要。
-            //   解法:亮底配深字。#f05a5a + #3b0606 = 5.20:1,
-            //   比暗相还高一点,亮度却比暗相亮了 81%(余光绝对抓得到)。
-            //   代价:危急在亮相这半拍里不是白字了。取舍理由是
-            //   "看得清"优先于"用白字标识最重的那一档"——
-            //   后者只是个约定,前者是能不能读。
-            if (level == QStringLiteral("Emergency")) {
-                bg = QColor(240,  90,  90);   // 深红 → 亮红
-                fg = QColor( 59,   6,   6);   // 白字 → 深字(见上面)
-            } else {
-                // 严重档是浅底配深字,提亮底色的同时把字压深,
-                // 对比度反而升到 5.39:1,不需要像危急那样翻过来配。
-                bg = QColor(255, 150, 130);   // 浅橙 → 深橙
-                fg = QColor(120,  10,   5);
-            }
-        }
-        // 暗相:保持本档原色,什么都不做。
-    }
+    // ★ 2026-10-14:配色决策整段搬进 AlarmRowPalette,这里只剩"取到结果、刷上去"。
+    //   原来这一整个函数(F3 + F3-b 两次加料)就是配色的第二个权威,
+    //   而 hmi.cpp 那套是第三个 —— 三个权威必然漂,详见 AlarmRowPalette.h 开头。
+    const qwhmi::alarm::RowColors c =
+        qwhmi::alarm::colorsFor(levelAt(row), visualStateAt(row), blinkOn_);
 
     for (int col = 0; col < table_->columnCount(); ++col) {
         if (auto* it = table_->item(row, col)) {
-            it->setBackground(bg);
-            it->setForeground(fg);
+            it->setBackground(c.bg);
+            it->setForeground(c.fg);
         }
     }
 }
 
+// ★ 从行里读回等级 —— UserRole 缺失时【向"更像报警"的方向兜底】
+//
+//   【为什么不用"最不显眼"兜底】
+//   兜底值必须偏向【多报】而不是【漏报】 —— 本项目在 F2 里的原话是
+//   "压错了报警,比多报一条危险得多"。同理,一行读不出等级时
+//   显示成 Warning + 未确认,后果是"多吸引一点注意力";
+//   显示成 Info + 已处理,后果是"一条真报警看着像已经处理过了",那危险得多。
+//   ★ 但光兜底不够 —— 静默兜底正是本项目反复吃亏的那一类,所以配 qCWarning。
+AlarmLevel AlarmListControl::levelAt(int row) const {
+    auto* it = table_ ? table_->item(row, kColLevel) : nullptr;
+    if (!it) return AlarmLevel::Warning;
+    const QVariant v = it->data(qwhmi::alarm::kLevelRole);
+    if (!v.isValid()) {
+        qCWarning(hmiAlarm) << "[AlarmListControl] 第" << row
+                            << "行等级列没有 UserRole —— 写这一行的代码漏了 setData";
+        return AlarmLevel::Warning;
+    }
+    return static_cast<AlarmLevel>(v.toInt());
+}
+
+qwhmi::alarm::RowVisualState AlarmListControl::visualStateAt(int row) const {
+    auto* it = table_ ? table_->item(row, kColStatus) : nullptr;
+    if (!it) return qwhmi::alarm::RowVisualState::Unacknowledged;
+    const QVariant v = it->data(qwhmi::alarm::kStateRole);
+    if (!v.isValid()) {
+        qCWarning(hmiAlarm) << "[AlarmListControl] 第" << row
+                            << "行状态列没有 UserRole —— 写这一行的代码漏了 setData";
+        return qwhmi::alarm::RowVisualState::Unacknowledged;
+    }
+    return static_cast<qwhmi::alarm::RowVisualState>(v.toInt());
+}
+
 // ★ F3-b:这一行此刻该不该闪
+//
+//   ★ 2026-10-14:判据搬到 AlarmRowPalette::shouldBlink。
+//     原来这里是"状态文字==未确认 && 等级文字∈{Critical,Emergency}",
+//     而 hmi.cpp 那套是"状态文字==未确认 && 等级文字∈{严重,危急}" ——
+//     两边一个认英文一个认中文,判据天生可能对不上,
+//     而"两套 UI 的闪烁判据必须一致"恰恰是 F3-b 对齐 500ms 时强调的硬要求。
 bool AlarmListControl::rowShouldBlink(int row) const {
     if (!table_) return false;
     if (row < 0 || row >= table_->rowCount()) return false;
-    auto* levelItem  = table_->item(row, 2);
-    auto* statusItem = table_->item(row, 4);
-    if (!levelItem || !statusItem) return false;
-    return statusItem->text() == QStringLiteral("未确认")
-        && (levelItem->text() == QStringLiteral("Critical")
-            || levelItem->text() == QStringLiteral("Emergency"));
+    return qwhmi::alarm::shouldBlink(levelAt(row), visualStateAt(row));
 }
 
 int AlarmListControl::blinkingRowCount() const {
@@ -427,25 +442,79 @@ void AlarmListControl::refreshCount() {
     } else {
         countLabel_->setStyleSheet(QStringLiteral("color:#606060;"));
     }
+    // ★ 2026-10-14:没有未确认就把"全部确认"灰掉。
+    //   不灰的话按钮一直亮着,按下去只得到一句"没有可确认的" —— 像坏了。
+    //   ★ 必须在【所有】会改变确认状态的路径上生效,所以跟着 refreshCount 走,
+    //     而不是各调用点自己记得 —— 后者迟早漏一处。
+    if (ackAllButton_) ackAllButton_->setEnabled(n > 0);
+}
+
+// ★ 2026-10-14:一次确认全部未确认报警。
+//
+//   【为什么这是"接线"而不是"新功能"】
+//   AlarmManager::acknowledgeAll() 从 5.5 就写好了,F3 又把它改成返回真实条数,
+//   也有回归测试 —— 但全项目【没有任何入口调它】。
+//   它唯一的调用点 hmi.cpp:867 在 count() > 0 的守卫后面,而 acknowledgeAll
+//   遍历的正是 activeAlarms_ —— 守卫一旦通过,里面必然是空的,
+//   于是【永远确认不到任何东西】。建好了没接线。
+//
+//   【为什么不弹窗】这个控件跑在触摸屏上,弹窗要么被别的窗口挡住、
+//   要么要点两次才能关掉 —— 同文件 onCellDoubleClicked 里已经因为同样的
+//   理由明确选择了"不弹窗,改计数标签",这里跟着一致。
+//   代价:标签上那条提示会被下一次 refreshCount 冲掉。
+//   ★ 那是有意的取舍,不是遗漏:计数必须永远是真的,
+//     宁可提示短暂,也不要为了留住提示让计数撒谎。
+void AlarmListControl::acknowledgeAll() {
+    if (!alarmMgr_) {
+        // 与双击那条路径同一个理由:没接上数据源要说出来,
+        // 否则"点了没反应"和"没权限"在现场完全分不开。
+        if (countLabel_) countLabel_->setText(QStringLiteral("未确认:0(未接入报警数据)"));
+        return;
+    }
+    const int pending = unacknowledgedCount();
+    if (pending == 0) return;   // 按钮本来就该是灰的;真走到这多半是竞态
+
+    const int acked = alarmMgr_->acknowledgeAll();
+    if (acked > 0) {
+        // 每条成功的 acknowledge 都会 emit alarmAcknowledged → updateAlarmRow →
+        // refreshCount,所以计数和按钮状态在这之前就已经更新过了。
+        return;
+    }
+
+    // 一条都没确认成 —— 分清"没权限"和"本来就没什么可确认的"。
+    if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                                     qwhmi::auth::Permission::AcknowledgeAlarm)) {
+        if (countLabel_)
+            countLabel_->setText(QStringLiteral("未确认:%1(无确认权限)").arg(pending));
+        return;
+    }
+    // 有权限却没确认成 → 刚被别处清掉了(比如同一时刻另一路先恢复了)。
+    // 不是错误,不必打扰操作员。
+    qCInfo(hmiAlarm) << "[AlarmListControl] 全部确认无事可做:待确认" << pending
+                     << "条,但 acknowledgeAll 返回" << acked;
 }
 
 int AlarmListControl::rowCount() const { return table_ ? table_->rowCount() : 0; }
 
+bool AlarmListControl::ackAllEnabled() const {
+    return ackAllButton_ && ackAllButton_->isEnabled();
+}
+
 QString AlarmListControl::levelTextAt(int row) const {
     if (!table_) return QString();
-    auto* it = table_->item(row, 2);
+    auto* it = table_->item(row, kColLevel);
     return it ? it->text() : QString();
 }
 
 QColor AlarmListControl::levelColorAt(int row) const {
     if (!table_) return QColor();
-    auto* it = table_->item(row, 2);
+    auto* it = table_->item(row, kColLevel);
     return it ? it->background().color() : QColor();
 }
 
 QColor AlarmListControl::levelTextColorAt(int row) const {
     if (!table_) return QColor();
-    auto* it = table_->item(row, 2);
+    auto* it = table_->item(row, kColLevel);
     return it ? it->foreground().color() : QColor();
 }
 
@@ -461,18 +530,27 @@ void AlarmListControl::onAlarmTriggered(const Alarm& alarm) {
 }
 
 void AlarmListControl::onAlarmRecovered(qint64 id) {
-    updateAlarmRow(id, "已恢复");
+    updateAlarmRow(id, AlarmState::Cleared);
 }
 
 void AlarmListControl::onAlarmAcknowledged(qint64 id) {
-    updateAlarmRow(id, "已确认");
+    updateAlarmRow(id, AlarmState::Acknowledged);
 }
 
-void AlarmListControl::updateAlarmRow(qint64 id, const QString& stateText) {
+// ★ 2026-10-14:形参从 QString 改成 AlarmState。
+//
+//   原来这里收一个状态文字字符串("已确认"/"已恢复"),而文字和 UserRole
+//   又是两份东西 —— 改文字时很容易忘了改 UserRole,或者反过来。
+//   收 enum 之后,文字和配色都由它派生,不存在"各说各话"。
+void AlarmListControl::updateAlarmRow(qint64 id, AlarmState st) {
     const int row = findRowByAlarmId(id);
     if (row < 0 || !table_) return;
-    auto* item = table_->item(row, 4);
-    if (item) item->setText(stateText);
+    auto* item = table_->item(row, kColStatus);
+    if (item) {
+        item->setText(stateTextFor(st));
+        item->setData(qwhmi::alarm::kStateRole,
+                      static_cast<int>(qwhmi::alarm::visualStateFor(st)));
+    }
     // ★ F3:状态变了 → 配色跟着变(已确认/已恢复要淡化成灰底),
     //   计数也要重算(确认一条,未确认数就该减一)。
     //   以前只改文字不改颜色,所以确认过的行还留着红底,

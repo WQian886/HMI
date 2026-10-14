@@ -106,6 +106,7 @@ set(SOURCES
     # ★ F4-a(2026-10-08):报警配置对话框(只读 + 草稿导出)
     src/alarm/AlarmConfigDialog.cpp
     src/alarm/AlarmSoundDialog.cpp     # ★ F5:报警声音设置对话框
+    src/alarm/AlarmRowPalette.cpp       # ★ 2026-10-14:报警行配色唯一权威(两套报警 UI 共用)
     # ★ 2026-10-10:协议下拉框"未实现"标注(置灰 + tooltip)
     #   注:src/drivers/ 下的文件目前靠下面的 GLOB 兜底捡进来,
     #   显式写出来是为了守住"新文件必须登记"的约定。
@@ -188,6 +189,7 @@ set(HEADERS
     # ★ F4-a(2026-10-08):报警配置对话框
     src/alarm/AlarmConfigDialog.h
     src/alarm/AlarmSoundDialog.h      # ★ F5:报警声音设置对话框
+    src/alarm/AlarmRowPalette.h        # ★ 2026-10-14:报警行配色唯一权威(纯函数,无 Q_OBJECT)
     # ★ 2026-10-10:协议下拉框"未实现"标注
     src/drivers/ProtocolAvailabilityUi.h
     src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图

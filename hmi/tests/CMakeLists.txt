@@ -108,6 +108,9 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/widgets/TrendControl.cpp
     ${HMI_SRC_DIR}/src/widgets/TableControl.cpp
     ${HMI_SRC_DIR}/src/widgets/AlarmListControl.cpp
+    # ★ 2026-10-14:报警行配色。AlarmListControl 和 hmi.cpp 都调它,
+    #   漏了这里会 LNK2019(三个未解析符号)—— 而 hmi/CMakeLists.txt 那份是另一份列表。
+    ${HMI_SRC_DIR}/src/alarm/AlarmRowPalette.cpp
     # ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
     #   逐个加:写完一个接线一个,避免文件还不存在就编不过
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
@@ -253,6 +256,8 @@ add_hmi_test(tst_InputEditControl)
 add_hmi_test(tst_TrendControl)
 add_hmi_test(tst_TableControl)
 add_hmi_test(tst_AlarmListControl)
+# ★ 2026-10-14:报警行配色的唯一权威。纯函数测试,跑得极快,可以写密。
+add_hmi_test(tst_AlarmRowPalette)
 # ★ E.1c(2026-09-28):UI → PLC 反向写通道(ControlBase::writeToPlc)
 #   修复前 ToggleControl 点一下只翻本地值,全仓库无人接 toggled 信号,
 #   17 个控件全是只读显示器。详见 tst_ControlBaseWrite.cpp 头注释。

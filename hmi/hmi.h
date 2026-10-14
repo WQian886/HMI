@@ -22,6 +22,11 @@ namespace qwhmi::widgets { class TrendWidget; }  // ★ D.2(2026-09-20):历史�
 #include "editor/EditorMainWindow.h"
 #include "editor/RuntimeCanvas.h"   // ★ E.5(2026-09-29):运行时画布
 
+// ★ QMenu 一直是靠 QtWidgets 传递包含进来的,这里把两个都显式前向声明 ——
+//   2026-10-14 新增 QAction 成员时才发现:不能假设"QMenu 可见则 QAction 也可见"。
+class QAction;
+class QMenu;
+
 class hmi : public QMainWindow
 {
     Q_OBJECT
@@ -45,11 +50,28 @@ private slots:
     void onAlarmTriggered(const Alarm& a);
     void onAlarmRecovered(qint64 id);
     void onAlarmBlinkTick();
+    // ★ 2026-10-14:报警表配色的唯一入口。
+    //   主画面过去自己一套配色(而且静止态根本没有四档色),
+    //   与运行时画布的 AlarmListControl 是两个权威,已经漂开了。
+    //   现在两边都调 src/alarm/AlarmRowPalette。
+    void repaintAlarmRow(int row);
+    // ★ 改某一行的状态列(文字 + UserRole + 重新上色)。三样必须一起改,
+    //   只改文字就会出现"文字说已确认、颜色说未确认"——那一行既灰着又在闪。
+    void setAlarmRowState(int row, AlarmState st);
+    // ★ 有该闪的行才亮表,一个都没有就停,【并且把相位复位】。
+    void updateAlarmBlinkTimer();
 
     // 阶段 5.5:右键菜单 + 确认 + 全清
     void onAlarmContextMenu(const QPoint& pos);
     void onAlarmAcknowledge();
+    // ★ 2026-10-14:一次确认全部未确认报警。
+    //   AlarmManager::acknowledgeAll() 早就写好了、也返回真实条数(F3 改的),
+    //   但全项目【没有任何入口调它】—— 建好了没接线。
+    //   而现场真出状况时往往是同时来七八条,操作员只能一条条双击/右键。
+    void onAlarmAcknowledgeAll();
     void onAllAlarmsCleared();
+    // ★ 2026-10-14:当前未确认条数(按 AlarmManager 的 state,不按表格行数)
+    int  alarmUnacknowledgedCount() const;
 
     // 阶段 0 第 1 练:手写 connect 的 QTimer 槽函数
 	void onTimerTick();// 定时器 tick 了
@@ -168,8 +190,20 @@ private:
 	Ui::hmiClass ui;// UI 设计器生成的界面类成员
     QTimer *timer;  // 阶段 0 第 1 练:QTimer 成员变量(1 秒 counter)
     QTimer *resetTimer_ = nullptr;  // 阶段 1 第 2 练:复位定时器(3 秒单次,到点转 Stopped)
-    QTimer *alarmBlinkTimer_ = nullptr;  // 阶段 5.4:严重级报警闪烁定时器(500ms 切红/橙)
+    QTimer *alarmBlinkTimer_ = nullptr;  // 阶段 5.4:严重级报警闪烁定时器(500ms 切亮/暗两相)
+    // ★ 2026-10-14:闪烁相位。
+    //   原来写在 onAlarmBlinkTick 里是个【函数内 static 变量】——
+    //   全体 hmi 实例共用一个,而且定时器停下来时【不复位】。
+    //   于是报警全清之后再来第一条,第一帧可能还停在亮相的浅色上,
+    //   用户看到的是"新报警颜色不对,过 500ms 才对"。
+    //   AlarmListControl 在 F3-b 已经把这个 bug 修掉了,主画面还留着。
+    bool alarmBlinkOn_ = false;
     QMenu* alarmContextMenu_ = nullptr;  // 阶段 5.5:alarmTable 右键菜单(含"确认"动作)
+    // ★ 2026-10-14:两个动作各自持有,才能分别按当前行/全局状态置灰。
+    //   原来用 actions().first() 取"确认"—— 加了第二个动作之后那个下标就指错人了,
+    //   而症状是"菜单项该灰的没灰、不该灰的灰着",不崩也不报错。
+    QAction* alarmAckAction_     = nullptr;
+    QAction* alarmAckAllAction_  = nullptr;
     int counter = 0;  // 阶段 0 第 1 练:用成员变量存计数(修法 B,数据归程序)
     TcpClient* tcp_ = nullptr;  // 阶段 1 第 1 练:TCP 客户端(生命周期由 this 管)
     // ★ C.1(2026-09-17):从 ModbusMaster* 改为 IPollDriver*

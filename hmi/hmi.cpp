@@ -10,6 +10,7 @@
 #include "history/HistoryRecorder.h" // ★ D.1(2026-09-18):SQLite 历史库
 #include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
 #include "history/AlarmHistoryView.h" // ★ F4(2026-10-08):报警历史查询视图(填 D.3 占位 tab)
+#include "alarm/AlarmRowPalette.h"   // ★ 2026-10-14:报警表配色的唯一权威(与运行时画布共用)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
 #include "widgets/NumberDisplay.h"
@@ -448,7 +449,11 @@ hmi::hmi(QWidget *parent)
             this, &hmi::onAlarmContextMenu);
 
     alarmContextMenu_ = new QMenu(this);
-    alarmContextMenu_->addAction("确认", this, &hmi::onAlarmAcknowledge);
+    alarmAckAction_ = alarmContextMenu_->addAction("确认", this, &hmi::onAlarmAcknowledge);
+    // ★ 2026-10-14:补上"全部确认" —— AlarmManager::acknowledgeAll()
+    //   从 5.5 就写好了、返回真实条数(F3 改的),但全项目没有一个入口调它。
+    alarmAckAllAction_ = alarmContextMenu_->addAction("全部确认", this,
+                                                       &hmi::onAlarmAcknowledgeAll);
 
     // 阶段 5.5 BUGFIX:报警已确认 → 表格行"未确认"→"已确认"(停闪),用 ID 匹配避免同名报警错配
     connect(alarmMgr_, &AlarmManager::alarmAcknowledged, this,
@@ -456,8 +461,13 @@ hmi::hmi(QWidget *parent)
             for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
                 auto* item = ui.alarmTable->item(row, 1);
                 if (item && item->data(Qt::UserRole).toLongLong() == id) {
-                    auto* statusItem = ui.alarmTable->item(row, 4);
-                    if (statusItem) statusItem->setText("已确认");
+                    // ★ 2026-10-14:走 setAlarmRowState + repaintAlarmRow。
+                    //   原来只改文字 —— 状态 UserRole 没跟着变,配色按"未确认"算,
+                    //   于是"确认"这一下文字变了、颜色没变,而闪烁定时器照旧在跑。
+                    //   操作员看到的是:点了确认,状态列变了,那一行却还在闪。
+                    setAlarmRowState(row, AlarmState::Acknowledged);
+                    repaintAlarmRow(row);
+                    updateAlarmBlinkTimer();
                     break;
                 }
             }
@@ -1497,12 +1507,105 @@ void hmi::onAlarmTriggered(const Alarm& a) {
     auto* nameItem = new QTableWidgetItem(a.name);
     nameItem->setData(Qt::UserRole, a.id_);  // ★ 存 ID 给 ack lambda 匹配(5.5 BUGFIX)
     ui.alarmTable->setItem(row, 1, nameItem);
-    ui.alarmTable->setItem(row, 2, new QTableWidgetItem(alarmLevelName(a.level)));
+
+    // ★ 2026-10-14:等级列带 enum,不再让配色去解析中文文字。
+    //   原来闪烁判据是 levelItem->text()=="严重"||=="危急" —— 而运行时画布那边
+    //   判的是 "Critical"/"Emergency"。两边一个认中文一个认英文,判据天生可能对不上,
+    //   而"两套 UI 判据必须一致"恰恰是对齐 500ms 时强调的硬要求。
+    auto* levelItem = new QTableWidgetItem(alarmLevelName(a.level));
+    levelItem->setData(qwhmi::alarm::kLevelRole, static_cast<int>(a.level));
+    ui.alarmTable->setItem(row, 2, levelItem);
+
     ui.alarmTable->setItem(row, 3, new QTableWidgetItem(a.triggerValue));
-    ui.alarmTable->setItem(row, 4, new QTableWidgetItem("未确认"));
+
+    // ★ 状态列同样带 enum,文字与配色都由它派生。
+    setAlarmRowState(row, a.state);
+    repaintAlarmRow(row);
     ui.alarmTable->scrollToBottom();
 
-    if (!alarmBlinkTimer_->isActive()) alarmBlinkTimer_->start();
+    updateAlarmBlinkTimer();
+}
+
+// ★ 2026-10-14:改某一行状态列 —— 文字、UserRole、配色三样一起。
+//
+//   【为什么必须三样一起】
+//   只改文字不动 UserRole → 配色还按"未确认"算,那一行既灰着又在闪;
+//   只改 UserRole 不动文字 → 屏幕写着"未确认"却不再闪,操作员无从判断。
+//   两个都是"看起来能点,点了没反应"那一类静默失败。
+void hmi::setAlarmRowState(int row, AlarmState st) {
+    auto* statusItem = ui.alarmTable->item(row, 4);
+    if (!statusItem) return;
+    QString text;
+    switch (st) {
+        case AlarmState::Active:       text = QStringLiteral("未确认"); break;
+        case AlarmState::Acknowledged: text = QStringLiteral("已确认"); break;
+        case AlarmState::Cleared:      text = QStringLiteral("已恢复"); break;
+    }
+    statusItem->setText(text);
+    statusItem->setData(qwhmi::alarm::kStateRole,
+                        static_cast<int>(qwhmi::alarm::visualStateFor(st)));
+}
+
+// ★ 2026-10-14:主画面报警表的配色入口 —— 决策全在 AlarmRowPalette。
+//   原来这个函数是【第二个】配色权威(第三个是 AlarmListControl 那套),
+//   而且是最弱的一个:静止态非闪烁行直接 setData(BackgroundRole, QVariant())
+//   清成白底,于是 Info / Warning 两档跟"这一行没有报警"长得一模一样。
+void hmi::repaintAlarmRow(int row) {
+    auto* levelItem  = ui.alarmTable->item(row, 2);
+    auto* statusItem = ui.alarmTable->item(row, 4);
+    if (!levelItem || !statusItem) return;
+
+    const QVariant lv = levelItem->data(qwhmi::alarm::kLevelRole);
+    const QVariant sv = statusItem->data(qwhmi::alarm::kStateRole);
+    if (!lv.isValid() || !sv.isValid()) {
+        // 兜底方向:偏向"更像未处理的报警"。理由与 AlarmListControl::levelAt 相同 ——
+        // 漏报比多报危险得多(见 docs/现状.md F2:"压错了报警,比多报一条危险得多")。
+        qCWarning(hmiAlarm) << "[hmi] 报警表第" << row
+                            << "行缺 UserRole(等级/状态),写这一行的代码漏了 setData";
+    }
+    const auto level = lv.isValid() ? static_cast<AlarmLevel>(lv.toInt())
+                                    : AlarmLevel::Warning;
+    const auto state = sv.isValid()
+        ? static_cast<qwhmi::alarm::RowVisualState>(sv.toInt())
+        : qwhmi::alarm::RowVisualState::Unacknowledged;
+
+    const qwhmi::alarm::RowColors c = qwhmi::alarm::colorsFor(level, state, alarmBlinkOn_);
+    for (int col = 0; col < ui.alarmTable->columnCount(); ++col) {
+        if (auto* it = ui.alarmTable->item(row, col)) {
+            it->setBackground(c.bg);
+            it->setForeground(c.fg);
+        }
+    }
+}
+
+// ★ 2026-10-14:该闪的行一个都没有就停表,并【把相位复位】。
+//
+//   原来只有 onAlarmRecovered 里一句 count()==0 就 stop(),而且不复位相位,
+//   于是清空之后再来第一条,第一帧可能停在亮相的浅色上(见 hmi.h 里那个成员变量
+//   的注释)。AlarmListControl 在 F3-b 修好了这件事,主画面一直没跟上。
+void hmi::updateAlarmBlinkTimer() {
+    bool anyShouldBlink = false;
+    for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
+        auto* levelItem  = ui.alarmTable->item(row, 2);
+        auto* statusItem = ui.alarmTable->item(row, 4);
+        if (!levelItem || !statusItem) continue;
+        const auto level = static_cast<AlarmLevel>(levelItem->data(qwhmi::alarm::kLevelRole).toInt());
+        const auto state = static_cast<qwhmi::alarm::RowVisualState>(
+                               statusItem->data(qwhmi::alarm::kStateRole).toInt());
+        if (qwhmi::alarm::shouldBlink(level, state)) { anyShouldBlink = true; break; }
+    }
+
+    if (anyShouldBlink) {
+        if (!alarmBlinkTimer_->isActive()) alarmBlinkTimer_->start();
+        return;
+    }
+
+    alarmBlinkTimer_->stop();
+    if (alarmBlinkOn_) {          // 复位相位 + 把所有行刷回暗相
+        alarmBlinkOn_ = false;
+        for (int row = 0; row < ui.alarmTable->rowCount(); ++row)
+            repaintAlarmRow(row);
+    }
 }
 
 // ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):报警恢复 → 用 ID 匹配找原行
@@ -1516,45 +1619,42 @@ void hmi::onAlarmRecovered(qint64 id) {
     for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
         auto* item = ui.alarmTable->item(row, 1);
         if (item && item->data(Qt::UserRole).toLongLong() == id) {
-            auto* statusItem = ui.alarmTable->item(row, 4);
-            if (statusItem) statusItem->setText("已恢复");
+            // ★ 2026-10-14:走 setAlarmRowState —— 文字和 UserRole 必须一起改。
+            //   原来只 setText("已恢复"),配色那边读不到对应的状态,会按"未确认"画。
+            setAlarmRowState(row, AlarmState::Cleared);
+            repaintAlarmRow(row);
             break;
         }
     }
-    if (alarmMgr_->count() == 0) alarmBlinkTimer_->stop();
+    // ★ 判据从 count()==0 换成"还有没有该闪的行"。
+    //   count()==0 是 activeAlarms_ 空了 —— 但 acknowledged 却未恢复的报警
+    //   仍然在 activeAlarms_ 里(5.5 有意为之:复位不该清历史),
+    //   那些行是灰的、不该闪,而 count() 把它们算进来 → 定时器还在空转。
+    updateAlarmBlinkTimer();
 }
 
 // ★ IMPROVE-5.5(2026-08-04):严重级报警闪烁 + 统一背景管理
-//   【背景】5.5 BUGFIX(Wqian 反馈):"已恢复"/"已确认"的行偶尔还显示红色,残留闪烁背景
-//   【改法】blink tick 是背景唯一权威:
-//     - "未确认" + 严重/危急级 → 切红/橙
-//     - 其他(已确认/已恢复/信息/警告)→ 清背景(默认)
-//   【取舍】每 tick 都清非活动行的背景(浪费但轻量);保证任何代码路径改状态后,500ms 内清干净
-//   【参照】Wqian 2026-08-04 反馈
+//
+// ★ 2026-10-14:本函数只剩"切相位 + 重画",判据与配色全部交给 AlarmRowPalette。
+//   原来这里是【第二个】配色权威,而它是最弱的一个:
+//     · 静止态非闪烁行被 setData(BackgroundRole, QVariant()) 清成白底
+//       → Info / Warning 两档跟"这一行没有报警"长得一模一样
+//       (而报警表里【每一行都是报警】,没有"没报警"这个参照物)
+//     · 闪烁是"换成固定红/橙",危急/严重/警告共用一个红
+//       → 闪一下就分不出档位,而分不出档位正是颜色存在的理由
+//   两处问题都由 AlarmRowPalette 一并解决,详见那个文件的头注释。
 void hmi::onAlarmBlinkTick() {
-    static bool blinkOn = false;
-    blinkOn = !blinkOn;
-    const QColor activeBg = blinkOn ? QColor(255, 80, 80) : QColor(255, 200, 100);  // 红/橙
+    alarmBlinkOn_ = !alarmBlinkOn_;
+    // 只重画"该闪的那些行",不是全表 —— 闪烁本来就是个局部信号。
+    // ★ 不闪的行不用动:它们的颜色由 colorsFor 决定,与相位无关。
     for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
-        auto* levelItem = ui.alarmTable->item(row, 2);
+        auto* levelItem  = ui.alarmTable->item(row, 2);
         auto* statusItem = ui.alarmTable->item(row, 4);
         if (!levelItem || !statusItem) continue;
-        const QString status = statusItem->text();
-        const QString levelText = levelItem->text();
-
-        if (status == "未确认" && (levelText == "严重" || levelText == "危急")) {
-            // 未确认 + 严重级 → 切红/橙背景
-            for (int col = 0; col < ui.alarmTable->columnCount(); ++col) {
-                auto* item = ui.alarmTable->item(row, col);
-                if (item) item->setBackground(activeBg);
-            }
-        } else {
-            // 其他(已确认/已恢复/信息/警告)→ 清背景,不留残色
-            for (int col = 0; col < ui.alarmTable->columnCount(); ++col) {
-                auto* item = ui.alarmTable->item(row, col);
-                if (item) item->setData(Qt::BackgroundRole, QVariant());
-            }
-        }
+        const auto level = static_cast<AlarmLevel>(levelItem->data(qwhmi::alarm::kLevelRole).toInt());
+        const auto state = static_cast<qwhmi::alarm::RowVisualState>(
+                               statusItem->data(qwhmi::alarm::kStateRole).toInt());
+        if (qwhmi::alarm::shouldBlink(level, state)) repaintAlarmRow(row);
     }
 }
 
@@ -1567,15 +1667,77 @@ void hmi::onAlarmContextMenu(const QPoint& pos) {
     QTableWidgetItem* item = ui.alarmTable->itemAt(pos);
     if (!item) return;
     int row = item->row();
+    // ★ 2026-10-14:判据从"状态列文字 == 未确认"改成读 UserRole 里的 enum。
+    //   拿显示文字当 API 用,翻译一改就错位 —— 而且不会报错,只是安静地置错灰。
     auto* statusItem = ui.alarmTable->item(row, 4);
-    // ★ 5.5:只有"未确认"才能确认(灰掉菜单项)
-    if (statusItem) {
-        bool canAck = (statusItem->text() == "未确认");
-        alarmContextMenu_->actions().first()->setEnabled(canAck);
-    }
+    const bool canAck = statusItem
+        && static_cast<qwhmi::alarm::RowVisualState>(
+               statusItem->data(qwhmi::alarm::kStateRole).toInt())
+           == qwhmi::alarm::RowVisualState::Unacknowledged;
+    if (alarmAckAction_) alarmAckAction_->setEnabled(canAck);
+
+    // "全部确认"看的是全局有没有未确认的,与当前点在哪一行无关。
+    if (alarmAckAllAction_) alarmAckAllAction_->setEnabled(alarmUnacknowledgedCount() > 0);
+
     // 选中当前行,菜单关闭后 onAlarmAcknowledge 用 currentRow() 拿
     ui.alarmTable->setCurrentCell(row, 0);
     alarmContextMenu_->exec(ui.alarmTable->viewport()->mapToGlobal(pos));
+}
+
+// ★ 2026-10-14:当前未确认条数 —— 按 AlarmManager 的 state 数,不按表格行数。
+//
+//   acknowledge 只改 state 不删记录(5.5 有意为之),所以表里既有 Active 的,
+//   也有 Acknowledged 还没恢复的。行数 ≠ 未确认数 —— 按行数算的话,
+//   操作员确认过的报警仍然被计入,"全部确认"的按钮会一直亮着。
+int hmi::alarmUnacknowledgedCount() const {
+    if (!alarmMgr_) return 0;
+    int n = 0;
+    const auto alarms = alarmMgr_->activeAlarms();
+    for (const Alarm& a : alarms) {
+        if (a.state == AlarmState::Active) ++n;
+    }
+    return n;
+}
+
+// ★ 2026-10-14:一次确认全部。
+//
+//   【为什么值得做】现场一次异常往往同时来七八条报警,
+//   只有单条确认入口的话,操作员得双击/右键七八次 —— 而他此时最该做的是
+//   去现场看一眼,不是点鼠标。
+//
+//   【返回值的用法】acknowledgeAll() 内部逐条调 acknowledge(),
+//   权限不足时每条都返回 false → 这里拿到 0。分三种情况讲清楚:
+//     ① 确认到了 N 条   → 报个数
+//     ② 一条都没确认到 且没权限 → 明确告诉他是权限问题(该找管理员)
+//     ③ 一条都没确认到 且有权限 → 本来就没有未确认的(按了也没必要)
+void hmi::onAlarmAcknowledgeAll() {
+    const int pending = alarmUnacknowledgedCount();
+    if (pending == 0) {
+        QMessageBox::information(this, "无需确认", "当前没有未确认的报警。");
+        return;
+    }
+
+    const int acked = alarmMgr_->acknowledgeAll();
+    if (acked > 0) {
+        qCInfo(hmiAlarm) << "[Alarm] 全部确认:" << acked << "条(共" << pending << "条待确认)";
+        // 成功就把"全部确认"自己灰掉 —— 否则菜单下次打开时它还亮着,
+        // 而按下去只会得到一句"当前没有未确认的报警"。
+        if (alarmAckAllAction_) alarmAckAllAction_->setEnabled(false);
+        return;
+    }
+
+    // 一条都没确认成。两种可能,提示文案要分开。
+    if (!qwhmi::auth::checkPermission(qwhmi::auth::CurrentUser::instance().role(),
+                                     qwhmi::auth::Permission::AcknowledgeAlarm)) {
+        QMessageBox::warning(this, "无法确认报警",
+            QString("当前用户「%1」没有确认报警的权限。\n请让管理员确认后再试。")
+                .arg(qwhmi::auth::CurrentUser::instance().name()));
+        return;
+    }
+    // 有权限却一条没确认成 —— 说明 pending 刚被别处清掉了(比如另一路刚恢复)。
+    // 这不是错误,不该弹窗打断操作员。
+    qCInfo(hmiAlarm) << "[Alarm] 全部确认无事可做:待确认" << pending
+                     << "条,但 acknowledgeAll 返回" << acked;
 }
 
 // ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):右键菜单"确认"槽 → 用 ID 调 acknowledge
@@ -1626,6 +1788,10 @@ void hmi::onAlarmAcknowledge() {
 void hmi::onAllAlarmsCleared() {
     ui.alarmTable->setRowCount(0);
     alarmBlinkTimer_->stop();
+    // ★ 2026-10-14:相位必须复位。清表后如果相位还停在"亮相",
+    //   下一条新报警的第一帧就是浅色,要等 500ms 才切回本档色 ——
+    //   用户看到的是"新报警颜色不对,过一会儿才对"。
+    alarmBlinkOn_ = false;
     qDebug() << "[Alarm 全部清除]";
 }
 

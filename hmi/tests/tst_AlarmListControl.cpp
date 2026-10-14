@@ -94,6 +94,16 @@ private slots:
     //   拿 WCAG 公式一算,那句话是假的(亮红配白字只有 3.33:1)。
     //   注释留不住 —— 得让测试拦住下一次调色。
     void blink_textStaysReadableInBothPhases();
+
+    // ===== ★ 2026-10-14:"全部确认" =====
+    //   AlarmManager::acknowledgeAll() 从 5.5 就写好了、也返回真实条数(F3 改的),
+    //   但全项目没有任何入口调它 —— 建好了没接线。
+    //   而现场一次异常往往同时来七八条,只有单条确认的话操作员得挨个点。
+    void ackAll_buttonDisabledWhenNothingPending();
+    void ackAll_acknowledgesEveryActiveAlarm();
+    void ackAll_leavesAlreadyAcknowledgedRowsAlone();
+    void ackAll_withoutPermission_saysSo();
+    void ackAll_buttonReenablesAfterNewAlarm();
 };
 
 // ===== 公共 fixture =====
@@ -713,6 +723,123 @@ void TestAlarmListControl::blink_emergencyAndCriticalKeepDistinctColors() {
     // 亮相也要和暗相不同,否则根本没在闪
     QVERIFY(critLit != critDark);
     QVERIFY(emgLit  != emgDark);
+}
+
+// ===== ★ 2026-10-14:"全部确认" =====
+
+// 没有待确认的时按钮必须是灰的。
+// 一直亮着的按钮按下去只得到一句"没有可确认的",在操作员眼里就是坏了。
+void TestAlarmListControl::ackAll_buttonDisabledWhenNothingPending() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+    QVERIFY2(!f.ctl.ackAllEnabled(), "刚接上数据源、一条报警都没有,按钮就该是灰的");
+
+    f.checker->fireTrigger(Fx::makeAlarm(9001, AlarmLevel::Critical, "温度高"));
+    QTest::qWait(30);
+    QVERIFY2(f.ctl.ackAllEnabled(), "有未确认报警时按钮必须可点,否则操作员没法一次处理完");
+}
+
+void TestAlarmListControl::ackAll_acknowledgesEveryActiveAlarm() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    // 四档全来 —— 现场一次异常往往不止一条,而且不止一个等级。
+    f.checker->fireTrigger(Fx::makeAlarm(9101, AlarmLevel::Info,      "巡检提示"));
+    f.checker->fireTrigger(Fx::makeAlarm(9102, AlarmLevel::Warning,   "压力偏高"));
+    f.checker->fireTrigger(Fx::makeAlarm(9103, AlarmLevel::Critical,  "温度高"));
+    f.checker->fireTrigger(Fx::makeAlarm(9104, AlarmLevel::Emergency, "电机过载"));
+    QTest::qWait(30);
+    QCOMPARE(f.ctl.rowCount(), 4);
+    QCOMPARE(f.ctl.unacknowledgedCount(), 4);
+
+    f.ctl.acknowledgeAll();
+    QTest::qWait(30);
+
+    // ★ 断言的是 Alarm::state,不是表格文字 —— 文字谁都能写,
+    //   state 才是"真的被确认了"的证据(同 F3 doubleClick 那条的写法)。
+    for (qint64 id : {9101, 9102, 9103, 9104}) {
+        const Alarm* a = f.mgr.findAlarm(id);
+        QVERIFY2(a, qPrintable(QStringLiteral("报警 %1 不见了").arg(id)));
+        QVERIFY2(a->state == AlarmState::Acknowledged,
+                 qPrintable(QStringLiteral("报警 %1 状态不对,期望 Acknowledged").arg(id)));
+    }
+    QCOMPARE(f.ctl.unacknowledgedCount(), 0);
+    QVERIFY2(!f.ctl.ackAllEnabled(), "全部确认完成后按钮必须回到灰的");
+    // 记录一条都不能少 —— 复位不该清历史(5.5 有意为之)
+    QCOMPARE(f.mgr.count(), 4);
+}
+
+// 已经确认过、但还没恢复的报警,不该被"全部确认"再算一次,
+// 更不该因为重算而丢掉原来的确认时间。
+void TestAlarmListControl::ackAll_leavesAlreadyAcknowledgedRowsAlone() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(9201, AlarmLevel::Critical, "温度高"));
+    f.checker->fireTrigger(Fx::makeAlarm(9202, AlarmLevel::Critical, "压力高"));
+    QTest::qWait(30);
+
+    QVERIFY(f.mgr.acknowledge(9201));   // 先单独确认一条
+    QTest::qWait(30);
+    QCOMPARE(f.ctl.unacknowledgedCount(), 1);
+    QVERIFY(f.ctl.ackAllEnabled());     // 还剩一条,所以按钮仍可点
+
+    f.ctl.acknowledgeAll();
+    QTest::qWait(30);
+
+    QCOMPARE(f.ctl.unacknowledgedCount(), 0);
+    QCOMPARE(f.mgr.count(), 2);         // 两条记录都还在
+    const Alarm* a1 = f.mgr.findAlarm(9201);
+    QVERIFY(a1);
+    QCOMPARE(int(a1->state), int(AlarmState::Acknowledged));
+    QVERIFY(a1->acknowledgedAt.isValid());   // 确认时间没被后来的那次冲掉
+}
+
+void TestAlarmListControl::ackAll_withoutPermission_saysSo() {
+    loginAs(qwhmi::auth::Role::Viewer, "只读用户");   // tst_Permission:61 已确认无 AcknowledgeAlarm
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(9301, AlarmLevel::Critical, "温度高"));
+    f.checker->fireTrigger(Fx::makeAlarm(9302, AlarmLevel::Critical, "压力高"));
+    QTest::qWait(30);
+
+    f.ctl.acknowledgeAll();
+    QTest::qWait(30);
+
+    // 一条都没被确认
+    QCOMPARE(f.ctl.unacknowledgedCount(), 2);
+    // ★ 但界面必须明说,不能沉默 —— 沉默的话操作员会以为是程序坏了
+    QVERIFY2(f.ctl.countText().contains(QStringLiteral("无确认权限")),
+             qPrintable(QStringLiteral("无权限时必须在界面上说明,不能静默。实际显示:%1")
+                            .arg(f.ctl.countText())));
+
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");   // 还原,CurrentUser 是进程内单例
+}
+
+// 确认完之后再来一条新报警,按钮必须重新亮起来 ——
+// 否则"全部确认"只能用一次,那等于没加。
+void TestAlarmListControl::ackAll_buttonReenablesAfterNewAlarm() {
+    loginAs(qwhmi::auth::Role::Operator, "操作员甲");
+    Fx f;
+    f.ctl.setAlarmManager(&f.mgr);
+
+    f.checker->fireTrigger(Fx::makeAlarm(9401, AlarmLevel::Critical, "温度高"));
+    QTest::qWait(30);
+    QVERIFY(f.ctl.ackAllEnabled());
+
+    f.ctl.acknowledgeAll();
+    QTest::qWait(30);
+    QVERIFY2(!f.ctl.ackAllEnabled(), "确认完后按钮该灰掉");
+
+    f.checker->fireTrigger(Fx::makeAlarm(9402, AlarmLevel::Emergency, "电机过载"));
+    QTest::qWait(30);
+    QVERIFY2(f.ctl.ackAllEnabled(), "又来一条未确认的,按钮必须重新可点 —— "
+                                    "只亮一次的按钮等于没加");
+    QCOMPARE(f.ctl.unacknowledgedCount(), 1);
 }
 
 QTEST_MAIN(TestAlarmListControl)

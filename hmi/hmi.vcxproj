@@ -404,4 +404,9 @@
   </ImportGroup>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\alarm\AlarmRowPalette.cpp" />
+    <ClInclude Include="src\alarm\AlarmRowPalette.h" />
+  </ItemGroup>
 </Project>
