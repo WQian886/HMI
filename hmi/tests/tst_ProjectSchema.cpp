@@ -25,6 +25,9 @@
 #include "PollScheduler.h"
 #include "JsonSerializer.h"
 #include "ThresholdAlarmChecker.h"
+// ★ 2026-10-14:loadFromFile_leavesNoCheckerOnDeadVariable 用 QPointer 判老 checker
+//   是否被销毁。改之前拿裸指针比地址,那是 UB —— 详见那个用例下面的长注释。
+#include <QPointer>
 // ★ E.3 测试:controls 序列化需要 ControlBase
 #include "widgets/BarControl.h"
 #include "widgets/LedControl.h"
@@ -537,6 +540,8 @@ void TestProjectSchema::loadFromFile_leavesNoCheckerOnDeadVariable() {
     oldCfg.direction = Direction::Below;
     oldCfg.threshold = 10.0;
     auto* oldChecker = new ThresholdAlarmChecker(QStringLiteral("老报警"), oldTemp, &ps, oldCfg, &am);
+    // ★ 用 QPointer 跟踪,不用裸指针 —— 原因见下面断言处的长注释。
+    QPointer<ThresholdAlarmChecker> oldCheckerP(oldChecker);
     QVERIFY(am.addChecker(oldChecker));
     QCOMPARE(am.checkers().size(), 1);
     QCOMPARE(am.checkers().first(), oldChecker);
@@ -544,8 +549,33 @@ void TestProjectSchema::loadFromFile_leavesNoCheckerOnDeadVariable() {
     Project p(&vm, &am, nullptr, &ps, nullptr);
     QVERIFY2(p.loadFromFile(path), "这个工程文件自己都读不回来,后面测的就不是清场问题了");
 
-    // 加载完:老 checker 必须已经不在了(它是靠 clearAll 走的)
-    QVERIFY2(am.checkers().size() == 1 && am.checkers().first() != oldChecker,
+    // ★★ 2026-10-14 重写这条断言 —— 它原来是【间歇性失败】的(实测 200 次红 10 次,5%)。
+    //
+    // 【原来为什么红】
+    //   原写法是 `am.checkers().first() != oldChecker`,拿两个【裸指针比地址】。
+    //   而 AlarmManager::clearAll()(AlarmManager.cpp:121)干的是
+    //       delete it.value();      // ← 真的把 checker 释放了
+    //   于是 oldChecker 在断言那行已经是【悬空指针】。
+    //   紧接着 loadFromFile 又 new 了一个新 checker —— 刚 free 掉的内存块
+    //   很可能被【原样复用】,于是新 checker 的地址 == oldChecker 的旧地址,
+    //   两个裸指针相等,断言判成"老 checker 还活着",【红】。
+    //   5% 的间歇率正好对应"内存偶尔没被复用"。
+    //
+    // 【为什么这是测试缺陷,不是产品缺陷】
+    //   产品行为一直是对的:clearAll 确实把老 checker 删了,新 checker 确实是新的。
+    //   错的是【用已释放的地址当身份标识】—— 拿悬空指针做比较本身就是 UB,
+    //   编译器完全可以据此优化出任意结果。测试自己的假绿/假红跟产品无关。
+    //
+    // 【现在怎么判】
+    //   QPointer 会被 QObject 析构函数自动置 null —— 这是【真身份】判断:
+    //   对象被销毁 ⇒ 指针为空,跟内存有没有被复用【完全无关】。
+    //   两个条件各管各的,谁也替代不了谁:
+    //     oldCheckerP.isNull()      老 checker 真的没了
+    //     size() == 1                新工程确实只留了一个 checker
+    QVERIFY2(am.checkers().size() == 1,
+             qPrintable(QStringLiteral(
+                 "换工程之后 checker 数量应为 1,实际 %1 个").arg(am.checkers().size())));
+    QVERIFY2(oldCheckerP.isNull(),
              "换工程之后老 checker 还活着 —— 它攥着的变量早就被删了");
 
     // ★ 核心断言:新 checker 的 variable() 必须是 manager 里【现存】的那个指针。
