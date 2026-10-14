@@ -38,7 +38,28 @@ public:
     void stop();
 
     // 配置超时(默认 5 分钟)
-    void setTimeoutMs(int ms) { timeoutMs_ = ms; if (timer_->isActive()) start(); }
+    //
+    // ★ BUGFIX(2026-10-14):原来是【假 setter】——
+    //     void setTimeoutMs(int ms) { timeoutMs_ = ms; if (timer_->isActive()) start(); }
+    //   它只改成员变量,从没调过 timer_->setInterval()。
+    //   而 setInterval(timeoutMs_) 只在【构造函数】里调过一次,
+    //   所以这个 setter 改成什么值,计时器实际走的都还是构造时的 5 分钟。
+    //   那个 if (timer_->isActive()) start() 也只是【重新启动】,
+    //   重启用的是 timer_ 上【现存的 interval】—— 还是 5 分钟。
+    //
+    //   【危害】不崩不报错,只是【安静地不生效】:
+    //   调用者以为"超时改成 30 秒了",实际 5 分钟。
+    //   这类 bug 最难查 —— 代码读起来完全合理,行为却不跟字面意思走。
+    //
+    //   【怎么发现的】做 --soak 时要给这个类补测试(它此前零覆盖),
+    //   新写的 tst_InactivityWatcher 第一轮就有 5 条红,
+    //   根因全指向这里。见该文件里 setTimeoutMs_actuallyChangesTheTimer 的注释。
+    void setTimeoutMs(int ms) {
+        timeoutMs_ = ms;
+        // ★ 关键:必须同步到计时器。只改字段的话计时器完全不知情。
+        if (timer_ != nullptr) timer_->setInterval(ms);
+        if (timer_ != nullptr && timer_->isActive()) start();
+    }
     int timeoutMs() const { return timeoutMs_; }
 
 protected:

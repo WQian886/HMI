@@ -35,6 +35,13 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/UserStore.cpp
     # 阶段 B · B2.2 CurrentUser
     ${HMI_SRC_DIR}/src/auth/CurrentUser.cpp
+    # ★ 2026-10-14:B2.2 InactivityWatcher(自动注销)
+    #   【为什么现在才加】做 24h 长跑的 --soak 时发现它【零测试覆盖】——
+    #   而它是个【安全特性】(5 分钟无操作自动注销)。
+    #   --soak 要在长跑期间关掉它,那就等于改了安全特性的生命周期,
+    #   却没有一个测试能回答"正常路径有没有被弄坏"。
+    #   这跟改善清单 #13 一模一样的结构:【没有测试 ≠ 改动安全】。
+    ${HMI_SRC_DIR}/src/auth/InactivityWatcher.cpp
     # 阶段 B · B3 Permission
     ${HMI_SRC_DIR}/src/auth/Permission.cpp
     # 阶段 B · B4 UI 权限绑定
@@ -195,6 +202,9 @@ add_hmi_test(tst_UserManager)
 add_hmi_test(tst_UserStore)
 # 阶段 B · B2.2
 add_hmi_test(tst_CurrentUser)
+# ★ 2026-10-14:B2.2 InactivityWatcher 此前零覆盖,补上
+#   (它被 --soak 改了生命周期,而它是安全特性)
+add_hmi_test(tst_InactivityWatcher)
 # 阶段 B · B3
 add_hmi_test(tst_Permission)
 # 阶段 B · B4
