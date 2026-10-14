@@ -106,8 +106,8 @@ hmi::hmi(QWidget *parent)
 	connect(ui.resetButton, &QPushButton::clicked, this, &hmi::onResetClicked);//   当 resetButton 被点击时调用 hmi::onResetClicked
 
     // ★ D.4.1(2026-09-20):D.4 CSV 导出按钮 — QFileDialog → CsvExporter
-    connect(ui.exportVariablesBtn, &QPushButton::clicked, this, &hmi::onExportVariablesClicked);
-    connect(ui.exportAlarmsBtn,    &QPushButton::clicked, this, &hmi::onExportAlarmsClicked);
+    connect(ui.exportVariablesButton, &QPushButton::clicked, this, &hmi::onExportVariablesClicked);
+    connect(ui.exportAlarmsButton,    &QPushButton::clicked, this, &hmi::onExportAlarmsClicked);
 
     // ★ E.1a 演示画布(2026-09-20)— 1-2 h 临时 demo,挂 6 控件到主窗口
     //   hmi.ui 没改;程序化建按钮 + 绑 onClicked
@@ -194,9 +194,9 @@ hmi::hmi(QWidget *parent)
 
     // TCP 控件按钮(注意:这些按钮的槽函数名都不是 on_<obj>_<signal> 格式,
     // 不会触发自动连接,只能靠上面这堆 connect 把信号接上)
-	connect(ui.connectBtn, &QPushButton::clicked, this, &hmi::onConnectClicked); // 当 connectBtn 被点击时调用 hmi::onConnectClicked
-	connect(ui.disconnectBtn, &QPushButton::clicked, this, &hmi::onDisconnectClicked);// 当 disconnectBtn 被点击时调用 hmi::onDisconnectClicked
-	connect(ui.sendBtn, &QPushButton::clicked, this, &hmi::onSendClicked);//      当 sendBtn 被点击时调用 hmi::onSendClicked
+	connect(ui.connectButton, &QPushButton::clicked, this, &hmi::onConnectClicked); // 当 connectButton 被点击时调用 hmi::onConnectClicked
+	connect(ui.disconnectButton, &QPushButton::clicked, this, &hmi::onDisconnectClicked);// 当 disconnectButton 被点击时调用 hmi::onDisconnectClicked
+	connect(ui.sendButton, &QPushButton::clicked, this, &hmi::onSendClicked);//      当 sendButton 被点击时调用 hmi::onSendClicked
 
     // ★ 阶段 C · C.4(2026-09-18):协议选择下拉框信号(教训 1.5 跨协议 UX 锁)
     connect(ui.protocolComboBox, &QComboBox::currentTextChanged,
@@ -279,12 +279,12 @@ hmi::hmi(QWidget *parent)
     // 2026-07-09:UI 防抖 —— pending_ 变空时重新启用发送按钮
     // ★ C.1:idle 是 ModbusMaster 特有,需要从 ModbusDriver.inner() 取
     connect(modbusDriver->inner(), &ModbusMaster::idle, this, [this](){
-        ui.modbusSendBtn->setEnabled(true);
+        ui.modbusSendButton->setEnabled(true);
         statusBar()->showMessage("Modbus 空闲,可发下一帧", kStatusBarShortMs);  // ★ IMPROVE-B4
     });
 
     // 2026-07-07 重设计:通用「发送」按钮 — 靠 fcCombo 区分读/写
-    connect(ui.modbusSendBtn, &QPushButton::clicked, this, [this](){
+    connect(ui.modbusSendButton, &QPushButton::clicked, this, [this](){
         QString host = ui.ipEdit->text().trimmed();
         bool ok;
         quint16 port = ui.portEdit->text().toUShort(&ok);
@@ -655,7 +655,7 @@ hmi::hmi(QWidget *parent)
     // ★ B4(2026-09-17):画面级权限 - 按钮 enabled 跟 CurrentUser.role 挂钩
     //   B3 已在 Binding.cpp:148 / AlarmManager.cpp:35 拦截动作发生瞬间(兜底),
     //   这里负责"动作发生前 UI 就灰",提升 UX、减少无效点击 + 拒日志噪音。
-    //   connectBtn/disconnectBtn 不绑:任何角色都要能连 PLC 看数据
+    //   connectButton/disconnectButton 不绑:任何角色都要能连 PLC 看数据
     //   speedWriteEdit 是 QLineEdit 不是按钮,B3 在回车时拦
     //   托盘"用户管理"在 SystemTray.cpp 里 bindActionEnable(ManageUsers)
     qwhmi::auth::bindButtonEnable(ui.startButton, qwhmi::auth::Permission::WriteVariable);
@@ -754,7 +754,7 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
 
     if (!reply) return;
     // 2026-07-09:UI 防抖 —— 请求已发,按钮变灰,等 idle 信号再亮
-    ui.modbusSendBtn->setEnabled(false);
+    ui.modbusSendButton->setEnabled(false);
     statusBar()->showMessage("Modbus 请求中...", kStatusBarShortMs);  // ★ IMPROVE-B4
 
     // 2026-07-07 重设计:跟 Qt 官方写法一致 — reply->finished 拿数据
@@ -1419,13 +1419,13 @@ void hmi::updateButtons() {
     ui.stopButton->setEnabled(canWrite && tcpReady && state == State::Running);
     ui.resetButton->setEnabled(canWrite && tcpReady && state != State::Resetting);
 
-    // 网络按钮:Reconnecting 时 connectBtn 灰掉,disconnectBtn 仍可点(用户取消)
+    // 网络按钮:Reconnecting 时 connectButton 灰掉,disconnectButton 仍可点(用户取消)
     //   不加 canWrite:Viewer 也要能连 PLC 看数据(B4 设计如此)
-    ui.connectBtn->setEnabled(tcpIdle);
-    ui.disconnectBtn->setEnabled(!tcpIdle || isReconnecting);
+    ui.connectButton->setEnabled(tcpIdle);
+    ui.disconnectButton->setEnabled(!tcpIdle || isReconnecting);
 
     // 发送按钮:必须已连(断网时灰掉避免发不出去)
-    ui.sendBtn->setEnabled(tcpReady);
+    ui.sendButton->setEnabled(tcpReady);
 }
 
 // Modbus 侧 modbusResultLabel(2026-07-08 收敛:统一用 lastResultText_)

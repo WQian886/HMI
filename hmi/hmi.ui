@@ -62,7 +62,7 @@
       </item>
       <item>
        <!-- ★ D.4.1(2026-09-20):导出历史 CSV(D.4 CsvExporter 接 UI) -->
-       <widget class="QPushButton" name="exportVariablesBtn">
+       <widget class="QPushButton" name="exportVariablesButton">
         <property name="minimumSize">
          <size><width>80</width><height>32</height></size>
         </property>
@@ -71,7 +71,7 @@
       </item>
       <item>
        <!-- ★ D.4.1(2026-09-20):导出报警 CSV(D.4 CsvExporter 接 UI) -->
-       <widget class="QPushButton" name="exportAlarmsBtn">
+       <widget class="QPushButton" name="exportAlarmsButton">
         <property name="minimumSize">
          <size><width>80</width><height>32</height></size>
         </property>
@@ -163,7 +163,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="connectBtn">
+       <widget class="QPushButton" name="connectButton">
         <property name="minimumSize">
          <size><width>80</width><height>40</height></size>
         </property>
@@ -171,7 +171,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="disconnectBtn">
+       <widget class="QPushButton" name="disconnectButton">
         <property name="minimumSize">
          <size><width>80</width><height>40</height></size>
         </property>
@@ -191,7 +191,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="sendBtn">
+       <widget class="QPushButton" name="sendButton">
         <property name="minimumSize">
          <size><width>80</width><height>40</height></size>
         </property>
@@ -246,7 +246,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="modbusSendBtn">
+       <widget class="QPushButton" name="modbusSendButton">
         <property name="text"><string>发送</string></property>
        </widget>
       </item>

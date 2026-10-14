@@ -57,6 +57,20 @@
     不启动新进程,观察已经在跑的 hmi.exe。
     用途:你今晚忘了关自己那个 hmi,又不想白跑 —— 观察也能拿到资源曲线,
     但要清楚这不是"受控长跑"(没有干净的基线,崩溃标记可能已经是脏的)。
+    ⚠ 本模式下 -SoakUser/-SoakPass 无效(不重启进程就加不上启动参数),
+    给了会直接报错退出 —— 不是静默忽略。
+
+.PARAMETER SoakUser
+.PARAMETER SoakPass
+    2026-10-14 新增,用来拆掉长跑的两道人工阻塞:
+      (1) LoginDialog::exec() 是模态阻塞的,脚本点不了它;
+      (2) InactivityWatcher 5 分钟无操作会自动注销并【再次弹出登录框】,
+          长跑期间没人碰键盘鼠标 —— 24 小时会弹 288 次,每次都把
+          Modbus 轮询和报警引擎堵停一次。
+    给了这两个参数,启动时会带上 hmi.exe 的 --soak,自动登录并关闭自动注销。
+    【安全边界】不是免认证:要求该用户已存在于 users.json,
+    且调的是同一个 UserManager::authenticate 核密码,错则拒绝启动。
+    【必须成对给】只给一个会认证失败退出,脚本会提前拦下并说明原因。
 
 .PARAMETER OutDir
     报告落盘目录。默认 soaks/<时间戳>/。
@@ -68,6 +82,13 @@
 .EXAMPLE
     .\scripts\long_run.ps1 -Hours 24 -IntervalSec 60
     真正的 24h。启动前请确认机器今晚不会关机/重启。
+
+.EXAMPLE
+    .\scripts\long_run.ps1 -Hours 24 -SoakUser admin -SoakPass '你的密码'
+    真正的 24h 受控长跑(自动登录,不需人工干预)。启动前请确认:
+      · 机器今晚不会关机/重启
+      · 【没有别的 hmi.exe 在跑】—— 单实例锁会让第二次启动直接退出
+      · 已连上 PLC(否则验不了「不掉线」,只能验资源曲线和崩溃链条)
 
 .NOTES
     日志读取有两处必须显式指定,否则拿到的全是错的:
@@ -84,6 +105,31 @@ param(
     [int]    $IntervalSec  = 60,
     [switch] $AdoptExisting,
     [string] $OutDir,
+
+    # ---- 2026-10-14:把长跑的两道人工阻塞拆掉 --------------------------
+    #  为什么需要这两个参数
+    #  -------------------
+    #  之前三次长跑全判 UNKNOWN,根因不在被测代码,在人机界面:
+    #
+    #    (1) LoginDialog::exec() 是模态阻塞的(main.cpp:254)。
+    #        长跑脚本没法点它,进程停在登录框,CPU 约 0.5%,
+    #        报警引擎和 Modbus 轮询根本没跑起来。
+    #
+    #    (2) ★ 就算人工登录了,InactivityWatcher 会在 5 分钟无操作后
+    #        自动注销并【再次弹出模态登录框】(main.cpp:265-282)。
+    #        长跑期间没人碰鼠标键盘 —— 24 小时里会弹 288 次,
+    #        每弹一次主流程就阻塞一次,轮询全停。
+    #        这一条比第一条更隐蔽:它不是"没登录",是"周期性冻结",
+    #        资源曲线会呈锯齿状,看着像泄漏其实不是。
+    #
+    #  所以 -SoakUser/-SoakPass 启动时会带上 hmi.exe 的 --soak 开关。
+    #  【安全边界】它不是免认证:仍然要求 users.json 里已存在该用户,
+    #  并且调的是同一个 UserManager::authenticate 核密码,错则拒绝启动。
+    #  被跳过的只有那个 QDialog,以及长跑期间的自动注销计时。
+    #  【为什么不给默认账号】凭据必须显式给 —— 脚本替用户猜账号密码,
+    #  一旦猜中就等于默认放行,那才是后门。
+    [string] $SoakUser = '',
+    [string] $SoakPass = '',
 
     # ---- 判据阈值 ----
     # 做成参数不是为了"调",是为了能被【证伪】:
@@ -208,6 +254,18 @@ if ($existing.Count -gt 0) {
     }
     $owned = $p
     Say "采用 -AdoptExisting:只观察,不接管、不杀。" 'Yellow'
+
+    # ★ 静默失效要堵:观察模式下【不会重启进程】,所以下面启动段那整套
+    #   --soak 参数根本不会被使用。给了 -SoakUser/-SoakPass 却不报错,
+    #   等于让人以为"我配了自动登录",实际跑的是那个还停在登录框的旧进程 ——
+    #   然后收获一个 UNKNOWN,还要花半小时想为什么。
+    #   这类"参数被接受但没用"比直接报错坏得多。
+    if ($SoakUser -or $SoakPass) {
+        Say "-SoakUser/-SoakPass 在 -AdoptExisting 下【无效】:" 'Red'
+        Say "  观察模式不重启进程,没法给它加启动参数 —— 你观察的还是原来那个。" 'Red'
+        Say "  要真正用 --soak 长跑,请先关掉已有 hmi,再去掉 -AdoptExisting。" 'Red'
+        exit 1
+    }
 }
 
 # ---- 前置 2:找可执行文件 -------------------------------------------
@@ -253,10 +311,45 @@ if ($baselineMarker.Exists) {
 # ---- 启动 ------------------------------------------------------------
 if (-not $AdoptExisting) {
     Say ("启动 hmi.exe,计划跑 {0} 小时,每 {1} 秒采一次" -f $Hours, $IntervalSec) 'Cyan'
-    $owned = Start-Process -FilePath $exe -PassThru
+
+    # ★ 凭据必须【成对】给。给一半就启动,程序会因认证失败退出,
+    #   而退出发生在 QApplication 之后、日志就绪之后 —— 但也可能更早,
+    #   届时日志里什么都没有,现场只剩一句"启动后 5 秒就退出了(exit=)"。
+    #   在这里挡住,比让它跑起来再崩要好排查得多。
+    if ([bool]$SoakUser -xor [bool]$SoakPass) {
+        Say "-SoakUser 和 -SoakPass 必须【成对】给(只给一个会认证失败退出)。" 'Red'
+        exit 1
+    }
+
+    $launchArgs = @()
+    if ($SoakUser -and $SoakPass) {
+        $launchArgs = @('--soak', '--soak-user', $SoakUser, '--soak-pass', $SoakPass)
+        Say "长跑模式:已启用 --soak(自动登录 + 关闭自动注销)" 'Green'
+        Say "  → 不再需要人工点登录框" 'Green'
+        Say "  → 不再需要每 5 分钟动一下鼠标(否则会自动注销并弹框阻塞)" 'Green'
+    } else {
+        Say "★ 未给 -SoakUser/-SoakPass —— 进程会停在登录框,本轮必然判 UNKNOWN。" 'Yellow'
+        Say "  长跑要用:.\scripts\long_run.ps1 -Hours 24 -SoakUser <用户名> -SoakPass <密码>" 'Yellow'
+    }
+
+    $owned = Start-Process -FilePath $exe -ArgumentList $launchArgs -PassThru
     Start-Sleep -Seconds 5
     if ($owned.HasExited) {
-        Say ("启动后 5 秒就退出了(exit={0}) —— 脚手架没跑起来,先查这个" -f $owned.ExitCode) 'Red'
+        # ★ ExitCode 有可能是空的 —— 实测踩过:Start-Process -PassThru 拿到的
+        #   对象在不同时机读 ExitCode 会返回空字符串,格式化成 "exit=" 什么也
+        #   没有。判不出来就明说"取不到",别打一个空串上去装作拿到了 ——
+        #   那正是"看起来在报,其实没信息"的一类假绿。
+        $code = try { $owned.ExitCode } catch { $null }
+        if ($null -eq $code -or "$code" -eq '') {
+            Say "启动后 5 秒就退出了(取不到 exit code) —— 脚手架没跑起来,先查这个。" 'Red'
+        } else {
+            Say ("启动后 5 秒就退出了(exit={0}) —— 脚手架没跑起来,先查这个。" -f $code) 'Red'
+        }
+        if ($SoakUser -and $SoakPass) {
+            Say "  给了 --soak 还退,最可能是【用户名或密码不对】。" 'Red'
+            Say "  程序会打 '[main] --soak 认证失败' 到日志,去 $logDir 里看最新那个。" 'Red'
+        }
+        Say "  也可能是还有别的 hmi.exe 占着单实例锁(见上面的检测)。" 'Red'
         exit 1
     }
     Say ("已启动 PID={0}" -f $owned.Id) 'Green'

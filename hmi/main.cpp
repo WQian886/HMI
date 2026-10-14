@@ -122,10 +122,26 @@ int main(int argc, char *argv[])
         QObject::tr("注册开机自启并退出"));
     QCommandLineOption removeOpt(QStringLiteral("remove-autostart"),
         QObject::tr("注销开机自启并退出"));
+    // ★ 2026-10-14 新增:长跑验收专用旁路(24h soak)。
+    //   【为什么需要】见下面 :265 那段 InactivityWatcher 的注释 ——
+    //   24h 长跑卡在两道人工操作上,这个开关把它们一次性拆掉。
+    //   【安全边界】它只是"跳过交互",不是"跳过认证":
+    //   仍然要求 users.json 里【已经存在】用户,并调用同一个
+    //   UserManager::authenticate 去核密码 —— 密码从命令行给,
+    //   见 :252 那段的处理。没有任何一条路径能凭空造出一个用户。
+    QCommandLineOption soakOpt(QStringLiteral("soak"),
+        QObject::tr("长跑验收模式:用已存在用户自动登录并关闭自动注销(见 scripts/long_run.ps1)"));
+    QCommandLineOption soakUserOpt(QStringLiteral("soak-user"),
+        QObject::tr("配合 --soak 使用的用户名"), QStringLiteral("name"));
+    QCommandLineOption soakPassOpt(QStringLiteral("soak-pass"),
+        QObject::tr("配合 --soak 使用的密码"), QStringLiteral("pwd"));
     parser.addOption(minimizeOpt);
     parser.addOption(projectOpt);
     parser.addOption(installOpt);
     parser.addOption(removeOpt);
+    parser.addOption(soakOpt);
+    parser.addOption(soakUserOpt);
+    parser.addOption(soakPassOpt);
     parser.addHelpOption();
     parser.addVersionOption();
     parser.process(app);
@@ -239,6 +255,8 @@ int main(int argc, char *argv[])
         });
 
     // ★ B1.3:加载 users.json + 首启引导
+    //   soakMode 在这里先定下来:下面登录分支和自动注销两处都要读它。
+    const bool soakMode = parser.isSet(soakOpt);
     const int loaded = auth::UserStore::load(userMgr);
     qCInfo(hmiApp) << "[main] userMgr 启动:load=" << loaded
                    << "hasUsers=" << (userMgr.hasUsers() ? "yes" : "no");
@@ -251,19 +269,79 @@ int main(int argc, char *argv[])
         // signals 已接 save,这里不用手动 save
     } else {
         // ★ B2.1:已有用户 → 必须登录;B2.2:登录成功 → CurrentUser.login
-        auth::LoginDialog loginDlg(userMgr);
-        if (loginDlg.exec() != QDialog::Accepted) {
-            qCWarning(hmiApp) << "[main] 用户取消登录,拒绝启动";
-            return 1;
+        //
+        // ★ 2026-10-14 新增 --soak 分支(24h 长跑验收专用)。
+        //   【为什么】正常路径的 LoginDialog::exec() 是模态阻塞的,
+        //   长跑脚本没法点它 —— 前三次 soak 因此全判 UNKNOWN。
+        //   而 InactivityWatcher 5 分钟无操作还会再弹一次,
+        //   就算人工登录了,24h 里也要人工点 288 次。
+        //
+        //   【安全边界 —— 这段是重点,别当成后门】
+        //   1. 必须【已经存在用户】才走这条路:这个分支在 else 里,
+        //      users.json 为空时上面 :245 的 AdminSetupDialog 分支照旧,
+        //      --soak 不会凭空造出一个用户。
+        //   2. 仍然调 UserManager::authenticate 核密码 —— 密码错直接退出,
+        //      认证逻辑跟人工登录是【同一段代码】,没有旁路。
+        //   3. 走的是同一个 CurrentUser::login,权限体系照常生效:
+        //      Viewer 登录后 start/stop 照样是灰的。
+        //   唯一被跳过的只有"那个 QDialog"本身。
+        if (soakMode) {
+            const QString soakName = parser.value(soakUserOpt);
+            const QString soakPass = parser.value(soakPassOpt);
+            if (soakName.isEmpty() || soakPass.isEmpty()) {
+                qCCritical(hmiApp) << "[main] --soak 必须同时给 --soak-user 和 --soak-pass";
+                return 1;
+            }
+            const auth::User* soakUser = nullptr;
+            if (userMgr.authenticate(soakName, soakPass)) {
+                // authenticate 成功后 findUser 必然能查到(UserManager 内部
+                // 就是拿这个名字查的同一张表)。查不到说明两者实现分叉了,
+                // 那宁可退出也不能登录一个空用户 —— 所以这里判空而不是解引用。
+                soakUser = userMgr.findUser(soakName);
+            }
+            if (soakUser == nullptr) {
+                // ★ 这里绝不能降级成"随便挑一个用户登录"——
+                //   那才是真后门。认证失败就是失败,退出。
+                //   authenticate 返 bool 是刻意设计(防用户名枚举,
+                //   UserManager.h:47-48),所以这里不能靠它的返回值区分
+                //   "用户不存在"和"密码错",统一报"认证失败"。
+                qCCritical(hmiApp) << "[main] --soak 认证失败:" << soakName << " 拒绝启动";
+                return 1;
+            }
+            auth::CurrentUser::instance().login(*soakUser);
+            qCInfo(hmiApp) << "[main] --soak 自动登录成功:" << soakUser->name
+                           << "role=" << roleToString(soakUser->role);
+        } else {
+            auth::LoginDialog loginDlg(userMgr);
+            if (loginDlg.exec() != QDialog::Accepted) {
+                qCWarning(hmiApp) << "[main] 用户取消登录,拒绝启动";
+                return 1;
+            }
+            auth::CurrentUser::instance().login(loginDlg.currentUser());
+            qCInfo(hmiApp) << "[main] 登录成功:" << loginDlg.currentUser().name
+                           << "role=" << roleToString(loginDlg.currentUser().role);
         }
-        auth::CurrentUser::instance().login(loginDlg.currentUser());
-        qCInfo(hmiApp) << "[main] 登录成功:" << loginDlg.currentUser().name
-                       << "role=" << roleToString(loginDlg.currentUser().role);
     }
 
     // ★ B2.2:自动注销监听器(install 到 qApp,5 分钟无操作 → 重新弹 LoginDialog)
+    //
+    // ★ 2026-10-14:24h 长跑必须关掉它。这不是"优化",是【长跑能不能跑完】
+    //   的决定性条件 —— 长跑期间没人碰鼠标键盘,5 分钟后这里必然触发,
+    //   然后弹一个模态 LoginDialog 把主流程重新卡住,轮询/报警全停。
+    //   表现和"程序崩了"几乎一样,但它会周期性地反复发生 ——
+    //   资源曲线会呈现"冻结-恢复-冻结"的锯齿,而根因是人机界面,
+    //   不是被测代码。前三次 soak 全 UNKNOWN 卡在登录框,这一条是第二道门。
+    //   只在 --soak 下关;正常运行的自动注销是安全特性,一个字都不改。
     auth::InactivityWatcher inactivityWatcher;
-    inactivityWatcher.installTo(&app);
+    if (soakMode) {
+        // ★ 注意这里【只跳过 installTo + start,不动 connect 本身】——
+        //   留着那条 connect 是有意的:它捕获的 &inactivityWatcher 是个栈对象,
+        //   它的生命周期到 main 结束,连接不会悬空。真正的开关在下面。
+        qCInfo(hmiApp) << "[main] --soak 模式:自动注销保持关闭(长跑期间无人工操作)";
+    }
+    if (!soakMode) {
+        inactivityWatcher.installTo(&app);
+    }
     QObject::connect(&inactivityWatcher, &auth::InactivityWatcher::inactivityTimeout,
                      &app, [&userMgr, &inactivityWatcher]() {
         qCWarning(hmiApp) << "[main] 自动注销触发";
@@ -286,7 +364,12 @@ int main(int argc, char *argv[])
     tray::SystemTray trayIcon(&window);
 
     // 启动 inactivity 监听(必须在主窗口 show 前 install + start)
-    inactivityWatcher.start();
+    // ★ --soak 下不启动:InactivityWatcher::start() 自己会查 installed_,
+    //   没 installTo 时它会 qCWarning 后直接返回 —— 但那行警告在长跑日志里
+    //   看着像故障,所以这里直接跳过,连警告都不产生。
+    if (!soakMode) {
+        inactivityWatcher.start();
+    }
 
     QObject::connect(&trayIcon, &tray::SystemTray::showRequested, &window, [&window]() {
         window.show();
