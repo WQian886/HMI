@@ -74,6 +74,8 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
     # ★ 2026-10-10:协议下拉框置灰(tst_ProtocolComboGrey 调的是这个生产函数)
     ${HMI_SRC_DIR}/src/drivers/ProtocolAvailabilityUi.cpp
+    # ★ 2026-10-16:菜单栏(tst_MenuBar 调的是 hmi.cpp 调的那个同一个 buildApplicationMenu)
+    ${HMI_SRC_DIR}/src/ui/MenuBuilder.cpp
     # 阶段 D · D.1 SQLite 历史库(2026-09-18)
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
     # ★ D.3(2026-09-20):报警持久化(对称 HistoryRecorder + alarm_history 表)
@@ -233,6 +235,10 @@ add_hmi_test(tst_VariableManager)
 add_hmi_test(tst_VariablePlcId)
 # ★ 2026-10-16:多 PLC 2a —— plcs[] 数组存得住,一台都不能被静默丢掉
 add_hmi_test(tst_ProjectMultiPlc)
+# ★ 2026-10-16:菜单栏 —— 逐个菜单项验证它连到了【正确的那个槽】
+#   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
+#   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。
+add_hmi_test(tst_MenuBar)
 add_hmi_test(tst_Serializer)
 # 阶段 B · B1
 add_hmi_test(tst_PasswordHasher)

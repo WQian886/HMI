@@ -243,6 +243,16 @@ private:
     void onAlarmConfigClicked();
     void onAlarmSoundSettings();   // ★ F5:报警声音设置对话框
 
+    // ★★ 2026-10-16:菜单栏
+    //   buildMenus() 在构造函数里调一次,全部 connect 到上面那些【已有槽】,
+    //   没有一行新逻辑 —— 菜单和按钮必须指向同一个实现,否则两边行为会分叉。
+    void buildMenus();
+
+    // 帮助 → "当前支持的功能":把程序的能力边界直接写在界面上。
+    //   【为什么不是个装饰性的"关于"】用户在菜单里点了个没反应的项,
+    //   最该立刻知道的是"这功能到底有没有"。藏起来只会被反复试。
+    void onShowCapabilities();
+
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)
     QString currentProtocol_ = QStringLiteral("modbus");

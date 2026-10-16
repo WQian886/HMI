@@ -115,6 +115,10 @@ set(SOURCES
     #   注:src/history/ 下的文件目前靠下面的 GLOB 兜底捡进来(AlarmRecorder 等
     #   都没写进显式列表)。这一条显式写出来是为了守住"新文件必须登记"的约定。
     src/history/AlarmHistoryView.cpp
+    # ★ 2026-10-16:菜单栏搭建。单独一个文件的原因和 ProtocolAvailabilityUi 同款 ——
+    #   写在 hmi.cpp 里的 UI 逻辑测试只能复制一份跑,测的是副本;
+    #   而"点'打开工程'弹出'保存工程'框"这种错连,副本测试【抓不到】。
+    src/ui/MenuBuilder.cpp
 )
 
 set(HEADERS
@@ -193,6 +197,7 @@ set(HEADERS
     # ★ 2026-10-10:协议下拉框"未实现"标注
     src/drivers/ProtocolAvailabilityUi.h
     src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图
+    src/ui/MenuBuilder.h            # ★ 2026-10-16:菜单栏(抽出来才能被 tst_MenuBar 测到)
 )
 
 set(FORMS

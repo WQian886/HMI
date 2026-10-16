@@ -47,11 +47,14 @@
 #include "auth/CurrentUser.h"   // ★ B4 修复(2026-09-17):updateButtons 需要查 role
 #include "auth/Permission.h"    // ★ B4 修复(2026-09-17):updateButtons 需要查 WriteVariable
 #include "auth/AuditLog.h"      // ★ C.4.2(2026-09-18):protocol.change 审计事件
+#include "ui/MenuBuilder.h"     // ★ 2026-10-16:菜单栏搭建(抽出来才能被 tst_MenuBar 测到真实那份)
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
 #include <QStandardPaths>    // ★ D.4.1:CSV 导出默认路径(桌面)
 #include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
+#include <QMenuBar>          // ★ 2026-10-16:菜单栏(hmi.ui:400 那个一直是空的)
+#include <QKeySequence>      // ★ 2026-10-16:菜单项快捷键(Ctrl+O / Ctrl+S)
 #include <QHeaderView>       // ★ 2026-10-10:两张表的列宽策略(报警名/Variable 吃余量)
 
 // ★ 2026-10-10:两张表里"宽度最不确定"的那一列的下标。
@@ -161,6 +164,27 @@ hmi::hmi(QWidget *parent)
         "需要工程师(Engineer)或管理员(Admin)权限。"));
     ui.buttonRowLayout->addWidget(alarmSoundBtn);
     connect(alarmSoundBtn, &QPushButton::clicked, this, &hmi::onAlarmSoundSettings);
+
+    // ★★ 2026-10-16:菜单栏 —— 把散在按钮行里的功能收进菜单
+    //
+    //   【为什么现在才做】hmi.ui 里一直有个空的 QMenuBar(hmi.ui:400),
+    //   26 个功能全挤在按钮行里。加 PLC 要改 JSON、报警要弹对话框、
+    //   编辑器/运行时画面要按按钮 —— 现场工程师找不到东西在哪。
+    //   这不是"界面不好看",是【功能没法被发现】。
+    //
+    //   【设计原则:菜单项只做"入口",不重造功能】
+    //     每一项都 connect 到【已经存在的槽函数】,没有一行新逻辑。
+    //     理由:菜单和按钮如果各写一份,改一处忘一处,两边行为就会分叉 ——
+    //     而"按钮能用菜单点不了"这种 bug 极难被发现。
+    //     按钮保留(向后兼容 + 已有人习惯),菜单是【同样功能的第二个入口】。
+    //
+    //   【为什么用代码建菜单,不改 .ui】
+    //     .ui 是 Designer 的产物,手改 XML 加 QMenu/QAction 极易写坏
+    //     (元素顺序、property 格式都对不上就静默不生效)。
+    //     而这里的菜单项会随功能增减频繁改动,放代码里 diff 清晰、可 review。
+    //     hmi.ui 里那个空 QMenuBar 保留不动 —— Qt 需要它在,
+    //     menuBar() 拿到的就是它,菜单项加在它下面。
+    buildMenus();
 
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
@@ -845,6 +869,56 @@ void hmi::onStartClicked() {
     tryTransition(Trigger::StartButton);
 }
 void hmi::onStopClicked()   { tryTransition(Trigger::StopButton); }
+
+// ★★ 2026-10-16:菜单栏搭建(见构造函数里的长注释,那里写了"为什么"和"为什么用代码建")
+//
+//   【分组依据】按现场工程师的心智模型分,不按代码模块分:
+//     工程 —— 打开/保存,是每天开头结尾做的事
+//     运行 —— 启停/连接,现场最常用,所以放第一个
+//     画面 —— 编辑器/运行时画面,改画面时才用
+//     报警 —— 配置和声音设置
+//     数据 —— 导出 CSV,交接班/报表用
+//     帮助 —— 放"程序现在做不到什么",比藏起来强
+void hmi::buildMenus() {
+    // ★ 菜单本身在 src/ui/MenuBuilder.cpp 里搭,不在这里。
+    //   原因见那个文件头:菜单写在这儿的花,测试只能复制一份跑,测的是副本;
+    //   而"点'打开工程'弹出'保存工程'对话框"这种错连,副本测试抓不到。
+    //   hmi.cpp 和测试调的是同一个 buildApplicationMenu,测试绿了才算数。
+    const QStringList failed = qwhmi::ui::buildApplicationMenu(menuBar(), this);
+
+    // ★★ 失败必须【在这里】喊出来,不能吞掉。
+    //   tst_MenuBar 用的是假接收者,它只能证明"接到了一个叫这个名字的槽";
+    //   而 receiver 换成 hmi 之后,hmi 到底有没有这个槽,只有这份代码知道。
+    //   字符串 connect 拼错槽名【不崩、不报、只是点了没反应】——
+    //   那是现场最难查的一类故障:用户看到的就是"这个菜单是灰的/没用的"。
+    //   所以每次启动都检查一遍,坏了就喊,而不是等用户去发现。
+    for (const QString& f : failed) {
+        qCWarning(hmiApp) << "[菜单]" << f
+                           << "——该菜单项点了不会有任何反应(槽名和 hmi 里的对不上)";
+    }
+}
+
+void hmi::onShowCapabilities() {
+    QMessageBox::information(this, tr("当前支持的功能"),
+        tr("<h3>✅ 现在就能用</h3>"
+           "<ul>"
+           "<li>连接一台 Modbus TCP 的 PLC（填 IP + 端口）</li>"
+           "<li>读变量：温度 / 压力 / 转速等，绑到画面控件上</li>"
+           "<li>写变量：手动改一个可写值发回 PLC</li>"
+           "<li>报警：上下限、超时、确认、声音、导出</li>"
+           "<li>画面编辑：22 种控件，拖拽排版、撤销重做、复制粘贴</li>"
+           "<li>数据导出：变量表、报警表存成 CSV（交接班/报表用）</li>"
+           "<li>多 PLC：可以配好存进工程文件，<b>但目前只连第 1 台</b></li>"
+           "</ul>"
+           "<h3>⏳ 还没做（菜单里不出现，免得你反复试）</h3>"
+           "<ul>"
+           "<li>多台 PLC 同时在线 —— 在做</li>"
+           "<li>界面上直接加/删 PLC —— 在做</li>"
+           "<li>西门子 S7 / AB EtherNet-IP —— 下拉框里是<b>灰的</b>，真接了才能选</li>"
+           "<li>新建工程（现在只能打开/保存已有工程）</li>"
+           "</ul>"));
+}
+
 // ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):报警值还在时禁止复位 + 复位只确认不删记录
 //   【背景】Wqian 反馈两点:
 //     1) 复位不应该把报警记录清除掉(事故追溯需要)
