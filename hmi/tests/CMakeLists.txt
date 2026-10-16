@@ -227,6 +227,10 @@ target_compile_definitions(tst_ProtocolComboShot PRIVATE
 
 add_hmi_test(tst_Variable)
 add_hmi_test(tst_VariableManager)
+# ★ 2026-10-16:多 PLC 第一块砖 —— plc_id 存住/读回/老工程不受影响
+#   不并进 tst_Serializer:那个是通用序列化测试,这里钉的是
+#   "改这行不会弄坏任何一个已有工程",两者失败含义不同,分开好定位。
+add_hmi_test(tst_VariablePlcId)
 add_hmi_test(tst_Serializer)
 # 阶段 B · B1
 add_hmi_test(tst_PasswordHasher)

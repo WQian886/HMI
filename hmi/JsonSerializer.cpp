@@ -17,6 +17,17 @@ QJsonObject JsonSerializer::toJson(const Variable& v) {
     QJsonObject obj;
     obj["name"]             = v.name();
     obj["address"]          = v.address();
+    // ★ 2026-10-16:plc_id —— 变量归属哪台 PLC(多 PLC 架构第一块砖)
+    //
+    //   【为什么以前没写】Variable 早就有 plcId 字段(Variable.h:163,2026-09-18 加的),
+    //   PollScheduler 也早就会按它分组 —— 但这个字段【从来没进过 JSON】。
+    //   于是工程文件里"两台 PLC 的同名变量"分不出来,plcId 永远是构造时的
+    //   默认值 plc1。整个多 PLC 架构就卡在这一行上。
+    //
+    //   【为什么默认不写也能兼容】下面的 variableFromJson 缺字段时按 "plc1" 兜底,
+    //   而 Variable 自己的默认值也是 plc1 —— 老工程读出来行为完全不变。
+    //   所以这里【总是写】:写出来才看得见、才能手工核对。
+    obj["plc_id"]           = v.plcId();
 
     // DataType: 用 QMetaEnum 反射拿名字(如 "Int16")
     QMetaEnum dataTypeEnum = QMetaEnum::fromType<Variable::DataType>();
@@ -167,6 +178,20 @@ Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj,
     // ★ 6.3 修正:Variable 构造第 5 参数是 QObject*,VariableManager* 要 static_cast
     //   即使 include 了 VariableManager.h,有些编译器还是要求显式转换(保险)
     Variable* v = new Variable(name, address, dataType, access, static_cast<QObject*>(parent));
+
+    // ★ 2026-10-16:plc_id —— 变量归属哪台 PLC
+    //   老工程文件没这个键 → toString("plc1") 兜底,和 Variable 自己的默认值一致,
+    //   所以老工程读进来行为【逐字节不变】。
+    //   空串单独处理:toString("plc1") 只在"键不存在"时兜底,键存在但值是空串
+    //   会原样得到空串 —— 那会让 PollScheduler 按 "" 分组,永远找不到 driver,
+    //   变量从此静默不刷新。所以空串也当缺省处理。
+    {
+        const QString pid = obj["plc_id"].toString(QStringLiteral("plc1"));
+        if (!pid.isEmpty()) {
+            v->setPlcId(pid);
+        }
+    }
+
     v->setDeadband(obj["deadband"].toDouble());
     v->setPollIntervalMs(obj["poll_interval_ms"].toInt(1000));  // 默认 1000ms
     // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板):分级轮询 —— 从 JSON 读 alwaysPoll
@@ -192,6 +217,8 @@ Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj,
         QStringLiteral("data_type"), QStringLiteral("access"),
         QStringLiteral("deadband"), QStringLiteral("poll_interval_ms"),
         QStringLiteral("alwaysPoll"), QStringLiteral("range"),
+        QStringLiteral("plc_id"),   // ★ 2026-10-16:不加的话本程序自己写出去的字段
+                                      //   读回来会报"未知字段已忽略" —— 自己人打自己人
     };
     for (auto it = obj.begin(); it != obj.end(); ++it) {
         if (!kKnown.contains(it.key())) {
