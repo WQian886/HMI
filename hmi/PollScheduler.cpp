@@ -11,6 +11,7 @@
 #include "Variable.h"
 #include "VariableManager.h"
 #include "drivers/IPollDriver.h"
+#include "logging/Logging.h"
 #include <QDateTime>
 #include <QVariant>
 #include <algorithm>
@@ -170,7 +171,7 @@ void PollScheduler::stop() {
 //   解决"断连瞬间 in-flight 的 Variable 永久卡 -1,重连后永远不读"的 bug
 // ★ IMPROVE-A7(2026-07-29):inFlight_ 独立 set 一起清(替原 -1 magic number)
 void PollScheduler::resetAll() {
-    qDebug() << "[PollScheduler] resetAll() — 清 in-flight 残留";
+    qCDebug(hmiPoll) << "[PollScheduler] resetAll() — 清 in-flight 残留";
     for (auto it = nextPollAtMs_.begin(); it != nextPollAtMs_.end(); ++it) {
         it.value() = 0;  // 0 = 立即可发
     }
@@ -186,14 +187,14 @@ void PollScheduler::resetAll() {
 void PollScheduler::addActiveVariable(Variable* v) {
     if (v && !activeVariables_.contains(v)) {
         activeVariables_.insert(v);
-        qDebug() << "[PollScheduler] addActiveVariable:" << v->name()
+        qCDebug(hmiPoll) << "[PollScheduler] addActiveVariable:" << v->name()
                  << " active.size=" << activeVariables_.size();
     }
 }
 
 void PollScheduler::removeActiveVariable(Variable* v) {
     if (v && activeVariables_.remove(v)) {
-        qDebug() << "[PollScheduler] removeActiveVariable:" << v->name();
+        qCDebug(hmiPoll) << "[PollScheduler] removeActiveVariable:" << v->name();
     }
 }
 
@@ -203,12 +204,12 @@ void PollScheduler::setAllActive() {
     for (Variable* v : varMgr_->allVariables()) {
         activeVariables_.insert(v);
     }
-    qDebug() << "[PollScheduler] setAllActive():" << activeVariables_.size() << "vars";
+    qCDebug(hmiPoll) << "[PollScheduler] setAllActive():" << activeVariables_.size() << "vars";
 }
 
 void PollScheduler::clearActiveVariables() {
     activeVariables_.clear();
-    qDebug() << "[PollScheduler] clearActiveVariables()";
+    qCDebug(hmiPoll) << "[PollScheduler] clearActiveVariables()";
 }
 
 // ★ C.5(2026-09-18):onTick 多 driver 调度 + 故障隔离

@@ -5,6 +5,7 @@
 #include "Variable.h"
 #include "VariableManager.h"
 #include "ModbusMaster.h"
+#include "logging/Logging.h"
 #include <QModbusDataUnit>
 #include <QDateTime>
 #include <QDebug>
@@ -28,14 +29,14 @@ void WriteScheduler::start() {
     if (timer_.isActive()) return;
     connect(modbus_, &ModbusMaster::writeFinished, this, &WriteScheduler::onWriteReply);
     timer_.start();
-    qDebug() << "[WriteScheduler] 启动";
+    qCDebug(hmiWrite) << "[WriteScheduler] 启动";
 }
 
 void WriteScheduler::stop() {
     timer_.stop();
     disconnect(modbus_, &ModbusMaster::writeFinished, this, &WriteScheduler::onWriteReply);
     pending_.clear();
-    qDebug() << "[WriteScheduler] 停止";
+    qCDebug(hmiWrite) << "[WriteScheduler] 停止";
 }
 
 void WriteScheduler::onTick() {
@@ -97,7 +98,7 @@ void WriteScheduler::onTick() {
         pending_[reqId] = v;
 
         QModbusDataUnit unit(type, v->address(), payload);
-        qDebug() << "[WriteScheduler] 发写:" << v->name()
+        qCDebug(hmiWrite) << "[WriteScheduler] 发写:" << v->name()
                  << "addr=0x" << QString::number(v->address(), 16).toUpper()
                  << "value=" << v->value().toString()
                  << "reqId=" << reqId;
@@ -117,7 +118,7 @@ void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
     if (success) {
         v->clearDirty();
         v->clearWriteFail();  // ★ IMPROVE-A4(2026-07-29):成功后清失败计数
-        qDebug() << "[Write] OK:" << v->name() << "=" << v->value().toString();
+        qCDebug(hmiWrite) << "[Write] OK:" << v->name() << "=" << v->value().toString();
     } else {
         // ★ IMPROVE-A4(2026-07-29):失败累加,达到上限报警 + 清 dirty(工业铁律)
         //   之前决策 3「失败不回滚,保留 dirty 等下一帧重试」,但 PLC 故障时会刷屏

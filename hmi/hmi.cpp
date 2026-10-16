@@ -189,7 +189,7 @@ hmi::hmi(QWidget *parent)
 	connect(tcp_, &TcpClient::reconnectAbandoned, this, [this]() {// 当 TCP 放弃重连时切换到 Failed 状态
 		connState_ = ConnState::Failed; // 切换到 Failed 状态
         updateUi();
-        qDebug() << "重连放弃(5 次重试已用完),需手动重连";
+        qCDebug(hmiComm) << "重连放弃(5 次重试已用完),需手动重连";
     });
 
     // TCP 控件按钮(注意:这些按钮的槽函数名都不是 on_<obj>_<signal> 格式,
@@ -270,7 +270,7 @@ hmi::hmi(QWidget *parent)
     });
     connect(modbus_, &qwhmi::drivers::IPollDriver::errorOccurred, this,
         [this](QString msg){
-            qDebug() << "Modbus 错误(伴随状态):" << msg;
+            qCDebug(hmiComm) << "Modbus 错误(伴随状态):" << msg;
             modbusState_ = ModbusState::Failed;
             updateUi();
             // 2026-07-09:协议/网络错误也弹窗 —— 之前只 qDebug 太隐了
@@ -587,7 +587,7 @@ hmi::hmi(QWidget *parent)
         //   【取舍】正在通讯时 loadFromFile 会短暂断连,但用户主动打开工程 = 期望切换,合理
         if (tcp_ && modbus_) {
             modbus_->connectTo(tcp_->host(), tcp_->port());
-            qDebug() << "[hmi] loadFromFile 同步 modbus →" << tcp_->host() << ":" << tcp_->port();
+            qCDebug(hmiComm) << "[hmi] loadFromFile 同步 modbus →" << tcp_->host() << ":" << tcp_->port();
         }
     });
 
@@ -614,12 +614,12 @@ hmi::hmi(QWidget *parent)
     }
     if (!defaultPath.isEmpty()) {
         if (project_->loadFromFile(defaultPath)) {
-            qDebug() << "[hmi] default.json 加载成功;path=" << defaultPath;
+            qCDebug(hmiApp) << "[hmi] default.json 加载成功;path=" << defaultPath;
         } else {
-            qDebug() << "[hmi] default.json 加载失败,用代码默认配置;path=" << defaultPath;
+            qCDebug(hmiApp) << "[hmi] default.json 加载失败,用代码默认配置;path=" << defaultPath;
         }
     } else {
-        qDebug() << "[hmi] default.json 找不到,候选路径:" << defaultPathCandidates;
+        qCDebug(hmiApp) << "[hmi] default.json 找不到,候选路径:" << defaultPathCandidates;
     }
 
     // ★ 阶段 6.2(2026-08-07):UI 保存按钮 → onSaveClicked(手动 connect,
@@ -878,7 +878,7 @@ void hmi::onResetClicked() {
     if (acked == 0 && alarmMgr_->count() == 0) {
         // 走到这里说明本来就一条都没有,属于正常情况,不打扰操作员。
         // 留这条分支是为了:将来有人挪动上面的 count 守卫时,这里会立刻暴露出来。
-        qDebug() << "[复位] 当前没有 active 报警,acknowledgeAll 无事可做(预期行为)";
+        qCDebug(hmiAlarm) << "[复位] 当前没有 active 报警,acknowledgeAll 无事可做(预期行为)";
     }
 }
 
@@ -1212,7 +1212,7 @@ void hmi::onTimerTick()
     // [FIX #1] state != Running 直接 return
     if (state != State::Running) return;
     counter++;
-    qDebug() << "counter:" << counter;
+    qCDebug(hmiUi) << "counter:" << counter;
     // [FIX #2] 同步显示到 numberLineEdit(原计划新增的 UI 控件)
     ui.numberLineEdit->setText(QString::number(counter));
 }
@@ -1288,7 +1288,7 @@ void hmi::onTcpError(const QString& msg) { // TCP 发生错误
     // ★ 重构(2026-06-18):errorOccurred 是"伴随"信号,不独立决定 UI 状态
     // 状态由 connected/disconnected/reconnectScheduled/connectionAttempted/reconnectAbandoned 决定
     // 这里只 qDebug 记日志(便于调试)
-    qDebug() << "TCP 错误(不独立决定 UI):" << msg;
+    qCDebug(hmiComm) << "TCP 错误(不独立决定 UI):" << msg;
 }
 
 void hmi::onTcpReadyRead(const QByteArray& data) {// 收到数据了,显示在 recvText 上
@@ -1497,7 +1497,7 @@ void hmi::onOpenClicked() {
 }
 
 void hmi::onAlarmTriggered(const Alarm& a) {
-    qDebug() << "[Alarm 触发]" << a.name << "level=" << static_cast<int>(a.level)
+    qCDebug(hmiAlarm) << "[Alarm 触发]" << a.name << "level=" << static_cast<int>(a.level)
              << "value=" << a.triggerValue << "threshold=" << a.threshold;
     tryTransition(Trigger::AlarmCritical);   // 推状态机进 Fault
 
@@ -1613,7 +1613,7 @@ void hmi::updateAlarmBlinkTimer() {
 //   【改法】Qt::UserRole 存 ID,scan alarmTable 按 ID 匹配,更新"状态"列文字 → "已恢复"
 //   【取舍】没用 model,直接扫行;5.5 数据量小(< 100 条)够用
 void hmi::onAlarmRecovered(qint64 id) {
-    qDebug() << "[Alarm 恢复]" << id;
+    qCDebug(hmiAlarm) << "[Alarm 恢复]" << id;
     // 恢复不直接转 Stopped — Fault 态只能 ResetButton 清(状态机规则)
 
     for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
@@ -1758,7 +1758,7 @@ void hmi::onAlarmAcknowledge() {
     if (!nameItem) return;
     qint64 id = nameItem->data(Qt::UserRole).toLongLong();
     if (alarmMgr_->acknowledge(id)) {
-        qDebug() << "[Alarm 确认]" << nameItem->text() << "id=" << id;
+        qCDebug(hmiAlarm) << "[Alarm 确认]" << nameItem->text() << "id=" << id;
         return;
     }
     // 走到这里是失败。三种可能,提示文案要分开,别都写成"失败":
@@ -1792,7 +1792,7 @@ void hmi::onAllAlarmsCleared() {
     //   下一条新报警的第一帧就是浅色,要等 500ms 才切回本档色 ——
     //   用户看到的是"新报警颜色不对,过一会儿才对"。
     alarmBlinkOn_ = false;
-    qDebug() << "[Alarm 全部清除]";
+    qCDebug(hmiAlarm) << "[Alarm 全部清除]";
 }
 
 // ==================== ★ 阶段 C · C.4(2026-09-18):协议选择 UI ====================
@@ -1828,7 +1828,7 @@ void hmi::onProtocolComboChanged(const QString& protocolName) {
     // ★ C.4:用 ProtocolGuard 纯逻辑判断(可单测,不耦合 GUI)
     //   教训 1.5:跨协议切工程 → 弹错误 + audit 记录 rejected + 撤销下拉框
     if (!qwhmi::drivers::isCrossProtocolChange(current, normalized)) {
-        qDebug() << "[C.4] 协议未变:" << protocolName;
+        qCDebug(hmiComm) << "[C.4] 协议未变:" << protocolName;
         return;
     }
 

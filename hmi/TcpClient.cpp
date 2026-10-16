@@ -1,4 +1,5 @@
 #include "TcpClient.h"
+#include "logging/Logging.h"
 #include <QDebug>
 #include <QtMath>  // qMin
 
@@ -33,7 +34,7 @@ TcpClient::TcpClient(QObject* parent) : QObject(parent) {
     connect(connectTimeoutTimer_, &QTimer::timeout, this, [this](){
         if (socket_->state() == QAbstractSocket::ConnectingState ||
             socket_->state() == QAbstractSocket::HostLookupState) {
-            qDebug() << "[TcpClient] 连接超时,强制 abort (state=" << socket_->state() << ")";
+            qCDebug(hmiComm) << "[TcpClient] 连接超时,强制 abort (state=" << socket_->state() << ")";
             socket_->abort();
             emit errorOccurred("连接超时(3 秒未连上)");
             // [FIX #13] Fallback: Qt 在 ConnectingState 下 abort() 触发的 disconnected/errorOccurred
@@ -42,7 +43,7 @@ TcpClient::TcpClient(QObject* parent) : QObject(parent) {
             //   等 50ms 看 reconnectTimer_ 有没有被启动(说明信号链通了),没通就手动推一把。
             QTimer::singleShot(50, this, [this](){
                 if (!reconnectTimer_->isActive() && !userInitiated_) {
-                    qDebug() << "[TcpClient] 超时 fallback:信号链断了,手动调 scheduleReconnect";
+                    qCDebug(hmiComm) << "[TcpClient] 超时 fallback:信号链断了,手动调 scheduleReconnect";
                     scheduleReconnect();
                 }
             });
@@ -183,7 +184,7 @@ void TcpClient::onSocketError(QAbstractSocket::SocketError err) {
     // 主动断开 → 不重连
     if (userInitiated_) {
         // ★ 主动断开,不 emit errorOccurred(由 disconnected 信号决定 UI 状态 → 灰)
-        qDebug() << "主动断开(忽略 errorOccurred):" << msg;
+        qCDebug(hmiComm) << "主动断开(忽略 errorOccurred):" << msg;
         return;
     }
 
@@ -193,8 +194,8 @@ void TcpClient::onSocketError(QAbstractSocket::SocketError err) {
     // 修复:让 scheduleReconnect 决定 UI 状态(它会在重试到上限时才 emit errorOccurred)
     scheduleReconnect();
 
-    // 错误详情走 qDebug(不进 UI)
-    qDebug() << "TCP 错误(进入重连):" << msg;
+    // 错误详情走日志 qCDebug(hmiComm)(不进 UI)
+    qCDebug(hmiComm) << "TCP 错误(进入重连):" << msg;
 }
 
 // ==================== 阶段 1 第 2 练:重连 ====================
@@ -235,7 +236,7 @@ void TcpClient::scheduleReconnect() {
         //   计数本来就由 connectTo() / onSocketConnected() 清,不必多此一举。
         reconnectAbandoned_ = true;
         emit reconnectAbandoned();   // 改:不再 emit errorOccurred(避免 hmi onTcpError 误设 Failed)
-        qDebug() << "[TcpClient] 重连放弃(已用完" << retryCount_ << "次),等用户手动重连";
+        qCDebug(hmiComm) << "[TcpClient] 重连放弃(已用完" << retryCount_ << "次),等用户手动重连";
         return;
     }
 
@@ -293,7 +294,7 @@ void TcpClient::onHeartbeatTimer() {
     // 检查"无活动超时" — 15s 内没收到任何数据 → 判掉线,触发重连
     qint64 elapsed = lastReceivedTime_.msecsTo(QTime::currentTime());
     if (lastReceivedTime_.isValid() && elapsed > inactivityTimeoutMs_) {
-        qDebug() << "[TcpClient] 心跳超时:" << elapsed << "ms 无活动,主动断开重连";
+        qCDebug(hmiComm) << "[TcpClient] 心跳超时:" << elapsed << "ms 无活动,主动断开重连";
         socket_->abort();
         // ★ 不 emit errorOccurred:abort 触发 onSocketError → scheduleReconnect
         // hmi 端 onTcpError 不应再设 Failed(由 reconnectScheduled 决定 UI = 橙)

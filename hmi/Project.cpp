@@ -14,6 +14,7 @@
 #include "ThresholdAlarmChecker.h"   // ★ 6.2 需要:dynamic_cast 用
 #include "TcpClient.h"
 #include "JsonSerializer.h"
+#include "logging/Logging.h"
 // ★ E.3:controls JSON 序列化走反射
 #include "widgets/base/ControlBase.h"
 
@@ -253,7 +254,7 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
             emit loadError(QString("schema 迁移失败:从 v%1 到 v%2").arg(schemaVerInt).arg(kCurrentSchemaVersion));
             return false;
         }
-        qDebug() << "[Project] schema 迁移完成:v" << schemaVerInt << "→ v" << kCurrentSchemaVersion;
+        qCDebug(hmiApp) << "[Project] schema 迁移完成:v" << schemaVerInt << "→ v" << kCurrentSchemaVersion;
     }
 
     // 4. 清空现有状态(Q4-A 全删干净)
@@ -373,10 +374,10 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
         int port = plc0["port"].toInt();
         if (!host.isEmpty() && port > 0 && port < 65536) {
             if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
-                qDebug() << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
+                qCDebug(hmiComm) << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
             } else {
                 tcp_->connectTo(host, static_cast<quint16>(port));
-                qDebug() << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
+                qCDebug(hmiComm) << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
             }
         }
     }
@@ -474,7 +475,7 @@ bool Project::saveToFile(const QString& path, const QList<qwhmi::widgets::Contro
 
     if (!saveRootToFile(path, root)) return false;
 
-    qDebug() << "[Project] saved to" << path
+    qCDebug(hmiApp) << "[Project] saved to" << path
              << "(controls:" << controls.size() << ")";
     emit saved(path);
     return true;
@@ -496,11 +497,11 @@ bool Project::loadFromFile(const QString& path) {
         int n = loadControlsFromJson(controlsArr,
                                      &qwhmi::widgets::ControlBase::create,
                                      loadedControls);
-        qDebug() << "[Project] loaded" << n << "controls from" << path;
+        qCDebug(hmiApp) << "[Project] loaded" << n << "controls from" << path;
     }
     emit controlsLoaded(loadedControls);   // ★ E.3
 
-    qDebug() << "[Project] loaded from" << path;
+    qCDebug(hmiApp) << "[Project] loaded from" << path;
     emit loaded(path);
     return true;
 }
@@ -510,7 +511,7 @@ bool Project::loadFromFile(const QString& path) {
 // =============================================================================
 
 bool Project::migrateV1ToV2(QJsonObject& root) {
-    qDebug() << "[Project] migrateV1ToV2 开始";
+    qCDebug(hmiApp) << "[Project] migrateV1ToV2 开始";
     root["schema_version"] = 2;
     if (!root.contains("plcs")) {
         QJsonObject comm = root["communications"].toObject();
@@ -533,14 +534,14 @@ bool Project::migrateV1ToV2(QJsonObject& root) {
         root["plcs"] = plcsArr;
     }
     root.remove("communications");
-    qDebug() << "[Project] migrateV1ToV2 完成(communications → plcs[0])";
+    qCDebug(hmiApp) << "[Project] migrateV1ToV2 完成(communications → plcs[0])";
     return true;
 }
 
 // ★ E.3:v2 → v3:screens[] 数组准备(老 v2 工程没有 controls,迁移时给空数组)
 //   旧 v2 工程加载后画布为空,用户重新拖入控件后再保存就是 v3
 bool Project::migrateV2ToV3(QJsonObject& root) {
-    qDebug() << "[Project] migrateV2ToV3 开始";
+    qCDebug(hmiApp) << "[Project] migrateV2ToV3 开始";
 
     // 1. schema_version 数字更新
     root["schema_version"] = 3;
@@ -566,7 +567,7 @@ bool Project::migrateV2ToV3(QJsonObject& root) {
         root["screens"] = screensArr;
     }
 
-    qDebug() << "[Project] migrateV2ToV3 完成(screens[].controls 已补全)";
+    qCDebug(hmiApp) << "[Project] migrateV2ToV3 完成(screens[].controls 已补全)";
     return true;
 }
 

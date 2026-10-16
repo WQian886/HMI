@@ -1,4 +1,5 @@
 #include "ModbusMaster.h"
+#include "logging/Logging.h"
 #include <QtEndian>
 #include <QDebug>
 
@@ -30,7 +31,7 @@ ModbusMaster::ModbusMaster(QObject* parent) : QObject(parent) {
     });
     connect(tcp_, &TcpClient::errorOccurred, this,
         [this](QString msg) {
-            qDebug() << "[ModbusMaster] TCP 错误(转发):" << msg;
+            qCDebug(hmiComm) << "[ModbusMaster] TCP 错误(转发):" << msg;
             emit errorOccurred(msg);
         });
     connect(tcp_, &TcpClient::readyRead, this, &ModbusMaster::onTcpReadyRead);
@@ -278,7 +279,7 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
     p.requestId     = requestId;  // 阶段 3.3:PollScheduler 用来反查
     pending_.insert(tid, p);
 
-    qDebug() << "[ModbusMaster] 已发读 FC=0x" << QString::number(fc, 16).toUpper()
+    qCDebug(hmiComm) << "[ModbusMaster] 已发读 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID=" << tid << "slave=" << serverAddress
              << "addr=" << addr << "count=" << readUnit.valueCount()
              << "reqId=" << requestId
@@ -354,7 +355,7 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
     p.requestId     = requestId;  // 阶段 4.3.0:WriteScheduler 用来反查 dirty Variable
     pending_.insert(tid, p);
 
-    qDebug() << "[ModbusMaster] 已发写 FC=0x" << QString::number(fc, 16).toUpper()
+    qCDebug(hmiComm) << "[ModbusMaster] 已发写 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID=" << tid << "slave=" << serverAddress
              << "addr=" << addr << "values.size=" << values.size()
              << "frame=" << frame.toHex(' ').toUpper();
@@ -456,7 +457,7 @@ void ModbusMaster::finalizeErrorReply(Pending* req, const QString& msg) {
 // 2026-07-07 新增:读响应拆帧(0x01/0x02/0x03/0x04)
 void ModbusMaster::handleReadResponse(quint8 fc, Pending* req, const QByteArray& frame) {
     // 2026-07-09:测速 —— sentAt 是发送时刻,这里算收到响应的耗时
-    qDebug() << "[ModbusMaster] 收到读响应 FC=0x" << QString::number(fc, 16).toUpper()
+    qCDebug(hmiComm) << "[ModbusMaster] 收到读响应 FC=0x" << QString::number(fc, 16).toUpper()
              << "elapsedMs=" << req->sentAt.msecsTo(QDateTime::currentDateTime());
     if (frame.size() < 9) {
         finalizeErrorReply(req, QString("读响应帧太短:%1 字节").arg(frame.size()));  // ★ IMPROVE-B5
@@ -506,7 +507,7 @@ void ModbusMaster::handleReadResponse(quint8 fc, Pending* req, const QByteArray&
         unit.setValues(values);
     }
 
-    qDebug() << "[ModbusMaster] 读响应成功 FC=0x" << QString::number(fc, 16).toUpper()
+    qCDebug(hmiComm) << "[ModbusMaster] 读响应成功 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID 关联 → slave=" << req->serverAddress
              << "count=" << unitCount;
 
@@ -522,7 +523,7 @@ void ModbusMaster::handleReadResponse(quint8 fc, Pending* req, const QByteArray&
 // 2026-07-07 新增:写响应拆帧(0x05/0x06/0x0F/0x10 都是 echo)
 void ModbusMaster::handleWriteResponse(quint8 fc, Pending* req, const QByteArray& frame) {
     // 2026-07-09:测速 —— 同上
-    qDebug() << "[ModbusMaster] 收到写响应 FC=0x" << QString::number(fc, 16).toUpper()
+    qCDebug(hmiComm) << "[ModbusMaster] 收到写响应 FC=0x" << QString::number(fc, 16).toUpper()
              << "elapsedMs=" << req->sentAt.msecsTo(QDateTime::currentDateTime());
     if (frame.size() < 12) {
         finalizeErrorReply(req, QString("写响应帧太短:%1 字节").arg(frame.size()));  // ★ IMPROVE-B5
@@ -534,10 +535,13 @@ void ModbusMaster::handleWriteResponse(quint8 fc, Pending* req, const QByteArray
     quint16 echoAddr = (quint16(quint8(frame[8])) << 8) | quint8(frame[9]);
     if (echoAddr != quint16(req->reply ? /*addr 通过 reply 拿*/0 : 0)) {
         // echo addr 不匹配 — 仅警告(某些从站实现宽松),不报错
-        qDebug() << "[ModbusMaster] 写响应 echo addr 与请求不一致";
+        // ★ 2026-10-16:上面那个三元两分支【都是 0】,占位从没填上,
+        //   所以这里判的其实是 "echoAddr != 0",不是注释说的"与请求地址比对"。
+        //   已知问题,本轮只做日志归类未改逻辑(改它属于协议行为变更,要单独验证)。
+        qCDebug(hmiComm) << "[ModbusMaster] 写响应 echo addr 与请求不一致";
     }
 
-    qDebug() << "[ModbusMaster] 写响应成功 FC=0x" << QString::number(fc, 16).toUpper()
+    qCDebug(hmiComm) << "[ModbusMaster] 写响应成功 FC=0x" << QString::number(fc, 16).toUpper()
              << "echo addr=" << echoAddr;
 
     if (req->reply) {
@@ -557,7 +561,7 @@ void ModbusMaster::onTimeoutScan() {
     for (auto it = pending_.begin(); it != pending_.end(); ) {
         const Pending& req = it.value();
         if (req.sentAt.msecsTo(now) > req.timeoutMs) {
-            qDebug() << "[ModbusMaster] 请求超时 TID=" << it.key()
+            qCDebug(hmiComm) << "[ModbusMaster] 请求超时 TID=" << it.key()
                      << "slave=" << req.serverAddress
                      << "elapsedMs=" << req.sentAt.msecsTo(now);
             emit errorOccurred(QString("Modbus 请求超时 TID=%1").arg(it.key()));

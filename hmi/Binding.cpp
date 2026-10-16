@@ -11,6 +11,7 @@
 #include "auth/AuditLog.h"      // ★ B5(2026-09-17):写值成功留痕
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
+#include "logging/Logging.h"
 #include <QLabel>
 #include <QLineEdit>
 #include <QPointer>  // 阶段 4.x:bindEdit 用 QPointer 防止 Variable delete 后 lambda 段错,见改善计划.md #7
@@ -139,7 +140,7 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
 
             if (!parseOk) {
                 applyNowEdit(edit, v);
-                qDebug() << "[BindEdit] 校验失败,已回滚:" << edit->text();
+                qCDebug(hmiVar) << "[BindEdit] 校验失败,已回滚:" << edit->text();
                 return;
             }
 
@@ -162,7 +163,7 @@ void Binding::bindEdit(QLineEdit* edit, Variable* v) {
             if (r == Variable::SetValueResult::Rejected) {
                 applyNowEdit(edit, v);   // 从变量重读回 UI(回滚)
                 setDirtyStyle(edit, true);  // 边框留橙,告诉用户没成功
-                qDebug() << "[BindEdit] 校验失败(类型/范围),已回滚:" << edit->text();
+                qCDebug(hmiVar) << "[BindEdit] 校验失败(类型/范围),已回滚:" << edit->text();
                 return;
             }
             // Accepted / NoChange 都算 OK — NoChange 时 markDirty 也会让 WriteScheduler 写一次

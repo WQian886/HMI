@@ -1,4 +1,5 @@
 #include "ModbusDemo.h"
+#include "logging/Logging.h"
 #include <QDebug>
 #include <QVariant>
 
@@ -8,7 +9,7 @@ ModbusDemo::ModbusDemo(QObject* parent) : QObject(parent) {
 
     // 库自己发的网络状态信号
 	connect(client_, &QModbusClient::stateChanged, this, [this](QModbusClient::State s) {// 网络状态变化时,更新 connState_ 和 UI
-        qDebug() << "[ModbusDemo] 状态变化:" << s;//
+        qCDebug(hmiComm) << "[ModbusDemo] 状态变化:" << s;//
         // Unconnected / Connecting / Connected / Closing
         if (s == QModbusClient::ConnectedState)    emit connected();
         else if (s == QModbusClient::UnconnectedState) emit disconnected();
@@ -58,7 +59,7 @@ QModbusReply* ModbusDemo::readHolding(int slaveId, int addr, int count) {
     connect(reply, &QModbusReply::finished, this, &ModbusDemo::onReplyFinished);
 
     // ★ 调试用:看原始字节流(MBAP 头 + PDU)
-    qDebug() << "[ModbusDemo] 发请求:slaveId=" << slaveId
+    qCDebug(hmiComm) << "[ModbusDemo] 发请求:slaveId=" << slaveId
              << "addr=" << addr << "count=" << count;
 
     return reply;
@@ -75,8 +76,8 @@ void ModbusDemo::onReplyFinished() {
     const QModbusResponse resp = reply->rawResult();
     QByteArray pdu(reinterpret_cast<const char*>(resp.data().data()),
                    resp.data().size());
-    qDebug() << "[ModbusDemo] 收到响应(PDU 字节):" << pdu.toHex(' ');
-    qDebug() << "[ModbusDemo] 响应 serverAddr=" << reply->serverAddress();
+    qCDebug(hmiComm) << "[ModbusDemo] 收到响应(PDU 字节):" << pdu.toHex(' ');
+    qCDebug(hmiComm) << "[ModbusDemo] 响应 serverAddr=" << reply->serverAddress();
 
     if (reply->error() != QModbusDevice::NoError) {
         // 异常响应 / 超时 / CRC 错误都会进这
