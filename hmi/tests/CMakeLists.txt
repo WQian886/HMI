@@ -231,6 +231,8 @@ add_hmi_test(tst_VariableManager)
 #   不并进 tst_Serializer:那个是通用序列化测试,这里钉的是
 #   "改这行不会弄坏任何一个已有工程",两者失败含义不同,分开好定位。
 add_hmi_test(tst_VariablePlcId)
+# ★ 2026-10-16:多 PLC 2a —— plcs[] 数组存得住,一台都不能被静默丢掉
+add_hmi_test(tst_ProjectMultiPlc)
 add_hmi_test(tst_Serializer)
 # 阶段 B · B1
 add_hmi_test(tst_PasswordHasher)

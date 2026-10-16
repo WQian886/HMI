@@ -45,6 +45,100 @@ Project::Project(VariableManager* varMgr,
 
 Project::~Project() = default;
 
+// =============================================================================
+// ★ 2026-10-16:PLC 配置存取(多 PLC 2a)
+// =============================================================================
+
+namespace {
+
+// 单台 PLC 配置的合法性检查。
+// ★【为什么只查这三样,别的都不查】
+//   id   —— 空 id 会让变量的 plc_id 对不上任何一台,那些变量从此静默不刷新
+//          (PollScheduler 按 plcId 查 driver,查不到就跳过,而跳过【不报错】)
+//   host —— 空 host 连不上,表现是"一直重连",看不出是配置问题
+//   port —— 0 或越界会让 connectTo 拿到非法端口
+//   刻意【不】查 protocol 是否受支持:那属于 2b 的判断(那时每台 PLC 才真建连接),
+//   现在查了也无处可去,只会把"配了个还没实现的协议"变成加载失败。
+int validatePlcEntry(const QJsonObject& plc, int index, QJsonArray* outOk) {
+    const QString id = plc.value("id").toString();
+    if (id.trimmed().isEmpty()) {
+        qWarning().noquote()
+            << QStringLiteral("[Project] plcs[%1] 缺少 \"id\",已跳过 —— "
+                              "没有 id 的配置无法和变量的 plc_id 对应,留着等于噪声。")
+                   .arg(index);
+        return 0;
+    }
+    const QString host = plc.value("host").toString();
+    const int port = plc.value("port").toInt(-1);
+    if (host.trimmed().isEmpty() || port <= 0 || port > 65535) {
+        qWarning().noquote()
+            << QStringLiteral("[Project] plcs[\"%1\"] 的 host/port 不合法(host=\"%2\" port=%3),已跳过 —— "
+                              "这台的地址填错了。请改成实际 PLC 的 IP 和端口。")
+                   .arg(id, host)
+                   .arg(port);
+        return 0;
+    }
+    if (outOk) outOk->append(plc);
+    return 1;
+}
+
+} // namespace
+
+int Project::loadPlcsFromJson(const QJsonObject& root) {
+    plcs_ = QJsonArray();      // QJsonArray 没有 clear(),只有赋值
+    const QJsonArray arr = root.value("plcs").toArray();
+    if (arr.isEmpty()) {
+        // 没有 plcs 键是【合法】的:v1 工程走 migrateV1ToV2 之后才会有,
+        // 而 migrate 失败会在调用方那里报 loadError。走到这里说明已经是新格式,
+        // 只是这个工程恰好没配 PLC —— 不该因此报错。
+        return 0;
+    }
+    for (int i = 0; i < arr.size(); ++i) {
+        validatePlcEntry(arr.at(i).toObject(), i, &plcs_);
+    }
+
+    // ★ 这里【故意】不做的事,记下来免得下一个人以为漏了:
+    //   不给 plcs_[0] 之外的 PLC 建连接对象,也不把它们的配置应用到 tcp_。
+    //   那是 2b 的活(要改 TcpClient 单实例的所有权)。2a 只保证"配置不丢"。
+    //   所以现在的实际行为是:文件里配 N 台能存住,但运行时只连第 1 台。
+    //   —— 这是有意为之的中间状态,不是遗漏。
+    qCDebug(hmiComm) << "[Project] PLC 配置读入" << plcs_.size()
+                      << "台(共" << arr.size() << "项)。"
+                      << "★ 当前运行期只连第一台,多台同时在线是 2b 的工作。";
+    return plcs_.size();
+}
+
+int Project::setPlcs(const QJsonArray& plcs) {
+    QJsonArray ok;
+    for (int i = 0; i < plcs.size(); ++i) {
+        validatePlcEntry(plcs.at(i).toObject(), i, &ok);
+    }
+    plcs_ = ok;
+    return plcs_.size();
+}
+
+QJsonObject Project::defaultPlcFromTcp(TcpClient* tcp) {
+    // 抽出来是因为原先这段逻辑内联在 saveToFile 里,而 2a 之后
+    // saveToFile 有三条不同的路(没配过 / 配过 N 台 / 退化成单台默认),
+    // 三处都要用同一份默认值 —— 复制三遍必然走偏。
+    QJsonObject plc;
+    plc["id"]       = QStringLiteral("plc1");
+    plc["protocol"] = QStringLiteral("modbus_tcp");
+    if (tcp) {
+        plc["host"] = tcp->host();
+        plc["port"] = tcp->port();
+    } else {
+        plc["host"] = QStringLiteral("127.0.0.1");
+        plc["port"] = 502;
+    }
+    QJsonObject modbus;
+    modbus["timeout_ms"]       = TcpClient::kConnectTimeoutMs;
+    modbus["max_retries"]      = TcpClient::kMaxRetries;
+    modbus["poll_interval_ms"] = 100;
+    plc["modbus"] = modbus;
+    return plc;
+}
+
 // ===== E.3:静态工具:控件列表 ↔ JSON 数组 =====
 
 // ★ 反射遍历每个控件 → QJsonObject(走 ControlBase::propertiesToJson)+ type 字段
@@ -367,11 +461,27 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
     }
 
     // 8. 通讯字段应用
-    QJsonArray plcsArr = root["plcs"].toArray();
-    if (!plcsArr.isEmpty() && tcp_) {
-        QJsonObject plc0 = plcsArr[0].toObject();
-        QString host = plc0["host"].toString();
-        int port = plc0["port"].toInt();
+    //   ★ 2026-10-16(多 PLC 2a):拆成两件事
+    //
+    //   ① 【全部 PLC 配置读入 plcs_】—— 新增。这是 2a 的核心:
+    //      原来这里只读 plcsArr[0],文件里另外几台从头到尾没人碰过,
+    //      保存时再被写死的一台覆盖掉。
+    //
+    //   ② 【应用第一台到 tcp_】—— 行为和原来完全一致,一个字没改。
+    //      这是有意为之:让另外几台"同时在线"是 2b 的活,
+    //      要改通讯层所有权(TcpClient 单实例 → 多实例),风险高一个量级。
+    //      2a 只保证"配置不丢",不碰"连不连"。
+    const int plcCount = loadPlcsFromJson(root);
+
+    if (plcCount > 0 && tcp_) {
+        // ★ 只应用第一台。取值走 plcs_[0] 而不是原来的 plcsArr[0]:
+        //   区别在于 —— plcsArr[0] 可能是【校验没过被跳过的那台】,
+        //   而 plcs_[0] 一定是校验通过的。两台以上时这个差别会咬人:
+        //   第一台填错了,第二台是好的,用 plcsArr[0] 会拿着错地址去连,
+        //   而用户看到的警告是"plcs[0] 已跳过",对不上他在连的那台。
+        const QJsonObject plc0 = plcs_.at(0).toObject();
+        const QString host = plc0["host"].toString();
+        const int port = plc0["port"].toInt();
         if (!host.isEmpty() && port > 0 && port < 65536) {
             if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
                 qCDebug(hmiComm) << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
@@ -379,6 +489,15 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
                 tcp_->connectTo(host, static_cast<quint16>(port));
                 qCDebug(hmiComm) << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
             }
+        }
+        if (plcCount > 1) {
+            // ★ 明说"没生效"。不说的后果是:用户配了 3 台,打开工程发现只有 1 台在通讯,
+            //   会怀疑程序坏了或者怀疑 PLC —— 而真相是"这一步还没做完"。
+            //   把未完成的能力说清楚,比让人自己撞上去好。
+            qCInfo(hmiComm) << "[Project] ★ 工程配了" << plcCount
+                            << "台 PLC,当前只连第 1 台(" << plc0["id"].toString()
+                            << ")。其余" << (plcCount - 1)
+                            << "台配置已保存但未连接 —— 多台同时在线是 2b 的工作,尚未实现。";
         }
     }
 
@@ -404,25 +523,28 @@ bool Project::saveToFile(const QString& path, const QList<qwhmi::widgets::Contro
     root["updated_at"]   = nowIso;
 
     // plcs
+    //   ★ 2026-10-16(多 PLC 2a):原来这里【无条件写死一台】(id 恒为 "plc1")。
+    //     于是用户配了 3 台 PLC,存一次 → 另外 2 台被静默丢掉,不报错不警告。
+    //     现在分三条路:
+    //       1) 本次会话【加载过工程】→ 原样写回全部 PLC(一个字节都不改)
+    //       2) 没加载过工程、但有人调过 setPlcs → 写那几台
+    //       3) 什么都没配 → 退回"从当前 tcp_ 生成一台默认"(老行为)
     {
-        QJsonArray plcsArr;
-        QJsonObject plc;
-        plc["id"] = "plc1";
-        plc["protocol"] = "modbus_tcp";
-        if (tcp_) {
-            plc["host"] = tcp_->host();
-            plc["port"] = tcp_->port();
+        if (!plcs_.isEmpty()) {
+            // ★ 路径 1/2 一律原样写回。
+            //   【为什么不重新生成】重新生成会丢掉用户手填的任何字段 ——
+            //   将来 2b 加了每台 PLC 的通讯参数(重试次数、超时…)时,
+            //   凡是没被这段代码显式列出来的字段都会消失,而用户无从知晓。
+            //   存-取往返必须是恒等的,这是最基本的要求。
+            root["plcs"] = plcs_;
         } else {
-            plc["host"] = "127.0.0.1";
-            plc["port"] = 502;
+            // ★ 路径 3:没配过 PLC。给一台默认,而不是写空数组 ——
+            //   写空数组的话,loadPlcsFromJson 返回 0,程序连 127.0.0.1 都不连,
+            //   而"新建工程然后直接保存"是很常见的动作,不该得到一个空的通讯配置。
+            QJsonArray plcsArr;
+            plcsArr.append(defaultPlcFromTcp(tcp_));
+            root["plcs"] = plcsArr;
         }
-        QJsonObject modbus;
-        modbus["timeout_ms"]       = TcpClient::kConnectTimeoutMs;
-        modbus["max_retries"]      = TcpClient::kMaxRetries;
-        modbus["poll_interval_ms"] = 100;
-        plc["modbus"] = modbus;
-        plcsArr.append(plc);
-        root["plcs"] = plcsArr;
     }
 
     // variables

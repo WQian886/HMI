@@ -18,17 +18,16 @@
 #include <QObject>
 #include <QString>
 #include <QList>
-
-class QJsonObject;
-class QJsonArray;
-
-namespace qwhmi::widgets { class ControlBase; }
+#include <QJsonArray>
+#include <QJsonObject>
 
 class VariableManager;
 class AlarmManager;
 class ActionManager;
 class PollScheduler;   // ★ 6.3 新增:ThresholdAlarmChecker 构造需要 PollScheduler*
 class TcpClient;
+
+namespace qwhmi::widgets { class ControlBase; }
 
 class Project : public QObject {
     Q_OBJECT
@@ -115,6 +114,55 @@ public:
                                     qwhmi::widgets::ControlBase* (*factory)(const QString& typeName),
                                     QList<qwhmi::widgets::ControlBase*>& outControls);
 
+    // ★ 2026-10-16:PLC 配置存取(多 PLC 第一步 · 2a)
+    //
+    //   【为什么需要它】
+    //     2a 之前,plcs[] 这个数组是"花瓶":加载只读 plcsArr[0](Project.cpp 第 8 步),
+    //     保存写死一台(id 恒为 "plc1")。文件里就算手写了 5 台,程序也只认第一台,
+    //     保存时还会把另外 4 台【静默丢掉】—— 而这不报错、不警告。
+    //     典型症状:用户配了 3 台 PLC,存一次,打开发现只剩 1 台,且没有任何提示。
+    //
+    //   【2a 做到哪一步为止 —— 边界很重要】
+    //     本组 API 只负责【数据存得住】:load 能把全部 PLC 读进来,
+    //     save 能把全部 PLC 原样写回去。
+    //     【不负责真的连多台】—— 那是 2b,要改通讯层所有权(TcpClient 单实例 → 多实例),
+    //     风险高一个量级,单独排期。
+    //     所以现在的行为是:配置能存住,但运行时仍然只连 plcs[0]。
+    //     ★ 这个"存住了但不生效"是【有意为之】的中间状态,不是 bug,
+    //       对应的实现在 loadPlcsFromJson 的注释里写明了。
+    //
+    //   【为什么用 JSON 数组原样持有,而不是解析成结构体】
+    //     解析成结构体会要求现在就定义"PLC 配置到底有哪些字段",
+    //     而 2b 要改的正是这个形状(每台 PLC 要带自己的一堆通讯参数)。
+    //     原样持有 = 2b 改形状时这层不用跟着动。代价是不做校验,
+    //     但校验在 loadPlcsFromJson 里做【最浅一层】—— 只查会导致运行期
+    //     静默失效的东西(id 为空 / host 为空 / 端口越界),字段本身不解释。
+
+    // 从工程 JSON 的 plcs[] 读出全部 PLC 配置。
+    //   - 缺 plcs 键 / 空数组 → 返回空数组(不是错误,老工程可能有 communications 已被迁移)
+    //   - 每项校验 id / host / port;不合格的**跳过并 qWarning 点名**,
+    //     不因一台配错就让整个工程打不开(与 F3 诊断策略一致:
+    //     能继续就继续,但一定要说清楚哪一项被丢了)
+    //   - 合格项按原样存入内部数组(字段不解释,留给 2b)
+    //   返回成功接受的台数
+    int loadPlcsFromJson(const QJsonObject& root);
+
+    // 取当前持有的 PLC 配置(原样 QJsonObject 数组)
+    const QJsonArray& plcs() const { return plcs_; }
+
+    // 设置 PLC 配置数组。
+    //   【什么时候需要】程序运行中通过界面增删 PLC 后,调用它让下次 save 写出去。
+    //   【校验】同样过滤掉 id/host 为空、端口越界的项 —— 宁可少存一台,
+    //   也不要存出一台"打开工程后连不上、且看不出为什么"的配置。
+    //   返回实际存下的台数
+    int setPlcs(const QJsonArray& plcs);
+
+    // 默认单台 PLC 配置(从 tcp_ 的当前 host/port 生成)。
+    //   【什么时候用】程序【没有】加载过任何工程、直接新建保存时。
+    //   【为什么不能一律用这个】那会把多 PLC 配置覆盖成 1 台 ——
+    //   这正是 2a 要修的那个 bug 换个方向重演一次。
+    static QJsonObject defaultPlcFromTcp(TcpClient* tcp);
+
 signals:
     void saved(const QString& path);
     void loaded(const QString& path);   // ★ 6.3:loadFromFile 成功(给 hmi 重绑 UI 用)
@@ -135,4 +183,10 @@ private:
     ActionManager*   actionMgr_;
     PollScheduler*   pollScheduler_;
     TcpClient*       tcp_;
+
+    // ★ 2026-10-16:PLC 配置(多 PLC 2a)。加载时填满,保存时原样写回。
+    //   【和 tcp_ 的关系】tcp_ 是【运行期连接对象】,只有一台;
+    //   plcs_ 是【工程配置】,可以有 N 台。两者刻意分开 ——
+    //   把 N 台配置塞进一个 TcpClient* 是 2b 要解决的问题,现在不碰。
+    QJsonArray plcs_;
 };
