@@ -86,6 +86,11 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/plc/PlcConnectionManager.cpp
     # ★ 2b 阶段6(2026-10-19):PLC 配置对话框(形状照 AlarmConfigDialog)
     ${HMI_SRC_DIR}/src/plc/PlcConfigDialog.cpp
+    # ★ 2026-10-19:变量配置对话框 —— 【两份 CMakeLists 都要登记】
+    #   漏了这份的症状是链接期 LNK2019 undefined symbol,
+    #   而 hmi/CMakeLists.txt 里明明已经加了 —— 两个独立的源文件列表,
+    #   只加一个不会报任何配置错(这个坑在 WriteFailChecker 上踩过一次)。
+    ${HMI_SRC_DIR}/src/plc/VariableConfigDialog.cpp
     # ★ 2026-10-10:协议下拉框置灰(tst_ProtocolComboGrey 调的是这个生产函数)
     ${HMI_SRC_DIR}/src/drivers/ProtocolAvailabilityUi.cpp
     # ★ 2026-10-16:菜单栏(tst_MenuBar 调的是 hmi.cpp 调的那个同一个 buildApplicationMenu)
@@ -267,6 +272,10 @@ add_hmi_test(tst_PlcMultiServerE2E)
 #   最要紧的两条在文件头:删被引用的 PLC【不许】自动改变量指向,
 #   状态列【不许】把"driver 建出来了"说成"在线"。
 add_hmi_test(tst_PlcConfigDialog)
+# ★ 2026-10-19:变量配置对话框 —— 让变量 plcId 有 UI 入口。
+#   最要紧的两条:删被引用的变量【拒删】并逐条列出引用者;
+#   以及【画面绑定查不到】这句话必须一直在界面上。
+add_hmi_test(tst_VariableConfigDialog)
 # ★ 2026-10-16:菜单栏 —— 逐个菜单项验证它连到了【正确的那个槽】
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。

@@ -109,6 +109,8 @@ set(SOURCES
     src/alarm/AlarmConfigDialog.cpp
     src/alarm/AlarmSoundDialog.cpp     # ★ F5:报警声音设置对话框
     src/alarm/AlarmRowPalette.cpp       # ★ 2026-10-14:报警行配色唯一权威(两套报警 UI 共用)
+    # ★ 2026-10-19:变量配置对话框 —— 让变量 plcId 有 UI 入口(多 PLC 2b 的收尾缺口)
+    src/plc/VariableConfigDialog.cpp
     # ★ 2026-10-10:协议下拉框"未实现"标注(置灰 + tooltip)
     #   注:src/drivers/ 下的文件目前靠下面的 GLOB 兜底捡进来,
     #   显式写出来是为了守住"新文件必须登记"的约定。
@@ -204,6 +206,7 @@ set(HEADERS
     src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图
     src/ui/MenuBuilder.h            # ★ 2026-10-16:菜单栏(抽出来才能被 tst_MenuBar 测到)
     src/plc/PlcConnectionManager.h  # ★ 2b:多 PLC 连接管理
+    src/plc/VariableConfigDialog.h  # ★ 2026-10-19:变量配置对话框
     src/drivers/IPlcDriverProvider.h  # ★ 2b:纯接口无 Q_OBJECT(写进 HEADERS 便于 VS 里查得到)
 )
 
