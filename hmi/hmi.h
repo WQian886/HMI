@@ -269,6 +269,11 @@ private:
     //   这个按钮是它们对真实用户存在的唯一途径。
     void onAlarmConfigClicked();
     void onAlarmSoundSettings();   // ★ F5:报警声音设置对话框
+    // ★ 2b 阶段6(2026-10-19):弹 PlcConfigDialog(N 台 PLC 的地址/协议/从站号)
+    //   2a/2b 把多 PLC 的存读和运行期连接都做完了,但 plcs[] 只能手改 JSON ——
+    //   host 写错要停机改文件、slave_id 填 0(广播地址)没有任何人拦。
+    //   改现场设备的配置却只存在于 JSON 里,等于这个功能对真实用户不存在。
+    void onPlcConfigClicked();
 
     // ★★ 2026-10-16:菜单栏
     //   buildMenus() 在构造函数里调一次,全部 connect 到上面那些【已有槽】,

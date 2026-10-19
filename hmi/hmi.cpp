@@ -34,6 +34,7 @@
 #include "ActionManager.h"        // 阶段 5.6:报警联动动作(关阀/停机)
 #include "alarm/AlarmConfigDialog.h"  // ★ F4-a(2026-10-08):报警配置对话框(报警配置按钮)
 #include "alarm/AlarmSoundDialog.h"   // ★ F5(2026-10-08):报警声音设置对话框
+#include "plc/PlcConfigDialog.h"      // ★ 2b 阶段6:N 台 PLC 的配置界面
 #include "AlarmSoundPlayer.h"         // ★ F5(2026-10-08):报警声音/蜂鸣(报警声音按钮)
 #include <QIntValidator>
 #include <QTimer>                 // counter / resetTimer_ / alarmBlinkTimer_ 共用
@@ -1207,6 +1208,19 @@ void hmi::onAlarmConfigClicked() {
 //   状态存在 AlarmSoundPlayer 里,对话框自己不留草稿。
 void hmi::onAlarmSoundSettings() {
     qwhmi::alarm::AlarmSoundDialog dlg(alarmSound_, this);
+    dlg.exec();
+}
+
+// ★ 2b 阶段6(2026-10-19):PLC 配置对话框
+//   【为什么每次点击都 new】同 onAlarmConfigClicked —— 对话框是栈上局部变量,
+//   草稿存在它自己的 rows_ 里,关掉就没了。"保存到工程文件"和
+//   "应用到运行中"是两个分开的按钮,草稿的生命周期短于任何一种生效方式。
+//
+//   【为什么传 varMgr_】只为算"引用变量数"那一列 ——
+//   删一台被 N 个变量引用的 PLC 时,必须先告诉用户会连累哪几个变量。
+//   传 nullptr 那一列显示 0,界面照常工作(只是少了个提示),不会崩。
+void hmi::onPlcConfigClicked() {
+    qwhmi::plc::PlcConfigDialog dlg(plcMgr_, varMgr_, this);
     dlg.exec();
 }
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable

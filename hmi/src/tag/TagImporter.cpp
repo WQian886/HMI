@@ -9,6 +9,7 @@
 
 #include <QFile>
 #include <QHash>
+#include <QSet>
 #include <QStringList>
 #include <QTextStream>
 
@@ -41,7 +42,9 @@ static Variable::Access parseAccess(const QString& s) {
     return Variable::Access::ReadOnly;  // 默认 R
 }
 
-TagImporter::Result TagImporter::importFromCsv(const QString& path, VariableManager* mgr) {
+TagImporter::Result TagImporter::importFromCsv(const QString& path,
+                                               VariableManager* mgr,
+                                               const QStringList& knownPlcIds) {
     Result r;
     if (!mgr) {
         r.errors << "VariableManager 为空";
@@ -72,6 +75,15 @@ TagImporter::Result TagImporter::importFromCsv(const QString& path, VariableMana
         r.errors << "CSV 缺少必需列(name, type)";
         return r;
     }
+
+    // ★ 已知 PLC 集合。空 = 不检查(调用方不知道有哪些 PLC)。
+    //   用 QSet 而不是 QStringList::contains:CSV 可能导几百行,
+    //   线性查找会退化成 O(行数 × PLC 数)。
+    const QSet<QString> known(knownPlcIds.begin(), knownPlcIds.end());
+    // 同一个不存在的 plcId 可能被几十个变量共用 —— 只说一次,
+    //   否则 200 个变量全指向 plc9 时错误列表会被同一条刷爆,
+    //   真正需要看的那几条反而被挤掉。
+    QStringList unknownPlcReported;
 
     while (!in.atEnd()) {
         const QString line = in.readLine();
@@ -119,7 +131,22 @@ TagImporter::Result TagImporter::importFromCsv(const QString& path, VariableMana
         } else {
             // ★ 普通 Variable
             auto* v = new Variable(name, address, type, access, mgr);
-            if (!plcId.isEmpty()) v->setPlcId(plcId);
+            if (!plcId.isEmpty()) {
+                v->setPlcId(plcId);
+                // ★ 2b 阶段 6:变量指向一台【不存在】的 PLC 时,警告但不拒绝。
+                //   理由见头注释:变量 plcId 没有 UI 入口,plcs[] 却已经能配了 ——
+                //   两边对不上是眼下最容易犯也最难查的一类错。
+                //   【不】拒绝:先导 CSV 再配 PLC 是合理顺序,拒绝会把它堵死。
+                if (!known.isEmpty() && !known.contains(plcId)
+                    && !unknownPlcReported.contains(plcId)) {
+                    unknownPlcReported << plcId;
+                    r.errors << QString("第 %1 行:变量 \"%2\" 的 plcId \"%3\" "
+                                        "在当前工程里【没有对应的 PLC】——"
+                                        "导入仍然保留,但这个变量运行时不会通讯"
+                                        "(值会停在 Bad)")
+                                  .arg(r.total).arg(name, plcId);
+                }
+            }
             // ★ D.5 别名
             for (const QString& a : aliasStr.split('|', Qt::SkipEmptyParts)) {
                 v->addAlias(a.trimmed());

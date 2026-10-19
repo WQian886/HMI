@@ -295,6 +295,132 @@ bool Project::replaceAlarmsInFile(const QString& path,
     return true;
 }
 
+// ============================================================================
+// ★ 阶段 6(2026-10-19):replacePlcsInFile —— 只换 plcs 段
+//
+// 形状与上面的 replaceAlarmsInFile【刻意一模一样】,连四步的顺序都一样:
+//   ① 先校验,坏草稿绝不落盘
+//   ② 读原文件,打不开 / 不是合法 JSON / 顶层不是 object → 报错,拒绝覆盖
+//   ③ 只换 plcs 一个键,其余原样保留
+//   ④ QSaveFile 原子写回
+//
+// 【为什么不抽成共用的模板函数】
+//   两个函数有 80% 是重复的,但剩下那 20%(校验规则、失败文案)是真的不同:
+//   报警是"重名会导致整个工程打不开",PLC 是"地址填错会静默不连"。
+//   抽模板省下的十几行,换来一个以后改一边忘了改另一边的风险。
+//   这两段各只有三十几行,重复的成本低于不一致的成本。
+// ============================================================================
+
+bool Project::replacePlcsInFile(const QString& path,
+                                const QJsonArray& plcs,
+                                QString* errorOut) {
+    auto fail = [&](const QString& msg) {
+        if (errorOut) *errorOut = msg;
+        return false;
+    };
+
+    // ---- ① 先校验,坏草稿绝不落盘 ----
+    //   落下去的不是"PLC 配错了",而是"这台 PLC 打开工程后静默不连"。
+    //   比"工程打不开"更隐蔽:用户看到界面照常起来,只是少了一台。
+    QString verr;
+    if (!validatePlcArray(plcs, &verr)) return fail(verr);
+
+    // ---- ② 读原文件 ----
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        return fail(QString("打不开工程文件: %1\n(请先在主界面用“打开工程”载入它,"
+                            "本对话框只改已有工程,不新建)").arg(f.errorString()));
+    }
+    const QByteArray data = f.readAll();
+    f.close();
+
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+    if (err.error != QJsonParseError::NoError) {
+        return fail(QString("原工程文件不是合法 JSON(%1,offset %2),拒绝覆盖")
+                        .arg(err.errorString()).arg(err.offset));
+    }
+    if (!doc.isObject()) {
+        return fail("原工程文件顶层不是 object,拒绝覆盖");
+    }
+
+    // ---- ③ 只换 plcs,其余键原样保留 ----
+    //   variables / actions / alarms / screens[].controls 一个都不动。
+    //   ★ 这一步是本函数的核心约束:对话框只管 PLC 连接,
+    //   绝不能顺手把用户的画面和变量清空。
+    QJsonObject root = doc.object();
+    root["plcs"] = plcs;
+
+    // ---- ④ 原子写回 ----
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        return fail(QString("打开文件准备写入失败: %1").arg(out.errorString()));
+    }
+    out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!out.commit()) {
+        return fail(QString("写入失败: %1").arg(out.errorString()));
+    }
+
+    if (errorOut) errorOut->clear();
+    return true;
+}
+
+bool Project::validatePlcArray(const QJsonArray& plcs, QString* errorOut) {
+    auto fail = [&](const QString& msg) {
+        if (errorOut) *errorOut = msg;
+        return false;
+    };
+
+    // ★ id 必须唯一 —— 这是 PLC 这边比 alarms 多出来的一条检查。
+    //   变量靠 plc_id 找 PLC,而重复的 id 在加载时是后者静默覆盖前者,
+    //   没有任何报错。所以用户配两台都叫 plc2 时,
+    //   现象是"配了 2 台,变量只跟第 2 台通讯",而界面上看不出哪里不对。
+    //   这条检查放在【存盘前】,而不是等到运行期才发现。
+    QSet<QString> seen;
+    for (int i = 0; i < plcs.size(); ++i) {
+        if (!plcs.at(i).isObject()) {
+            return fail(QString("plcs[%1] 不是对象").arg(i));
+        }
+        const QJsonObject plc = plcs.at(i).toObject();
+        const QString id = plc.value("id").toString().trimmed();
+        if (id.isEmpty()) {
+            return fail(QString("plcs[%1] 缺少 \"id\" —— 变量靠它找到这台 PLC").arg(i));
+        }
+        if (seen.contains(id)) {
+            return fail(QString("plcs 的 id \"%1\" 重复(第 %2 条)—— "
+                                "重复会让变量静默只连到其中一台")
+                            .arg(id).arg(i));
+        }
+        seen.insert(id);
+
+        // host/port 复用 loadPlcsFromJson 同一套判据(validatePlcEntry 那三条)。
+        // ★ 刻意【不】在这里加协议白名单 —— 理由见 validatePlcEntry 上方注释:
+        //   "配了个还没实现的协议"不该变成"存不进去",它会在运行期
+        //   明确进 rejected 并在界面上显示"不在线"。
+        const QString host = plc.value("host").toString();
+        const int port = plc.value("port").toInt(-1);
+        if (host.trimmed().isEmpty() || port <= 0 || port > 65535) {
+            return fail(QString("plcs[\"%1\"] 的 host/port 不合法(host=\"%2\" port=%3)")
+                            .arg(id, host).arg(port));
+        }
+
+        // ★ slave_id 越界在【存盘前】就拦。
+        //   运行期 PlcConnectionManager::parseEntry 也会兜(按缺省 1 处理),
+        //   但那条只是"不崩",界面上从站号会显示成 1,而用户填的是 300 ——
+        //   两边对不上且没有解释。存盘前拦住,用户当场就知道填错了。
+        if (plc.contains("slave_id")) {
+            const int sid = plc.value("slave_id").toInt(1);
+            if (sid < 1 || sid > 247) {
+                return fail(QString("plcs[\"%1\"] 的 slave_id=%2 非法(1..247)。"
+                                    "注意 0 是 Modbus 广播地址,不能填")
+                                .arg(id).arg(sid));
+            }
+        }
+    }
+    if (errorOut) errorOut->clear();
+    return true;
+}
+
 // ===== 私有 loadRootFromFile:读文件 + 解析 + schema 校验 + migrate =====
 //   返回 true 表示成功(应用 vars/alarms/actions/plcs 到管理器);
 //   成功时 outRoot 是 migrate 后的完整 JSON(供 E.3 进一步解析 screens[0].controls)

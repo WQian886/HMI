@@ -75,6 +75,8 @@ set(HMI_CORE_SOURCES
     # ★ 2b(2026-10-19):多 PLC 连接管理(把 plcs[] 变成运行期真的在线的 N 台)
     #   IPlcDriverProvider.h 是纯接口无 Q_OBJECT,不进列表(没有 .cpp)。
     ${HMI_SRC_DIR}/src/plc/PlcConnectionManager.cpp
+    # ★ 2b 阶段6(2026-10-19):PLC 配置对话框(形状照 AlarmConfigDialog)
+    ${HMI_SRC_DIR}/src/plc/PlcConfigDialog.cpp
     # ★ 2026-10-10:协议下拉框置灰(tst_ProtocolComboGrey 调的是这个生产函数)
     ${HMI_SRC_DIR}/src/drivers/ProtocolAvailabilityUi.cpp
     # ★ 2026-10-16:菜单栏(tst_MenuBar 调的是 hmi.cpp 调的那个同一个 buildApplicationMenu)
@@ -252,6 +254,10 @@ add_hmi_test(tst_WriteSchedulerMultiPlc)
 #   而"写错设备"这个 bug 恰恰发生在链路层,只有真 socket 才现形。
 #   所以三台服务端各自把寄存器空间填成 0x1111/0x2222/0x3333 —— 值本身编码身份。
 add_hmi_test(tst_PlcMultiServerE2E)
+# ★ 2b(2026-10-19):PLC 配置对话框 —— 改现场设备的配置不再只能手改 JSON。
+#   最要紧的两条在文件头:删被引用的 PLC【不许】自动改变量指向,
+#   状态列【不许】把"driver 建出来了"说成"在线"。
+add_hmi_test(tst_PlcConfigDialog)
 # ★ 2026-10-16:菜单栏 —— 逐个菜单项验证它连到了【正确的那个槽】
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。

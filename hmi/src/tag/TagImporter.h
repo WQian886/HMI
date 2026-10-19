@@ -39,8 +39,26 @@ public:
     // ★ 从 CSV 文件导入 Variable/派生 Variable
     //   path: CSV 文件路径
     //   mgr: 目标 VariableManager
+    //   knownPlcIds:当前工程里【已配置】的 plcId 集合。
+    //     传空集合 = 调用方不知道有哪些 PLC(或不关心),不做检查。
+    //     传了就检查,发现变量指向一个不存在的 PLC 时【警告但不拒绝】。
+    //
+    //     ★【为什么只警告不拒绝】"先导 CSV、再配 PLC"是完全合理的顺序,
+    //       而变量 plcId 至今【没有 UI 入口】(整个变量编辑界面都不存在),
+    //       用户只能靠 CSV 或手改 JSON 来写 plc_id。
+    //       拒绝的话,"我导了 200 个变量,plc_id 先写 plc1/plc2/plc3,
+    //       等会儿在 PLC 配置里配上"这条正常路径直接走不通。
+    //
+    //     ★【为什么必须警告】静默接受的后果是:导入全部"成功",
+    //       界面上一片绿,但那些变量永远不通讯 —— 而 plc_id 那一格
+    //       在界面上【根本没有显示】,用户没有任何地方能看到"plc3 不存在"。
+    //       运行时它们一直是无连接状态(值停在 Bad),那份坏配置就永远查不到了。
+    //       至少在导入那一刻把话说出来。
+    //
     //   返回:Result(无失败错误返 true,errors 列表为空)
-    static Result importFromCsv(const QString& path, VariableManager* mgr);
+    static Result importFromCsv(const QString& path,
+                                VariableManager* mgr,
+                                const QStringList& knownPlcIds = QStringList());
 
     // ★ CSV 表头常量(供 UI 展示 + 测试用)
     static QString csvHeader();

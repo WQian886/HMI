@@ -118,6 +118,20 @@ QStringList buildApplicationMenu(QMenuBar* bar, QObject* receiver) {
     addItem(mRun, QStringLiteral("断开(&D)"),
             receiver, SLOT(onDisconnectClicked()), &failures);
 
+    // ---- PLC(2b 阶段 6)----
+    //   ★ 放独立顶级菜单,不塞进"运行"或"工程"。理由:
+    //   它既不是"运行控制"(启动/停止那种一次性动作),
+    //   也不是"文件操作"(打开/保存工程)。
+    //   它是【改现场设备的配置】—— 塞进"运行"会让人以为点它就能开始通讯,
+    //   塞进"工程"会让人以为它只写文件(而它一半的职责是立即重连)。
+    //   混进任何一个都是拿现成的分类掩盖真实的差别。
+    //   【为什么不给快捷键】现场改 PLC 配置是低频动作,给快捷键等于
+    //   占掉一个用户更常用的键位;而且它有 EditProject 权限门槛,
+    //   按错一次弹一个"权限不足"框很烦。
+    QMenu* mPlc = bar->addMenu(QStringLiteral("PLC(&L)"));
+    addItem(mPlc, QStringLiteral("PLC 配置(&C)..."),
+            receiver, SLOT(onPlcConfigClicked()), &failures);
+
     // ---- 画面 ----
     QMenu* mScreen = bar->addMenu(QStringLiteral("画面(&V)"));
     addItem(mScreen, QStringLiteral("编辑器(&E)..."),

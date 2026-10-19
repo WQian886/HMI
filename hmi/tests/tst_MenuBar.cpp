@@ -96,6 +96,8 @@ public slots:
     // --- 报警 ---
     void onAlarmConfigClicked() { fired << QStringLiteral("onAlarmConfigClicked"); }
     void onAlarmSoundSettings() { fired << QStringLiteral("onAlarmSoundSettings"); }
+    // --- PLC(2b 阶段 6)---
+    void onPlcConfigClicked()  { fired << QStringLiteral("onPlcConfigClicked"); }
     // --- 数据 ---
     void onExportVariablesClicked(){ fired << QStringLiteral("onExportVariablesClicked"); }
     void onExportAlarmsClicked()  { fired << QStringLiteral("onExportAlarmsClicked"); }
@@ -218,9 +220,12 @@ void tst_MenuBar::menuBar_hasExpectedTopLevelMenus() {
 
     // ★ 顺序也是断言的一部分 —— "运行"放第二个是有意的(现场用得最多),
     //   排到工程后面会让操作员每次先扫一眼用不上的项。
+    //   "PLC" 排在"运行"之后、"画面"之前:它比画面更接近现场操作
+    //   (改 IP 是工程师到场做的事),但比启动/停止低频。
     const QStringList expected = {
-        QStringLiteral("工程"), QStringLiteral("运行"), QStringLiteral("画面"),
-        QStringLiteral("报警"), QStringLiteral("数据"), QStringLiteral("帮助")
+        QStringLiteral("工程"), QStringLiteral("运行"), QStringLiteral("PLC"),
+        QStringLiteral("画面"), QStringLiteral("报警"),
+        QStringLiteral("数据"), QStringLiteral("帮助")
     };
     QCOMPARE(names, expected);
 
@@ -246,6 +251,7 @@ void tst_MenuBar::everyAction_reachesItsOwnSlot() {
         {"运行", "复位",         "onResetClicked"},
         {"运行", "连接 PLC",     "onConnectClicked"},
         {"运行", "断开",         "onDisconnectClicked"},
+        {"PLC",  "PLC 配置...",  "onPlcConfigClicked"},
         {"画面", "编辑器...",    "onEditorClicked"},
         {"画面", "运行时画面...", "onRuntimeCanvasClicked"},
         {"画面", "演示画布...",  "onDemoCanvasClicked"},
@@ -284,7 +290,8 @@ void tst_MenuBar::actionCount_matchesSlotsWired() {
     struct Count { const char* menu; int expected; };
     // 工程 = 2 项(没有多余的分隔符);运行 = 5 项 + 1 分隔符;其余各项全列
     static const Count kCounts[] = {
-        {"工程", 2}, {"运行", 6}, {"画面", 3}, {"报警", 2}, {"数据", 2}, {"帮助", 1}
+        {"工程", 2}, {"运行", 6}, {"PLC", 1}, {"画面", 3},
+        {"报警", 2}, {"数据", 2}, {"帮助", 1}
     };
     int total = 0;
     for (const Count& c : kCounts) {
@@ -296,7 +303,7 @@ void tst_MenuBar::actionCount_matchesSlotsWired() {
                      .arg(QLatin1String(c.menu)).arg(c.expected).arg(n)));
         total += n;
     }
-    QCOMPARE(m_bar.actions().size(), 6);
+    QCOMPARE(m_bar.actions().size(), 7);
     QVERIFY(total > 0);
 
     // ★★ 全菜单扫一遍:不许出现"新建工程"。
@@ -333,7 +340,7 @@ void tst_MenuBar::openAndSave_haveStandardShortcuts() {
 
 void tst_MenuBar::buildTwice_doesNotDuplicateMenus() {
     qwhmi::ui::buildApplicationMenu(&m_bar, &m_recv);
-    QCOMPARE(m_bar.actions().size(), 6);
+    QCOMPARE(m_bar.actions().size(), 7);
 
     // 顶层菜单【数量】对了还不够:如果没 clear,会出现 12 个("工程"出现两次)。
     // 而"两处都叫工程"这个状态肉眼很难在测试报告里看出来,所以显式查名字。
@@ -367,15 +374,15 @@ void tst_MenuBar::nullMenuBar_isNoCrash() {
 
 void tst_MenuBar::missingSlot_isReportedNotSwallowed() {
     // ★★★ 替 hmi 兜底的最后一道。
-    //   HalfReceiver 只有 onOpenClicked 一个槽,其余 14 个 connect 必然失败 ——
+    //   HalfReceiver 只有 onOpenClicked 一个槽,其余 15 个 connect 必然失败 ——
     //   这正是"hmi 里少了个槽"在真实运行时的样子。
     //   改之前这些失败被 addItem 静默吞掉,菜单照样建出来,
-    //   用户点那 14 个菜单项【什么都不会发生】,而程序一声不吭。
+    //   用户点那 15 个菜单项【什么都不会发生】,而程序一声不吭。
     HalfReceiver half;
     const QStringList failed = qwhmi::ui::buildApplicationMenu(&m_bar, &half);
 
-    // 15 个菜单项,只有 1 个能连上 → 14 个必须被报出来,一个都不能少
-    QCOMPARE(failed.size(), 14);
+    // 16 个菜单项,只有 1 个能连上 → 15 个必须被报出来,一个都不能少
+    QCOMPARE(failed.size(), 15);
 
     // 报出来的内容必须【指得出是哪个菜单的哪一项、想连的是哪个槽】
     //   —— 只报一个数字("14 个没连上")的话,排查的人还得自己去猜是哪里错了。
@@ -395,7 +402,7 @@ void tst_MenuBar::missingSlot_isReportedNotSwallowed() {
     // ★ 菜单【照样建出来了】。
     //   这是刻意的:一个槽名写错,不该让整个菜单栏消失 ——
     //   否则用户看到的是"程序连启动都出不来",而真实情况只是少了一个功能。
-    QCOMPARE(m_bar.actions().size(), 6);
+    QCOMPARE(m_bar.actions().size(), 7);
 }
 
 void tst_MenuBar::healthyReceiver_reportsNoFailures() {

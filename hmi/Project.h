@@ -95,6 +95,28 @@ public:
     //   校验内容:报警名非空、报警名唯一。返回 false 时 errorOut 说明原因。
     static bool validateAlarmsArray(const QJsonArray& alarms, QString* errorOut);
 
+    // ★ 阶段 6(2026-10-19):只替换工程文件里的 plcs 段,其余原样保留。
+    //
+    //   【为什么要它,以及为什么不能走 setPlcs + saveToFile】
+    //   与上面 replaceAlarmsInFile 完全同源:
+    //   saveToFile 是"把当前【运行中】的管理器状态整个重新序列化",
+    //   而对话框的草稿只覆盖 plcs[] —— 走那条路会把草稿丢掉、
+    //   覆盖成运行中的旧值,存了等于没存。
+    //
+    //   前置条件同 replaceAlarmsInFile:path 必须已存在且是合法 JSON object。
+    //   不负责创建新工程。
+    static bool replacePlcsInFile(const QString& path,
+                                  const QJsonArray& plcs,
+                                  QString* errorOut);
+
+    // ★ 阶段 6:存盘前校验 plcs[]。比 loadPlcsFromJson 严格的地方在两处:
+    //   id 唯一、slave_id 在 1..247。
+    //   【为什么存盘前要更严】loadPlcsFromJson 的取舍是"配错就跳过这一台,
+    //   其余照常" —— 那是加载时的正确行为(现场不能因为一台填错就打不开工程)。
+    //   但存盘时用户正坐在对话框前面,这时候报出来他马上就改;
+    //   存下去再等下次打开工程才发现,那一台已经白配了。
+    static bool validatePlcArray(const QJsonArray& plcs, QString* errorOut);
+
     // ★ C.0(2026-09-17):schema 迁移公开 API(单测和外部工具可直接用)
     //   - migrateTo:从 fromVersion 链式迁移到 toVersion(内部按需调 migrateVxToVxPlus1)
     //   - migrateV1ToV2:v1 → v2 单步迁移(单独暴露给单测)
