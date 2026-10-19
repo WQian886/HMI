@@ -18,6 +18,12 @@
 // 3. in-flight 机制:nextPollAtMs[v] = 0 + inFlight_ set(避免 -1 magic number)
 // 4. 失败/超时:由 PollScheduler 自己的下一帧重试(不依赖具体 driver 失败信号)
 // 5. ★ C.5 多 driver 调度:每个 driver 各自发请求,各自等 reply;1 个 driver 挂不影响其他
+//
+// ★ 2b(2026-10-19):多 driver 骨架(C.5)自己有两个 bug,这次一并修掉。
+//   改之前 addDriver 只插哈希不接 readFinished(那个 connect 只在 start() 里),
+//   而 hmi.cpp 是先 start() 再 loadFromFile() —— 运行期加进来的 driver
+//   永远收不到回包。现在挂接收敛到 hookDriver(),由 running_ 决定什么时候接。
+//   详见 .cpp 顶部注释和 addDriver() 的长注释。
 
 #pragma once
 
@@ -51,6 +57,23 @@ public:
 
     // 当前 driver 列表(plcId → IPollDriver*)
     QHash<QString, qwhmi::drivers::IPollDriver*> drivers() const { return drivers_; }
+
+    // ★ 2b(2026-10-19):当前真正接了 readFinished 的 driver 个数。
+    //   【它证明什么】净连接数 —— stop() 之后是 0、start 之后是 N。
+    //   【它【不】证明什么】"没有多连"。它是 QSet,重复 insert 不增长,
+    //   而且实测把 hookDriver 的幂等 disconnect 删掉它也不变。
+    //   想断言"多连了"只能靠 replyDispatchCount()。
+    int hookedDriverCount() const { return hooked_.size(); }
+
+    // ★ 2b:reply 分派被进入过多少次(纯观测计数器,生产逻辑不用它)。
+    //
+    //   【它证明的是什么,不是什么】
+    //   证明:每个 requestId 恰好被分派一次(用例断言它 == driver 的发帧数)。
+    //   不证明:"hookDriver 里那行幂等 disconnect 被删掉会被抓到" —— 【抓不到】。
+    //   实测(2026-10-19):删掉那行,22 条用例全绿。原因是每个调用方
+    //   (addDriver 先 unhook、start 有 isActive 挡着)都已经先摘干净了,
+    //   那行是防御性的、当前不可达。详见 .cpp 里 hookDriver() 的注释。
+    quint64 replyDispatchCount() const { return replyDispatchCount_; }
 
 	void start();// 开始轮询调度
 	void stop();// 停止轮询调度
@@ -89,11 +112,29 @@ private:
     // 两个构造函数都要调 —— 信号连接跟有几个 driver 无关。
     void connectVariableManager();
 
+    // ★ 2b(2026-10-19):readFinished 挂接的【唯一入口】。
+    //   幂等性靠"第一行无条件 disconnect 再连"这一个动作拿到,不靠调用方约定顺序 ——
+    //   靠约定的东西迟早会被乱序调用打破。
+    //   【只在 running_ 为真时被调用】
+    void hookDriver(const QString& plcId);
+    void unhookDriver(const QString& plcId);
+
     VariableManager* varMgr_;
     // ★ C.5:从单 IPollDriver* 改成 QHash<QString, IPollDriver*>
     //   老代码 driver_ 单指针保留(兼容性指针),drivers_ 是新多 driver 哈希
     qwhmi::drivers::IPollDriver* legacyDriver_ = nullptr;  // 单 driver 兼容
     QHash<QString, qwhmi::drivers::IPollDriver*> drivers_;  // 多 driver(按 plcId)
+    // ★ 2b(2026-10-19):定时器是不是"应该连着"的状态标志。
+    //   【为什么不能省】tst_IPollDriver 里约 7 条用例把 stop() 当拆解用。
+    //   如果 stop() 之后 addDriver 又把 readFinished 连上,stop() 就失去意义了 ——
+    //   那些用例会看到本不该有的回包流入。
+    //   【为什么要有】start() 在 hmi.cpp 里早于工程加载,运行期 addDriver 是常态,
+    //   所以"要不要现在连"必须由一个显式状态回答,不能靠 timer_.isActive()
+    //   (stop() 之后它也是 false,但 addDriver 的语义要跟 start/stop 对齐)。
+    bool running_ = false;
+    QSet<QString> hooked_;               // 已经接了 readFinished 的 plcId
+    // ★ 2b:纯观测计数器,给"有没有重复连接"用。生产逻辑不读它。见 replyDispatchCount()。
+    quint64 replyDispatchCount_ = 0;
     QTimer timer_;                                       // 100ms tick
     QHash<Variable*, qint64> nextPollAtMs_;            // 下次轮询时刻(0 = 立即可发,>0 = 等到该时刻)
     // ★ IMPROVE-A7(2026-07-29):in-flight 状态独立用 QSet,替原来的 -1 magic number

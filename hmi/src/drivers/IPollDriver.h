@@ -66,7 +66,21 @@ public:
         int count = 1;
         quint32 requestId = 0; // driver 透传,reply 时回带
     };
-    virtual void sendReadRequest(const ReadRequest& req) = 0;
+    // ★ 2b(2026-10-19):改成返回 bool,与 sendWriteRequest 对称。
+    //
+    //   【为什么必须改】原来返回 void,而底层 ModbusMaster::sendReadRequest
+    //   拒收请求时返回 nullptr 并【不发 readFinished】(只 emit errorOccurred)。
+    //   这个"信息"就在返回值里,接口层把它丢了,于是 PollScheduler 无从知道
+    //   请求有没有被接收 —— 只能先乐观登记 pending_[reqId],然后等一个
+    //   【永远不会来的】reply,把变量永久留在在途态。
+    //   现场表现:同一台 PLC 上地址连续的那几个变量有值,中间跳过几个地址的
+    //   那几个永远停在旧值,而日志里只有一句"上一帧未完成,稍后再发"。
+    //
+    //   【返回值语义】true = 已接收,【必定会】来一个 readFinished(成功或失败都算);
+    //                     false = 已拒绝,不会来 readFinished,调用方要负责回滚。
+    //   注意 stub driver(S7/EIP)会立刻 emit readFinished(false) 然后返回 true ——
+    //   它们"接收了请求",失败是通过信号报的,不是通过返回值。
+    virtual bool sendReadRequest(const ReadRequest& req) = 0;
 
     // ===== 异步写请求 =====
     virtual bool sendWriteRequest(RegisterArea area,

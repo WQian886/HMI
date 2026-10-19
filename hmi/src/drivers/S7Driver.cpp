@@ -89,12 +89,17 @@ int S7Driver::pendingCount() const
     return 0;
 }
 
-void S7Driver::sendReadRequest(const ReadRequest& req)
+// ★ 2b(2026-10-19):返回 bool。stub 会立刻 emit readFinished(false),
+//   即"接收了请求、失败通过信号报",所以返回 true 而不是 false。
+//   返回 false 的语义是"拒绝,不会有 readFinished" —— 两者不能混,
+//   否则 PollScheduler 会去等一个永远不来的 reply。
+bool S7Driver::sendReadRequest(const ReadRequest& req)
 {
     // C.2.5 TODO:Cli_ReadArea(area, dbNumber, start, amount, wordLen, buffer)
     Q_UNUSED(req);
     qWarning() << "[S7Driver] sendReadRequest C.2.1 stub";
     emit readFinished(req.requestId, QVector<quint16>{}, false);
+    return true;
 }
 
 bool S7Driver::sendWriteRequest(RegisterArea area, int slaveId, int addr,

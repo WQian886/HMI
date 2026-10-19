@@ -34,7 +34,8 @@ public:
     void disconnect() override;
     bool isConnected() const override;
     int pendingCount() const override;
-    void sendReadRequest(const ReadRequest& req) override;
+    // ★ 2b(2026-10-19):返回 bool(是否被接收),理由见 IPollDriver.h 同名函数注释
+    bool sendReadRequest(const ReadRequest& req) override;
     bool sendWriteRequest(RegisterArea area, int slaveId, int addr,
                           const QVector<quint16>& values, quint32 requestId) override;
     QString protocolName() const override { return QStringLiteral("modbus"); }

@@ -99,7 +99,9 @@ int EipDriver::pendingCount() const
     return 0;
 }
 
-void EipDriver::sendReadRequest(const ReadRequest& req)
+// ★ 2b(2026-10-19):返回 bool。stub 会立刻 emit readFinished(false),
+//   即"接收了请求、失败通过信号报",所以返回 true。理由同 S7Driver。
+bool EipDriver::sendReadRequest(const ReadRequest& req)
 {
     // C.3.4 TODO: 真 libplctag 读逻辑
     //   1. tag_ = pPlcTagCreate(tagName, 0, "protocol=ab-eip&...")  — 第一次创建
@@ -110,6 +112,7 @@ void EipDriver::sendReadRequest(const ReadRequest& req)
     Q_UNUSED(req);
     qWarning() << "[EipDriver] sendReadRequest C.3.1 stub";
     emit readFinished(req.requestId, QVector<quint16>{}, false);
+    return true;
 }
 
 bool EipDriver::sendWriteRequest(RegisterArea area, int slaveId, int addr,

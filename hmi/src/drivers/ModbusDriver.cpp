@@ -73,11 +73,14 @@ int ModbusDriver::areaToModbusType(RegisterArea area) {
     return QModbusDataUnit::HoldingRegisters;   // fallback
 }
 
-void ModbusDriver::sendReadRequest(const ReadRequest& req) {
+// ★ 2b(2026-10-19):返回 bool —— 跟下面 sendWriteRequest 完全同形。
+//   ModbusMaster 拒收请求时返回 nullptr 且【不发 readFinished】,
+//   这个信息必须透出去,否则 PollScheduler 会把变量永久留在在途态。
+bool ModbusDriver::sendReadRequest(const ReadRequest& req) {
     QModbusDataUnit::RegisterType type =
         static_cast<QModbusDataUnit::RegisterType>(areaToModbusType(req.area));
     QModbusDataUnit unit(type, static_cast<quint16>(req.addr), static_cast<quint16>(req.count));
-    inner_->sendReadRequest(unit, req.slaveId, req.requestId);
+    return inner_->sendReadRequest(unit, req.slaveId, req.requestId) != nullptr;
 }
 
 bool ModbusDriver::sendWriteRequest(RegisterArea area, int slaveId, int addr,

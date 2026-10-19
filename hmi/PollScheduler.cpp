@@ -6,6 +6,20 @@
 //   - 每个 driver 独立 tick + 独立 readFinished
 //   - 1 driver = 1 PLC,故障隔离(教训 1.5):plc1 挂不影响 plc2/plc3
 //   - 单 driver 构造兼容老工程:默认所有变量 plcId="plc1"
+//
+// ★ 2b(2026-10-19)改了两个真 bug。两者都跟"多 PLC"有关,但【不修它们
+//   多 PLC 根本跑不起来】,所以它们排在所有新代码之前:
+//
+//   BUG-1  addDriver 收不到回包 —— 多 driver 骨架(C.5)自己就是坏的
+//          readFinished 的 connect 只写在 start() 里,addDriver 只插哈希。
+//          而 hmi.cpp 是先 start() 再 loadFromFile(),所以运行期加进来的
+//          driver 永远没有回包。改法:挂接收敛到 hookDriver(),由 running_ 决定时机。
+//
+//   BUG-2  地址不连续的变量永久卡住 —— 这是现在就存在的活 bug,与多 PLC 无关
+//          onTick 的合并循环遇地址不连续会连发多帧,但单 in-flight 防御只在
+//          循环前判一次。第 2 帧起被 ModbusMaster 拒收(只 errorOccurred,
+//          不发 readFinished),而 pending_[reqId] 已登记 → 这批变量再也不轮询。
+//          改法:检查 sendReadRequest 返回值,失败回滚 inFlight_ 和 pending_。
 
 #include "PollScheduler.h"
 #include "Variable.h"
@@ -118,15 +132,61 @@ void PollScheduler::onVariableReplaced(Variable* oldVar, Variable* newVar) {
 }
 
 // ★ C.5:运行时添加 driver
+// ★ 2b(2026-10-19):补上 running_ 判断 + 同 id 覆盖时摘旧连接。
+//
+//   【改之前的实际行为,不是风险,是现状】
+//     addDriver 只往哈希里塞指针,【不接 readFinished】——
+//     那个 connect 只写在 start() 里(见下方 start)。
+//     而 hmi.cpp 的顺序是 pollScheduler_->start()(:412)在
+//     project_->loadFromFile()(:640)【之前】。
+//     于是运行期打开工程/应用配置加进来的 driver,永远收不到任何回包。
+//     现象:配置里有 plc2、变量也绑了 plc2,就是不出数,而且日志一声不吭。
 void PollScheduler::addDriver(const QString& plcId, qwhmi::drivers::IPollDriver* driver) {
     if (plcId.isEmpty() || !driver) return;
+    // ★ 同 id 二次添加:先把【旧 driver】的连接摘干净。
+    //   不摘的话旧 driver 会继续把回包打进同一个 onDriverReadFinished,
+    //   而 requestId 是 PollScheduler 全局唯一的 —— 现象是
+    //   "明明已经切到新 PLC 了,偶尔还会读到旧 PLC 的值"。
+    //   ★ 注意只摘不 delete:所有权在 PlcConnectionManager,本类只借引用。
+    if (drivers_.contains(plcId)) {
+        unhookDriver(plcId);
+    }
     drivers_.insert(plcId, driver);
     if (!legacyDriver_) legacyDriver_ = driver;
-    // 启动定时器如果还没启(start() 由调用方决定)
+    if (running_) hookDriver(plcId);   // 运行期加的也要接上 —— 这就是 2b 补的那一刀
+}
+
+// ★ 2b(2026-10-19):readFinished 挂接的唯一入口。
+//   【第一行那个无条件 disconnect 是防御性的,不是当前可达的行为】
+//   实测记录(2026-10-19):把它注释掉,22 条用例【全绿】—— 没有任何用例能证伪它。
+//   原因是今天每一个调用方都已经先摘干净了:
+//     · addDriver  → 同 id 时先 unhookDriver
+//     · start()    → 有 if (timer_.isActive()) return; 挡着,而且 stop() 已全摘
+//   所以它防的是"将来有人新加一个调用方,忘了先摘"。
+//   留着是因为成本只有一行、而漏掉的代价是连接泄漏(数据层静默 no-op,
+//   不会有人发现)。但不要以为它被测试守着 —— 它没有。
+void PollScheduler::hookDriver(const QString& plcId) {
+    auto* d = drivers_.value(plcId, nullptr);
+    if (!d) return;
+    QObject::disconnect(d, &qwhmi::drivers::IPollDriver::readFinished, this, nullptr);
+    connect(d, &qwhmi::drivers::IPollDriver::readFinished,
+            this, [this, plcId](quint32 reqId, QVector<quint16> regs, bool success) {
+                onDriverReadFinished(plcId, reqId, regs, success);
+            });
+    hooked_.insert(plcId);
+}
+
+void PollScheduler::unhookDriver(const QString& plcId) {
+    auto* d = drivers_.value(plcId, nullptr);
+    if (d) {
+        QObject::disconnect(d, &qwhmi::drivers::IPollDriver::readFinished, this, nullptr);
+    }
+    hooked_.remove(plcId);
 }
 
 // ★ C.5:运行时移除 driver
 void PollScheduler::removeDriver(const QString& plcId) {
+    unhookDriver(plcId);   // ★ 2b:摘哈希之前先摘连接,否则 driver 析构后 lambda 还挂着
     drivers_.remove(plcId);
     if (legacyDriver_ && !drivers_.isEmpty()) {
         legacyDriver_ = drivers_.values().first();
@@ -144,24 +204,25 @@ void PollScheduler::start() {
     }
     // ★ C.5:接每个 driver 的 readFinished(协议无关),包 lambda 捕获 plcId
     //   故障隔离:1 个 driver disconnect 不影响其他 driver 的 reply 处理
+    // ★ 2b:改走 hookDriver —— running_ 必须【先置真】,否则下面的
+    //   "只在 running_ 时挂接"会把这一轮全跳掉。
+    running_ = true;
     for (auto it = drivers_.begin(); it != drivers_.end(); ++it) {
-        const QString plcId = it.key();
-        qwhmi::drivers::IPollDriver* drv = it.value();
-        connect(drv, &qwhmi::drivers::IPollDriver::readFinished,
-                this, [this, plcId](quint32 reqId, QVector<quint16> regs, bool success) {
-                    onDriverReadFinished(plcId, reqId, regs, success);
-                });
+        hookDriver(it.key());
     }
     timer_.start();
 }
 
 void PollScheduler::stop() {
     timer_.stop();
+    // ★ 2b:走 unhookDriver,顺带把 hooked_ 清空、running_ 落回 false。
+    //   少了 running_ = false 这行,stop() 之后再 addDriver 会把连接接回来,
+    //   stop() 就失去意义了(tst_IPollDriver 里约 7 条用例把它当拆解用)。
+    running_ = false;
     for (auto it = drivers_.begin(); it != drivers_.end(); ++it) {
-        qwhmi::drivers::IPollDriver* drv = it.value();
-        disconnect(drv, &qwhmi::drivers::IPollDriver::readFinished,
-                   this, nullptr);  // 断开所有 lambda
+        unhookDriver(it.key());
     }
+    hooked_.clear();
     nextPollAtMs_.clear();
     pending_.clear();
     pendingPlcId_.clear();
@@ -301,13 +362,36 @@ void PollScheduler::onTick() {
             req.addr      = first->address();
             req.count     = count;
             req.requestId = reqId;
-            drv->sendReadRequest(req);  // ★ C.5:用 per-plc driver 发,不是单 driver_
+            // ★ BUGFIX-B1(2026-10-19):检查返回值,失败必须回滚。
+            //
+            //   【改之前的实际行为,不是风险,是现状】
+            //     单 in-flight 防御在 while 循环【之前】只判了一次(:268),
+            //     而这个循环遇地址不连续会连发多帧。于是第 2 帧起
+            //     ModbusMaster::sendReadRequest 因 pending_ 非空拒收
+            //     (ModbusMaster.cpp:233-237),【只 emit errorOccurred,
+            //     不发 readFinished】。而上面 pending_[reqId] 早就登记了,
+            //     于是这批变量永远等不到 reply,inFlight_ 里再也出不来。
+            //
+            //     现场表现:同一台 PLC 上地址连续的那几个变量有值,
+            //     中间跳过几个地址的那几个永远停在旧值,而且日志里只有
+            //     一句 "上一帧未完成,稍后再发" —— 看不出后果是什么。
+            if (!drv->sendReadRequest(req)) {
+                pending_.remove(reqId);
+                pendingPlcId_.remove(reqId);
+                for (Variable* v : batch) {
+                    inFlight_.remove(v);              // 回滚在途标记
+                    nextPollAtMs_[v] = now + 100;     // 100ms 后重试(与上面同节奏)
+                }
+            }
         }
     }
 }
 
 // ★ C.5(2026-09-18):readFinished 改签名带 plcId(因为可能 N 个 driver 同时发 reply)
 void PollScheduler::onDriverReadFinished(const QString& plcId, quint32 requestId, QVector<quint16> registers, bool success) {
+    // ★ 2b:观测计数器。重复连接时下面这行会被进两次,而数据层看不出差别,
+    //   所以只能靠计数把它证明出来。见 PollScheduler.h 的 replyDispatchCount()。
+    ++replyDispatchCount_;
     QList<Variable*> batch = pending_.take(requestId);
     pendingPlcId_.remove(requestId);
     if (batch.isEmpty()) return;
