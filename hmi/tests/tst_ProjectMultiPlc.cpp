@@ -12,11 +12,20 @@
 //
 //   2a 修的正是这个:加载时全部读进 plcs_,保存时原样写回。
 //
-// 【2a 明确【没做】什么 —— 这条边界必须钉住】
-//   多台 PLC 【不会真的同时连上】。运行时仍然只连 plcs_[0]。
-//   那是 2b(要改 TcpClient 单实例的所有权,风险高一个量级)。
-//   所以本文件有一条用例专门确认"2a 没有偷偷越界":
-//     如果将来有人以为 2b 做了、把它删掉,本文件要能发现行为变了。
+// 【2a 明确【没做】什么 —— 这条边界 2b 已经补上】
+//   2a 结束时多台 PLC 【不会真的同时连上】,运行时仍然只连 plcs_[0]。
+//   2b(2026-10-19)把这一刀补上了:Project 不再自己连,而是通过
+//   setPlcApplier 把全部配置递给 PlcConnectionManager。
+//   所以本文件那条 multiplePlcs_runtimeStillAppliesOnlyFirst 的断言
+//   已经【改写】成 multiplePlcs_allOfThemReachTheApplier ——
+//   【断言改了,用例没删】。删掉等于把 2a 的这段历史静默继承给 2b,
+//   下一个读这个文件的人就看不出"这一段曾经是个已知缺口"。
+//
+// 【2b 在本文件里钉的是"数据有没有完整交出去",不是"有没有连上"】
+//   真连接是阶段 5 那条 3 个真 QTcpServer 的 E2E 的职责。
+//   这里刻意不接 PlcConnectionManager —— 那样这条用例就变成
+//   一条"跑得起来"的集成测试,但它失败时你分不清是 Project 递错了
+//   还是网络没通。分层的好处就是:这一层红,一定就是这一层坏了。
 //
 // 【为什么这类测试特别容易假绿】
 //   "读回来数量对不对"这种断言,在【加载路径坏掉、保存路径也坏掉】时会互相抵消 ——
@@ -40,7 +49,21 @@
 //   只做一轮的话,另一侧照样可以坏着而测试全绿 ——
 //   那正是这个 bug 当初能活下来的原因:两侧各自都"看起来在工作"。
 //
-// 关联:Project::loadPlcsFromJson / setPlcs / plcs(),Project.cpp 第 8 步 + saveToFile
+// 【2b 追加的负向对照 —— 同样两轮实跑,2026-10-19】
+//   轮次一:第 8 步【不】调用 plcApplier_(装回"只读不建连接",即 2a 的行为)
+//     → 红 3:multiplePlcs_allOfThemReachTheApplier(calls != 1)
+//             plcApplier_receivesValidatedConfigNotRawArray
+//             plcApplier_notInvokedWhenLoadFails
+//       绿 10
+//   轮次二:递【原始】数组 root["plcs"](没过 validatePlcEntry)
+//     → 红 1:plcApplier_receivesValidatedConfigNotRawArray
+//       绿 12
+//   ★ 轮次二只红 1 条,是【正确且预期】的结果 ——
+//     它就是专门为这个方向写的那一条。3 条用例各自盯一个不同方向,
+//     不是"3 条一起防 1 个 bug",所以"只红 1"说明分层是对的。
+//
+// 关联:Project::loadPlcsFromJson / setPlcs / plcs() / setPlcApplier,
+//      Project.cpp 第 8 步 + saveToFile
 // ============================================================================
 
 #include <QtTest>
@@ -99,10 +122,21 @@ private slots:
     // 校验:host 为空 / 端口越界 的项被跳过,但【不】让整个工程打不开
     void invalidEntries_areSkippedButOthersSurvive();
 
-    // ★ 2a 的边界:多台配置读进来之后,运行期仍然只应用第一台
-    //   这条现在是通过的。2b 做完后它会变成 FAIL —— 那时【要改断言,不是删用例】,
-    //   把它改成"应该 N 台都建立连接",才算把 2a 的遗留清掉。
-    void multiplePlcs_runtimeStillAppliesOnlyFirst();
+    // ★★★ 2b 之后:全部配置都要递到 applier 手上,且逐台对得上
+    //   原来是 multiplePlcs_runtimeStillAppliesOnlyFirst(钉 2a 的边界)。
+    //   断言改了,【用例没删】—— 删掉就等于把 2a 那段历史静默继承给 2b。
+    void multiplePlcs_allOfThemReachTheApplier();
+
+    // 递给 applier 的必须是【校验后】的,不是原始数组(空 host 那台不该去连)
+    void plcApplier_receivesValidatedConfigNotRawArray();
+
+    // 加载失败【绝对不能】建连接(否则用户会看到"没加载成功却已经在轮询了")
+    void plcApplier_notInvokedWhenLoadFails();
+
+    // ★ 文件里没有 slave_id,保存时【不许】补上缺省 1。
+    //   补了会在用户版本控制里冒出一片"我什么都没改"的 diff。
+    //   这条同时守着 saveToFile 那道"一个字都不许动"的硬约束。
+    void slaveId_absentInFile_isNotGeneratedOnSave();
 
 private:
     QTemporaryDir m_dir;
@@ -334,18 +368,20 @@ void tst_ProjectMultiPlc::invalidEntries_areSkippedButOthersSurvive() {
     QCOMPARE(p.plcs().at(0).toObject()["id"].toString(), QStringLiteral("plc4"));
 }
 
-void tst_ProjectMultiPlc::multiplePlcs_runtimeStillAppliesOnlyFirst() {
-    // ★★★ 这条钉的是 2a 的【边界】,不是它的成果。
+void tst_ProjectMultiPlc::multiplePlcs_allOfThemReachTheApplier() {
+    // ★★★ 这条以前叫 multiplePlcs_runtimeStillAppliesOnlyFirst ——
+    //   它钉的是 2a 的【边界】:"2a 只保证配置存得住,没做多台在线"。
+    //   2b 做完了,所以【断言改了,用例没删】。
+    //   ★ 保留函数原名(改后)也不理想,但删掉就等于把 2a 的这段历史
+    //     静默地继承给 2b。git 里应该看得出"这是一条被加强过的旧用例"。
     //
-    //   2a 做到"配置存得住"为止。多台【同时连上】是 2b。
-    //   本文件目前【没有】真 TCP 连接的手段(所有测试都跑在内存对象上),
-    //   所以这一条能验证的是"程序没有因为读了 3 台就自己乱连"——
-    //   具体表现为:传进去的 tcp_ 是 nullptr,加载 3 台【不崩】。
+    //   2b 之后 Project 不再自己连,它把【全部】配置递给 setPlcApplier。
+    //   所以新的断言是:applier 收到 2 台,且【逐台都对】——
+    //   不是"收到 1 台"这条旧断言的反面,而是更强的"全都收到了,而且是对的"。
     //
-    //   如果哪天 2b 做完了(会引入多 TcpClient 所有权),
-    //   这里的构造方式大概要改,而【断言本身应该保持或加强】。
-    //   到那时正确做法是把这条改成"3 台都建立了连接对象",
-    //   而不是删掉——删掉就等于把 2a 的遗留静默地继承给了 2b。
+    //   【为什么这里不起真连接】本文件全部跑在内存对象上,连 PlcConnectionManager
+    //   都故意不接 —— 接了就变成阶段 5 那条 3 个真 QTcpServer 的 E2E 的职责。
+    //   这一层只钉"数据有没有完整交出去"。
     QJsonArray plcs;
     plcs.append(makePlc("plc1", "192.168.1.10", 502));
     plcs.append(makePlc("plc2", "192.168.2.20", 502));
@@ -354,10 +390,131 @@ void tst_ProjectMultiPlc::multiplePlcs_runtimeStillAppliesOnlyFirst() {
     VariableManager vm;  AlarmManager am;  ActionManager ag;
     PollScheduler poll(&vm, nullptr);
 
-    // tcp_ 传 nullptr:读 3 台配置不该触发任何连接动作,更不该崩
+    Project p(&vm, &am, &ag, &poll, nullptr);
+
+    int calls = 0;
+    QJsonArray received;
+    p.setPlcApplier([&](const QJsonArray& cfg) {
+        ++calls;
+        received = cfg;
+    });
+
+    QVERIFY(p.loadFromFile(src));
+
+    QVERIFY2(calls == 1, "加载工程应当调用 applier 恰好一次。多次调用 = 每次建一批 driver。");
+    QCOMPARE(received.size(), 2);
+    // ★ 逐台比对 id 和地址 —— 只比数量的话,3 台全填成同一个地址也能过
+    QCOMPARE(received.at(0).toObject()["id"].toString(), QStringLiteral("plc1"));
+    QCOMPARE(received.at(0).toObject()["host"].toString(), QStringLiteral("192.168.1.10"));
+    QCOMPARE(received.at(1).toObject()["id"].toString(), QStringLiteral("plc2"));
+    QCOMPARE(received.at(1).toObject()["host"].toString(), QStringLiteral("192.168.2.20"));
+}
+
+void tst_ProjectMultiPlc::plcApplier_receivesValidatedConfigNotRawArray() {
+    // ★ 传给 applier 的必须是【校验后】的 plcs_,不是原始数组。
+    //   传原始的话,校验没过的那几项也会被拿去建连接 ——
+    //   而 host 为空的 PLC 连不上,现场只会看到它一直重连,
+    //   用户完全不知道"这一项在加载时就已经被判定为无效了"。
+    QJsonArray plcs;
+    plcs.append(makePlc("plc1", "192.168.1.10", 502));
+    QJsonObject bad = makePlc("plc2", QStringLiteral(""), 502);   // 空 host
+    plcs.append(bad);
+
+    const QString src = writeProject(plcs, "validated.hmi.json");
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
+    Project p(&vm, &am, &ag, &poll, nullptr);
+
+    QJsonArray received;
+    p.setPlcApplier([&](const QJsonArray& cfg) { received = cfg; });
+
+    QVERIFY(p.loadFromFile(src));
+    QCOMPARE(received.size(), 1);
+    QCOMPARE(received.at(0).toObject()["id"].toString(), QStringLiteral("plc1"));
+}
+
+void tst_ProjectMultiPlc::plcApplier_notInvokedWhenLoadFails() {
+    // ★ 加载失败【绝对不能】建连接。
+    //   失败意味着用户的变量/报警/画面全都没进来 ——
+    //   这时候如果照着文件里的地址把 PLC 连上了,用户会看到
+    //   "程序明明没加载成功,PLC 却已经在轮询了",完全对不上账,
+    //   而且他根本不知道自己的工程文件哪里有问题。
+    QJsonArray plcs;
+    plcs.append(makePlc("plc1", "192.168.1.10", 502));
+
+    const QString src = writeProject(plcs, "ok.hmi.json");
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
+    Project p(&vm, &am, &ag, &poll, nullptr);
+
+    int calls = 0;
+    p.setPlcApplier([&](const QJsonArray&) { ++calls; });
+
+    QVERIFY(p.loadFromFile(src));
+    QCOMPARE(calls, 1);
+
+    // 这次加载一个不存在的文件
+    calls = 0;
+    QVERIFY(!p.loadFromFile(m_dir.filePath("根本不存在的文件.json")));
+    QCOMPARE(calls, 0);
+}
+
+void tst_ProjectMultiPlc::slaveId_absentInFile_isNotGeneratedOnSave() {
+    // ★★★ 恒等往返的实战考验。
+    //
+    //   2b 让 slave_id 变成一个真正的字段(可配、进 Modbus 帧的 unit id)。
+    //   最易犯的错:保存时"顺手"把缺省的 slave_id=1 补进去。
+    //   那会在用户的版本控制里冒出一片"我什么都没改"的 diff ——
+    //   而这类工程文件恰恰是现场调试记录的一部分,改动会淹没在噪声里。
+    //
+    //   saveToFile 是【硬约束:一个字都不许动】。这条用例就是那道约束的守卫:
+    //   有人哪天觉得"补上默认值更规范"而动手,这里立刻红。
+    QJsonArray plcs;
+    QJsonObject noSlave = makePlc("plc1", "192.168.1.10", 502);
+    plcs.append(noSlave);                       // 注意:【没有】slave_id 字段
+    QCOMPARE(noSlave.contains(QStringLiteral("slave_id")), false);
+
+    const QString src = writeProject(plcs, "slave.hmi.json");
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
     Project p(&vm, &am, &ag, &poll, nullptr);
     QVERIFY(p.loadFromFile(src));
-    QCOMPARE(p.plcs().size(), 2);
+
+    const QString dst = m_dir.filePath("slave-saved.hmi.json");
+    QVERIFY(p.saveToFile(dst));
+
+    // 读回来逐字段比
+    QFile f(dst);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+    const QJsonArray saved = root["plcs"].toArray();
+
+    QCOMPARE(saved.size(), 1);
+    QVERIFY2(!saved.at(0).toObject().contains(QStringLiteral("slave_id")),
+             "★ 文件里没写 slave_id,保存时【不许】补上缺省值。"
+             "补了会在用户版本控制里冒出一片\"我什么都没改\"的 diff,"
+             "而这类文件正是现场调试记录,改动会被噪声淹没。");
+
+    // 反过来:文件里【写了】就必须原样写回(不能被抹成缺省)
+    QJsonArray plcs2;
+    QJsonObject withSlave = makePlc("plc1", "192.168.1.10", 502);
+    withSlave["slave_id"] = 9;
+    plcs2.append(withSlave);
+
+    const QString src2 = writeProject(plcs2, "slave2.hmi.json");
+    VariableManager vm2;  AlarmManager am2;  ActionManager ag2;
+    PollScheduler poll2(&vm2, nullptr);
+    Project p2(&vm2, &am2, &ag2, &poll2, nullptr);
+    QVERIFY(p2.loadFromFile(src2));
+
+    const QString dst2 = m_dir.filePath("slave2-saved.hmi.json");
+    QVERIFY(p2.saveToFile(dst2));
+
+    QFile f2(dst2);
+    QVERIFY(f2.open(QIODevice::ReadOnly));
+    const QJsonObject root2 = QJsonDocument::fromJson(f2.readAll()).object();
+    QCOMPARE(root2["plcs"].toArray().at(0).toObject().value(QStringLiteral("slave_id")).toInt(),
+             9);
 }
 
 QTEST_MAIN(tst_ProjectMultiPlc)

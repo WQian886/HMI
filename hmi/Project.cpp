@@ -98,13 +98,12 @@ int Project::loadPlcsFromJson(const QJsonObject& root) {
     }
 
     // ★ 这里【故意】不做的事,记下来免得下一个人以为漏了:
-    //   不给 plcs_[0] 之外的 PLC 建连接对象,也不把它们的配置应用到 tcp_。
-    //   那是 2b 的活(要改 TcpClient 单实例的所有权)。2a 只保证"配置不丢"。
-    //   所以现在的实际行为是:文件里配 N 台能存住,但运行时只连第 1 台。
-    //   —— 这是有意为之的中间状态,不是遗漏。
+    //   本函数【只负责读和校验】,不建任何连接。
+    //   建连接是第 8 步的事(交给 plcApplier_ 指定的 PlcConnectionManager)。
+    //   —— 2a 之后的一段时间里这里是"读进来但没人连",日志里明写着"2b 尚未实现";
+    //   2b 起那条日志已删,因为它变成了骗人的话。
     qCDebug(hmiComm) << "[Project] PLC 配置读入" << plcs_.size()
-                      << "台(共" << arr.size() << "项)。"
-                      << "★ 当前运行期只连第一台,多台同时在线是 2b 的工作。";
+                      << "台(共" << arr.size() << "项,已剔除" << (arr.size() - plcs_.size()) << "项)。";
     return plcs_.size();
 }
 
@@ -461,24 +460,26 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
     }
 
     // 8. 通讯字段应用
-    //   ★ 2026-10-16(多 PLC 2a):拆成两件事
+    //   ★ 2026-10-16(多 PLC 2a):读入全部 PLC 配置
     //
-    //   ① 【全部 PLC 配置读入 plcs_】—— 新增。这是 2a 的核心:
-    //      原来这里只读 plcsArr[0],文件里另外几台从头到尾没人碰过,
-    //      保存时再被写死的一台覆盖掉。
-    //
-    //   ② 【应用第一台到 tcp_】—— 行为和原来完全一致,一个字没改。
-    //      这是有意为之:让另外几台"同时在线"是 2b 的活,
-    //      要改通讯层所有权(TcpClient 单实例 → 多实例),风险高一个量级。
-    //      2a 只保证"配置不丢",不碰"连不连"。
+    //   ★ 2026-10-19(多 PLC 2b):把"建连接"这个副作用交给调用方。
+    //      原来第 8 步自己调 tcp_->connectTo —— Project 于是握着通讯层对象,
+    //      "加载工程"这个纯数据动作里藏了一次连网。改法见 Project::setPlcApplier。
     const int plcCount = loadPlcsFromJson(root);
 
     if (plcCount > 0 && tcp_) {
-        // ★ 只应用第一台。取值走 plcs_[0] 而不是原来的 plcsArr[0]:
+        // ★ 只应用第一台到 tcp_。取值走 plcs_[0] 而不是原来的 plcsArr[0]:
         //   区别在于 —— plcsArr[0] 可能是【校验没过被跳过的那台】,
         //   而 plcs_[0] 一定是校验通过的。两台以上时这个差别会咬人:
         //   第一台填错了,第二台是好的,用 plcsArr[0] 会拿着错地址去连,
         //   而用户看到的警告是"plcs[0] 已跳过",对不上他在连的那台。
+        //
+        //   【为什么 2b 之后这里还在】—— tcp_ 是【手工调试通道】:
+        //   用户在调试面板手敲一帧原始 Modbus 报文时就用它,跟调度器无关。
+        //   但它跟 PlcConnectionManager 建的那 N 条连接是【两条独立 socket】,
+        //   真接上一台 PLC 就等于连了两遍。
+        //   阶段 5 拼装 hmi 时会把这一段整个删掉(那时 applyConfig 已经接管),
+        //   留到那时是因为这个提交必须【行为完全不变】才能单独验证。
         const QJsonObject plc0 = plcs_.at(0).toObject();
         const QString host = plc0["host"].toString();
         const int port = plc0["port"].toInt();
@@ -490,15 +491,22 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
                 qCDebug(hmiComm) << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
             }
         }
-        if (plcCount > 1) {
-            // ★ 明说"没生效"。不说的后果是:用户配了 3 台,打开工程发现只有 1 台在通讯,
-            //   会怀疑程序坏了或者怀疑 PLC —— 而真相是"这一步还没做完"。
-            //   把未完成的能力说清楚,比让人自己撞上去好。
-            qCInfo(hmiComm) << "[Project] ★ 工程配了" << plcCount
-                            << "台 PLC,当前只连第 1 台(" << plc0["id"].toString()
-                            << ")。其余" << (plcCount - 1)
-                            << "台配置已保存但未连接 —— 多台同时在线是 2b 的工作,尚未实现。";
-        }
+    }
+
+    // ★ 2b:把全部配置递出去建连接。这是"多台同时在线"真正落地的那一步。
+    //   传的是 plcs_ —— 【校验后】的数组,不是原始 arr:
+    //   校验没过的那几项(没 id / host 空 / port 越界)本就不该有人去连。
+    //   传原始 arr 会让 PlcConnectionManager 再拒一遍,两处判据将来必然走偏。
+    if (plcApplier_) {
+        plcApplier_(plcs_);
+    } else if (plcCount > 1) {
+        // ★ 说【当前事实】,不说"未实现"。
+        //   原来这里写的是"多台同时在线是 2b 的工作,尚未实现" —— 2b 做完后
+        //   那句话就成了纯骗人的日志,还留在代码里误导下一个读日志的人。
+        //   现在:没设 applier 就是真的没人连,那就照实说,并点名是谁的锅。
+        qCWarning(hmiComm) << "[Project] ★ 读入" << plcCount
+                           << "台 PLC 配置,但调用方没有 setPlcApplier ——"
+                           << "【没有一条连接会被建立】。配置已存入,可在配置界面查看。";
     }
 
     outRoot = root;

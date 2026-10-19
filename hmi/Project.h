@@ -21,6 +21,8 @@
 #include <QJsonArray>
 #include <QJsonObject>
 
+#include <functional>
+
 class VariableManager;
 class AlarmManager;
 class ActionManager;
@@ -122,14 +124,12 @@ public:
     //     保存时还会把另外 4 台【静默丢掉】—— 而这不报错、不警告。
     //     典型症状:用户配了 3 台 PLC,存一次,打开发现只剩 1 台,且没有任何提示。
     //
-    //   【2a 做到哪一步为止 —— 边界很重要】
+    //   【2a / 2b 的分工 —— 边界很重要】
     //     本组 API 只负责【数据存得住】:load 能把全部 PLC 读进来,
     //     save 能把全部 PLC 原样写回去。
-    //     【不负责真的连多台】—— 那是 2b,要改通讯层所有权(TcpClient 单实例 → 多实例),
-    //     风险高一个量级,单独排期。
-    //     所以现在的行为是:配置能存住,但运行时仍然只连 plcs[0]。
-    //     ★ 这个"存住了但不生效"是【有意为之】的中间状态,不是 bug,
-    //       对应的实现在 loadPlcsFromJson 的注释里写明了。
+    //     它【永远不负责真的连多台】—— 2b 起,建连接由 setPlcApplier 递出去的
+    //     PlcConnectionManager 做(见下面那个方法)。
+    //     拆成两层的理由见 setPlcApplier 的注释:Project 不该握着通讯层对象。
     //
     //   【为什么用 JSON 数组原样持有,而不是解析成结构体】
     //     解析成结构体会要求现在就定义"PLC 配置到底有哪些字段",
@@ -143,7 +143,7 @@ public:
     //   - 每项校验 id / host / port;不合格的**跳过并 qWarning 点名**,
     //     不因一台配错就让整个工程打不开(与 F3 诊断策略一致:
     //     能继续就继续,但一定要说清楚哪一项被丢了)
-    //   - 合格项按原样存入内部数组(字段不解释,留给 2b)
+    //   - 合格项按原样存入内部数组(字段不解释,交给 PlcConnectionManager 去解释)
     //   返回成功接受的台数
     int loadPlcsFromJson(const QJsonObject& root);
 
@@ -162,6 +162,32 @@ public:
     //   【为什么不能一律用这个】那会把多 PLC 配置覆盖成 1 台 ——
     //   这正是 2a 要修的那个 bug 换个方向重演一次。
     static QJsonObject defaultPlcFromTcp(TcpClient* tcp);
+
+    // ============================================================
+    // ★ 2b(2026-10-19):把"建立连接"这个副作用【交出去】
+    // ============================================================
+    //
+    // 【为什么要交出去】Project 一直是"配置存取"这一层,唯独第 8 步
+    //   顺手调了 tcp_->connectTo —— 也就是它【自己】握着通讯层的对象,
+    //   于是"加载工程"这个纯数据动作里藏了一个连网络的副作用。
+    //   后果:想支持 N 台 PLC 就得改 Project(Project 得知道 PlcConnectionManager),
+    //   而 Project 是全项目跟工程文件耦合最深的一个类。
+    //
+    //   改成:Project 只负责把 plcs_ 递出去,由 hmi 拼装层决定递给谁。
+    //   测试里则可以递一个纯计数的 lambda,不必起任何连接。
+    //
+    // 【为什么不直接调 PlcConnectionManager】
+    //   hmi_core 不含 hmi.cpp,但【含】Project.cpp。让 Project 依赖
+    //   PlcConnectionManager 会把"连不连"重新焊死在 Project 上 ——
+    //   那正是这里要拆的东西。std::function 是这里唯一合适的抽象层级:
+    //   Project 不需要知道被调的是真连接还是测试探针。
+    //
+    // 【不设时的行为】什么都不做(纯数据层)。
+    //   ★ 不是"退回只连第一台" —— 2b 之前的 loadFromFile 会调 tcp_->connectTo,
+    //     而那段代码在本提交里被【删掉】了。所以不设 applier 的调用方
+    //     (主要是测试)拿到的是"配置读进来了,没人连",这是准确描述。
+    using PlcApplier = std::function<void(const QJsonArray&)>;
+    void setPlcApplier(PlcApplier applier) { plcApplier_ = std::move(applier); }
 
 signals:
     void saved(const QString& path);
@@ -187,6 +213,10 @@ private:
     // ★ 2026-10-16:PLC 配置(多 PLC 2a)。加载时填满,保存时原样写回。
     //   【和 tcp_ 的关系】tcp_ 是【运行期连接对象】,只有一台;
     //   plcs_ 是【工程配置】,可以有 N 台。两者刻意分开 ——
-    //   把 N 台配置塞进一个 TcpClient* 是 2b 要解决的问题,现在不碰。
+    //   2b 起,运行期的 N 台由 plcApplier_ 交给 PlcConnectionManager 管,
+    //   tcp_ 只剩"手工调试通道 + defaultPlcFromTcp 取 host/port"这两个用途。
     QJsonArray plcs_;
+
+    // ★ 2b(2026-10-19):加载工程后谁来建连接。没设 = 没人建。详见 setPlcApplier。
+    PlcApplier plcApplier_;
 };
