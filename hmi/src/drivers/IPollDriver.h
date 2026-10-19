@@ -30,7 +30,12 @@ namespace qwhmi::drivers {
 //   - Modbus: HoldingReg / InputReg / Coils / DiscreteInput 全支持
 //   - S7:     HoldingReg↔DBW / InputReg↔IW / Coils↔位输出 / DiscreteInput↔位输入
 //   - EIP:    主要用 HoldingReg,其他有限支持
-enum class RegisterArea {
+// ★ 2b(2026-10-19):显式写出底层类型 = int。
+//   WriteScheduler.h 只前向声明这个 enum(它要出现在一个头文件里的函数签名中,
+//   不值得为此把整个 IPollDriver.h 拖进来)。C++11 起 enum class 前向声明
+//   必须带底层类型,两边不一致就是 ODR 违规 —— MSVC 会静默按不对的尺寸走,
+//   链接期不报错,运行时行为随机。
+enum class RegisterArea : int {
     HoldingReg    = 0,  // 保持寄存器 / DBW
     InputReg      = 1,  // 输入寄存器 / IW
     Coils         = 2,  // 线圈 / 位输出

@@ -3,6 +3,7 @@
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
 #include "drivers/IPollDriver.h"   // ★ C.1(2026-09-17):协议抽象层
+#include "drivers/IPlcDriverProvider.h" // ★ 2b(2026-10-19):WriteScheduler 按 plcId 问它要 driver
 #include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
@@ -64,6 +65,35 @@
 namespace {
 constexpr int kColAlarmName = 1;   // 报警表:时间/报警名/等级/值/状态
 constexpr int kColVarName   = 1;   // 审计表:时间/Variable/新值/结果/地址
+
+// ★ 2b(2026-10-19):临时的单 PLC 适配器 —— 【阶段 5 会删掉它】
+//
+//   WriteScheduler 改成按 plcId 问 IPlcDriverProvider 要 driver,
+//   而本阶段【只】做调度器侧的重构、不改接线(见调用处注释)。
+//   所以这里包一个:不管问什么 plcId,都回 plc1 那一个 driver。
+//
+//   ★ 为什么这样"零行为变化"是可证明的:
+//     Variable::plcId_ 默认就是 "plc1"(Variable.h:163),hmi.cpp 建的那几个
+//     变量没有一个改过它 —— 于是所有问询都命中 plc1,
+//     而改之前 WriteScheduler 就是直接用那唯一一个 driver。
+//     唯一的差别是 slaveId:以前是硬编码字面量 1,现在问 provider,
+//     而这个适配器对所有 plcId 都回 1。
+//
+//   【不许把它当成"单 PLC 也能用的正经实现"留给后面】
+//     它的存在只有一个理由:让本提交的 diff 可审。
+class LegacySinglePlcProvider : public qwhmi::drivers::IPlcDriverProvider {
+public:
+    explicit LegacySinglePlcProvider(qwhmi::drivers::IPollDriver* d, QObject* parent = nullptr)
+        : QObject(parent), driver_(d) {}
+    qwhmi::drivers::IPollDriver* driverFor(const QString& plcId) const override {
+        // ★ 只有 plc1 命中。其余回 nullptr —— 【不】回 driver_。
+        //   回 driver_ 就正好是 2b 要消灭的那个 bug 的原型。
+        return (plcId == QStringLiteral("plc1")) ? driver_ : nullptr;
+    }
+    int slaveIdFor(const QString&) const override { return 1; }
+private:
+    qwhmi::drivers::IPollDriver* driver_;
+};
 } // namespace
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
@@ -416,11 +446,20 @@ hmi::hmi(QWidget *parent)
     pollScheduler_->setAllActive();
 
     // 阶段 4.3.0:启动写调度(与 PollScheduler 对称,处理 Variable.dirty_ → Modbus 写 PLC)
-    writeScheduler_ = new WriteScheduler(varMgr_, modbusDriver->inner(), this);
-    //                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    //   ★ C.1:WriteScheduler 保留 ModbusMaster* 参数(写调度仍是 Modbus-specific),
-    //   从 ModbusDriver.inner() 拿 ModbusMaster* 给它用
-    //   未来 C.4 协议 UI 切到 S7 时,WriteScheduler 也得协议无关化(单独一个里程碑)
+    //
+    // ★ 2b(2026-10-19):参数从 ModbusMaster* 换成 IPlcDriverProvider*。
+    //   WriteScheduler 现在按变量的 plcId 问 provider 要 driver 和 slaveId,
+    //   而不是握着唯一一个 ModbusMaster 指针。
+    //
+    //   【这里为什么还是单 PLC 的临时适配器】本提交只做"WriteScheduler 协议无关化
+    //   + 按 plcId 路由",【故意不】同时改接线 —— 那样一旦出问题,
+    //   就分不清是重构坏了还是接线错了。适配器的行为是"所有 plcId 都回 plc1
+    //   那一个 driver",而所有变量的 plcId 默认就是 "plc1"(Variable.h:163),
+    //   所以整个提交对现场行为【可证明地零变化】。
+    //   阶段 5 把这里换成真正的 PlcConnectionManager,并删掉这个适配器。
+    auto* legacyProvider = new LegacySinglePlcProvider(modbus_, this);
+    writeScheduler_ = new WriteScheduler(varMgr_, legacyProvider, this);
+    writeScheduler_->hookDriver(QStringLiteral("plc1"), modbus_);
     writeScheduler_->start();
 
     // 阶段 5.2:报警管理器(空架子,5.3 才注册 Checker)

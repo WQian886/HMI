@@ -242,6 +242,10 @@ add_hmi_test(tst_ProjectMultiPlc)
 #   与 tst_ProjectMultiPlc 分开:那边钉"存得住",这边钉"建得对"。
 #   两边失败含义完全不同 —— 2a 坏了是文件丢数据,2b 坏了是现场连错设备。
 add_hmi_test(tst_PlcConnectionManager)
+# ★ 2b(2026-10-19):写侧按 plcId 路由。
+#   这是整套 2b 里最严重的一条 —— 改之前给 plc2 的变量写的值
+#   从 plc1 的 socket 发出去,而且【零日志】。
+add_hmi_test(tst_WriteSchedulerMultiPlc)
 # ★ 2026-10-16:菜单栏 —— 逐个菜单项验证它连到了【正确的那个槽】
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。
