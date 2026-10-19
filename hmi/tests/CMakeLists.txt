@@ -72,6 +72,9 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/S7Driver.cpp
     # 阶段 C · C.3 EIP 协议适配器(2026-09-18)DriverFactory 创建 EipDriver 需要链接 EipDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/EipDriver.cpp
+    # ★ 2b(2026-10-19):多 PLC 连接管理(把 plcs[] 变成运行期真的在线的 N 台)
+    #   IPlcDriverProvider.h 是纯接口无 Q_OBJECT,不进列表(没有 .cpp)。
+    ${HMI_SRC_DIR}/src/plc/PlcConnectionManager.cpp
     # ★ 2026-10-10:协议下拉框置灰(tst_ProtocolComboGrey 调的是这个生产函数)
     ${HMI_SRC_DIR}/src/drivers/ProtocolAvailabilityUi.cpp
     # ★ 2026-10-16:菜单栏(tst_MenuBar 调的是 hmi.cpp 调的那个同一个 buildApplicationMenu)
@@ -235,6 +238,10 @@ add_hmi_test(tst_VariableManager)
 add_hmi_test(tst_VariablePlcId)
 # ★ 2026-10-16:多 PLC 2a —— plcs[] 数组存得住,一台都不能被静默丢掉
 add_hmi_test(tst_ProjectMultiPlc)
+# ★ 2b(2026-10-19):plcs[] → 运行期真的在线的 N 台 driver
+#   与 tst_ProjectMultiPlc 分开:那边钉"存得住",这边钉"建得对"。
+#   两边失败含义完全不同 —— 2a 坏了是文件丢数据,2b 坏了是现场连错设备。
+add_hmi_test(tst_PlcConnectionManager)
 # ★ 2026-10-16:菜单栏 —— 逐个菜单项验证它连到了【正确的那个槽】
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。

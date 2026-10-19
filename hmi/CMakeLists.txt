@@ -119,6 +119,9 @@ set(SOURCES
     #   写在 hmi.cpp 里的 UI 逻辑测试只能复制一份跑,测的是副本;
     #   而"点'打开工程'弹出'保存工程'框"这种错连,副本测试【抓不到】。
     src/ui/MenuBuilder.cpp
+    # ★ 2b(2026-10-19):多 PLC 连接管理。src/plc/ 目前靠 GLOB 兜底也能捡到,
+    #   显式写出来是为了守住"新文件必须登记"的约定(见上面 MenuBuilder 那段)。
+    src/plc/PlcConnectionManager.cpp
 )
 
 set(HEADERS
@@ -198,6 +201,8 @@ set(HEADERS
     src/drivers/ProtocolAvailabilityUi.h
     src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图
     src/ui/MenuBuilder.h            # ★ 2026-10-16:菜单栏(抽出来才能被 tst_MenuBar 测到)
+    src/plc/PlcConnectionManager.h  # ★ 2b:多 PLC 连接管理
+    src/drivers/IPlcDriverProvider.h  # ★ 2b:纯接口无 Q_OBJECT(写进 HEADERS 便于 VS 里查得到)
 )
 
 set(FORMS
