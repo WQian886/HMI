@@ -467,31 +467,13 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
     //      "加载工程"这个纯数据动作里藏了一次连网。改法见 Project::setPlcApplier。
     const int plcCount = loadPlcsFromJson(root);
 
-    if (plcCount > 0 && tcp_) {
-        // ★ 只应用第一台到 tcp_。取值走 plcs_[0] 而不是原来的 plcsArr[0]:
-        //   区别在于 —— plcsArr[0] 可能是【校验没过被跳过的那台】,
-        //   而 plcs_[0] 一定是校验通过的。两台以上时这个差别会咬人:
-        //   第一台填错了,第二台是好的,用 plcsArr[0] 会拿着错地址去连,
-        //   而用户看到的警告是"plcs[0] 已跳过",对不上他在连的那台。
-        //
-        //   【为什么 2b 之后这里还在】—— tcp_ 是【手工调试通道】:
-        //   用户在调试面板手敲一帧原始 Modbus 报文时就用它,跟调度器无关。
-        //   但它跟 PlcConnectionManager 建的那 N 条连接是【两条独立 socket】,
-        //   真接上一台 PLC 就等于连了两遍。
-        //   阶段 5 拼装 hmi 时会把这一段整个删掉(那时 applyConfig 已经接管),
-        //   留到那时是因为这个提交必须【行为完全不变】才能单独验证。
-        const QJsonObject plc0 = plcs_.at(0).toObject();
-        const QString host = plc0["host"].toString();
-        const int port = plc0["port"].toInt();
-        if (!host.isEmpty() && port > 0 && port < 65536) {
-            if (tcp_->host() == host && tcp_->port() == static_cast<quint16>(port)) {
-                qCDebug(hmiComm) << "[Project] 通讯参数已应用(无变化,跳过重连):" << host << ":" << port;
-            } else {
-                tcp_->connectTo(host, static_cast<quint16>(port));
-                qCDebug(hmiComm) << "[Project] 通讯参数已应用(切换):" << host << ":" << port;
-            }
-        }
-    }
+    // ★★ 阶段 5(2026-10-19):原来这里还有一段"只把 plcs_[0] 应用到 tcp_"。
+    //   现在【整段删掉】,因为它跟下面的 plcApplier_ 建出来的 N 条连接是
+    //   【两条独立的 socket】—— 同一台 PLC 被连了两遍。
+    //   而且第一遍的 host/port 取的是 plcs_[0]:用户配了 3 台、只有第 2 台
+    //   是好的,调试面板连的是第 1 台,调度器连的是 3 台,界面显示的
+    //   连接状态说的是另一台机器 —— 典型的"两个来源各说各话"。
+    //   调试面板现在在 hmi 侧改走 plcMgr_->driverFor("plc1"),复用同一条 socket。
 
     // ★ 2b:把全部配置递出去建连接。这是"多台同时在线"真正落地的那一步。
     //   传的是 plcs_ —— 【校验后】的数组,不是原始 arr:

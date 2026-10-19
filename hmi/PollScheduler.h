@@ -36,7 +36,10 @@
 
 class Variable;
 class VariableManager;
-namespace qwhmi::drivers { class IPollDriver; }
+namespace qwhmi::drivers {
+class IPollDriver;
+class IPlcDriverProvider;
+}
 
 class PollScheduler : public QObject {
     Q_OBJECT
@@ -54,6 +57,23 @@ public:
     // ★ C.5(2026-09-18):运行时添加/移除 PLC(用于切换协议 / 新增 PLC)
     void addDriver(const QString& plcId, qwhmi::drivers::IPollDriver* driver);
     void removeDriver(const QString& plcId);
+
+    // ★★ 2b(2026-10-19):slaveId 的来源。
+    //
+    //   【改之前的实际行为】onTick 里写的是 `req.slaveId = 1;`
+    //   注释说"slaveId 暂时固定 1,阶段 6 工程文件再做成可配"——
+    //   那条注释本身就是在说"这是一个【已知错误】,现在先欠着"。
+    //   后果和多 PLC 是一回事的量级:工程里 slave_id 配了 5,
+    //   读请求照样发 Unit ID = 1,打到别的从机上,值读回来还"看着有值"。
+    //
+    //   【为什么不加进构造函数】加进去就得改两个构造函数的签名,
+    //   而 tst_IPollDriver 有十几次构造调用会一起改 ——
+    //   diff 变大,而"没装 provider 就退回 1"是合理默认,setter 更合适。
+    //   【默认值必须是 1】不装 provider 的老用法(单元测试、
+    //   单 driver 场景)行为不变。
+    void setSlaveIdProvider(qwhmi::drivers::IPlcDriverProvider* provider) {
+        slaveIdProvider_ = provider;
+    }
 
     // 当前 driver 列表(plcId → IPollDriver*)
     QHash<QString, qwhmi::drivers::IPollDriver*> drivers() const { return drivers_; }
@@ -124,6 +144,10 @@ private:
     //   老代码 driver_ 单指针保留(兼容性指针),drivers_ 是新多 driver 哈希
     qwhmi::drivers::IPollDriver* legacyDriver_ = nullptr;  // 单 driver 兼容
     QHash<QString, qwhmi::drivers::IPollDriver*> drivers_;  // 多 driver(按 plcId)
+    // ★ 2b:问它要 slaveId。没装(单元测试 / 老用法)就退回 1。
+    //   【为什么不让 driver 自己报】IPollDriver 没有 slaveId 概念 ——
+    //   slaveId 是【这台 PLC 的配置】,不是【这条连接的属性】,归 driver 是错位。
+    qwhmi::drivers::IPlcDriverProvider* slaveIdProvider_ = nullptr;
     // ★ 2b(2026-10-19):定时器是不是"应该连着"的状态标志。
     //   【为什么不能省】tst_IPollDriver 里约 7 条用例把 stop() 当拆解用。
     //   如果 stop() 之后 addDriver 又把 readFinished 连上,stop() 就失去意义了 ——

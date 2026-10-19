@@ -246,6 +246,12 @@ add_hmi_test(tst_PlcConnectionManager)
 #   这是整套 2b 里最严重的一条 —— 改之前给 plc2 的变量写的值
 #   从 plc1 的 socket 发出去,而且【零日志】。
 add_hmi_test(tst_WriteSchedulerMultiPlc)
+# ★ 2b(2026-10-19):3 台真 QTcpServer 的端到端。
+#   前三个 2b 测试全都把 driver 换成了 mock —— 它们证明"调度器派得对",
+#   证明不了"三个指针背后是三条真的连到三台不同机器的 socket"。
+#   而"写错设备"这个 bug 恰恰发生在链路层,只有真 socket 才现形。
+#   所以三台服务端各自把寄存器空间填成 0x1111/0x2222/0x3333 —— 值本身编码身份。
+add_hmi_test(tst_PlcMultiServerE2E)
 # ★ 2026-10-16:菜单栏 —— 逐个菜单项验证它连到了【正确的那个槽】
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。

@@ -4,6 +4,7 @@
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
 #include "drivers/IPollDriver.h"   // ★ C.1(2026-09-17):协议抽象层
 #include "drivers/IPlcDriverProvider.h" // ★ 2b(2026-10-19):WriteScheduler 按 plcId 问它要 driver
+#include "plc/PlcConnectionManager.h"  // ★ 2b:工程里 N 台 PLC 的连接持有者 + provider 实现
 #include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
@@ -65,36 +66,16 @@
 namespace {
 constexpr int kColAlarmName = 1;   // 报警表:时间/报警名/等级/值/状态
 constexpr int kColVarName   = 1;   // 审计表:时间/Variable/新值/结果/地址
-
-// ★ 2b(2026-10-19):临时的单 PLC 适配器 —— 【阶段 5 会删掉它】
-//
-//   WriteScheduler 改成按 plcId 问 IPlcDriverProvider 要 driver,
-//   而本阶段【只】做调度器侧的重构、不改接线(见调用处注释)。
-//   所以这里包一个:不管问什么 plcId,都回 plc1 那一个 driver。
-//
-//   ★ 为什么这样"零行为变化"是可证明的:
-//     Variable::plcId_ 默认就是 "plc1"(Variable.h:163),hmi.cpp 建的那几个
-//     变量没有一个改过它 —— 于是所有问询都命中 plc1,
-//     而改之前 WriteScheduler 就是直接用那唯一一个 driver。
-//     唯一的差别是 slaveId:以前是硬编码字面量 1,现在问 provider,
-//     而这个适配器对所有 plcId 都回 1。
-//
-//   【不许把它当成"单 PLC 也能用的正经实现"留给后面】
-//     它的存在只有一个理由:让本提交的 diff 可审。
-class LegacySinglePlcProvider : public qwhmi::drivers::IPlcDriverProvider {
-public:
-    explicit LegacySinglePlcProvider(qwhmi::drivers::IPollDriver* d, QObject* parent = nullptr)
-        : QObject(parent), driver_(d) {}
-    qwhmi::drivers::IPollDriver* driverFor(const QString& plcId) const override {
-        // ★ 只有 plc1 命中。其余回 nullptr —— 【不】回 driver_。
-        //   回 driver_ 就正好是 2b 要消灭的那个 bug 的原型。
-        return (plcId == QStringLiteral("plc1")) ? driver_ : nullptr;
-    }
-    int slaveIdFor(const QString&) const override { return 1; }
-private:
-    qwhmi::drivers::IPollDriver* driver_;
-};
 } // namespace
+
+// ★ 阶段 5(2026-10-19):LegacySinglePlcProvider 已删除 —— 它是阶段 4 的临时
+//   适配器("不管问什么 plcId 都回 plc1 那一个 driver"),存在的唯一理由是
+//   让阶段 4 的 diff 可审。现在 PlcConnectionManager 自己就是 provider,
+//   而且它【按 plcId 精确查表】,查不到回 nullptr ——
+//   留着那个适配器反而会把"没配 plc2"悄悄变成"写到 plc1",
+//   也就是 2b 要消灭的那个 bug 的原型。
+//   少一个类、少一层转发,现场行为还从"永远单 PLC"变成"真的多 PLC"。
+
 
 // 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
 QVector<quint16> parseValueList(const QString& text, QString* errOut);
@@ -284,61 +265,120 @@ hmi::hmi(QWidget *parent)
     }
 
     // ==================== 阶段 2 第 4 练:重设计 — Qt 统一接口 ====================
-    // ★ C.1(2026-09-17):ModbusMaster 包装为 ModbusDriver(IPollDriver*)
-    //   100% 行为兼容(后面 PollScheduler 直接换 IPollDriver* 不破现有逻辑)
-    modbus_ = qwhmi::drivers::DriverFactory::create("modbus", this);
-    auto* modbusDriver = qobject_cast<qwhmi::drivers::ModbusDriver*>(modbus_);
+    // ★★★ 2b(2026-10-19):这里原来是 DriverFactory::create("modbus", this)
+    //   建出【唯一一台】driver,modbus_ / PollScheduler / WriteScheduler 全指着它。
+    //   工程里配几台都只连一台 —— 那就是 2b 要消灭的"半截多 PLC"。
+    //
+    //   现在 driver 由 PlcConnectionManager 按配置建,每台一条 socket。
+    //   【modbus_ 保留但降级】:它变成一个【非拥有】指针,指向 plc1 的 driver,
+    //   只服务于手工调试面板(面板要用 ModbusMaster::inner() 这种协议特有接口)。
+    //   面板不扩成 N 路 —— 开发工具、零测试覆盖,扩它只会增加接错线的面。
+    plcMgr_ = new PlcConnectionManager(this);
 
     // 2026-07-07 重设计:连接 / 错误 信号(同阶段 2-3 风格)
-    // ★ C.1(2026-09-17):用 IPollDriver 通用信号(由 ModbusDriver 转发自 ModbusMaster)
-    connect(modbus_, &qwhmi::drivers::IPollDriver::connected, this, [this](){
-        modbusState_ = ModbusState::Connected;
-        // ★ BUGFIX(2026-07-28):重连时清 PollScheduler 残留 in-flight -1,避免 Variable 永远不读
-        if (pollScheduler_) pollScheduler_->resetAll();
-        // 连接刚建好,如果之前有"待发"请求 → 现在发(消除 500ms hack)
-        if (hasPendingModbus_) {
-            executePendingModbus();
-        }
-        updateUi();
-    });
-    connect(modbus_, &qwhmi::drivers::IPollDriver::disconnected, this, [this](){
-        // 2026-07-09:记住旧状态,在跳转 Disconnected 前判断 —— Connecting → 要弹窗告诉用户连不上
-        const bool wasConnecting = (modbusState_ == ModbusState::Connecting);
-        const bool hadPending     = hasPendingModbus_;
-        modbusState_ = ModbusState::Disconnected;
-        hasPendingModbus_ = false;
-        updateUi();
-        if (wasConnecting) {
-            // 主动发起的连接失败 —— 常见原因:ModbusSlave 仿真器没起 / IP 端口不对
-            QMessageBox::warning(this, "Modbus 连不上",
-                "TCP 连不上 ModbusSlave(默认 127.0.0.1:5000)。\n\n"
-                "可能原因:\n"
-                "• ModbusSlave 仿真器/PLC 没起\n"
-                "• IP / 端口填错\n"
-                "• 防火墙挡住\n\n"
-                "调好后点 [发送] 重试。");
-        } else if (hadPending) {
-            QMessageBox::information(this, "Modbus 断了",
-                "连接意外中断,刚才排队的请求被丢弃。\n请重新点 [发送]。");
-        }
-    });
-    connect(modbus_, &qwhmi::drivers::IPollDriver::errorOccurred, this,
-        [this](QString msg){
-            qCDebug(hmiComm) << "Modbus 错误(伴随状态):" << msg;
-            modbusState_ = ModbusState::Failed;
+    // ★ 2b:driver 是运行期一台一台建出来的,不能在构造函数里 connect 一个
+    //   固定对象(那时一个都还不存在)。改成在 driverAdded 时挂上去。
+    connect(plcMgr_, &PlcConnectionManager::driverAdded, this,
+        [this](const QString& plcId, qwhmi::drivers::IPollDriver* d) {
+            // ★ 先把读/写两侧接上 —— 每一台都要,不分 plc1 还是 plc2。
+            //   ★ 判空:driverAdded 理论上在 pollScheduler_ / writeScheduler_
+            //     建好之后才发(plcMgr_ 那时一个 driver 都还没有),
+            //     但这两个指针是成员,写代码的人改构造顺序时不会想到要回来补判空。
+            //     判空比"注释里写清楚它不会空"可靠 —— 后者已经骗过人一次了。
+            if (pollScheduler_) pollScheduler_->addDriver(plcId, d);
+            if (writeScheduler_) writeScheduler_->hookDriver(plcId, d);
+
+            // ★ 只有 plc1 的信号驱动界面状态和调试面板 —— 界面只有一套状态显示,
+            //   3 台 PLC 各连各的,弹窗策略也没法定。一个"plc2 断了"的弹窗
+            //   在有 3 台 PLC 的现场会变成骚扰。状态如实进日志,界面只反映 plc1。
+            if (plcId != QStringLiteral("plc1")) {
+                qCDebug(hmiComm) << "[hmi] PLC" << plcId << "已上线(界面状态栏只跟随 plc1)";
+                return;
+            }
+            modbus_ = d;
+            auto* modbusDriver = qobject_cast<qwhmi::drivers::ModbusDriver*>(d);
+
+            connect(d, &qwhmi::drivers::IPollDriver::connected, this, [this](){
+                modbusState_ = ModbusState::Connected;
+                // ★ BUGFIX(2026-07-28):重连时清 PollScheduler 残留 in-flight -1,避免 Variable 永远不读
+                if (pollScheduler_) pollScheduler_->resetAll();
+                // 连接刚建好,如果之前有"待发"请求 → 现在发(消除 500ms hack)
+                if (hasPendingModbus_) {
+                    executePendingModbus();
+                }
+                updateUi();
+            });
+            connect(d, &qwhmi::drivers::IPollDriver::disconnected, this, [this](){
+                // 2026-07-09:记住旧状态,在跳转 Disconnected 前判断 —— Connecting → 要弹窗告诉用户连不上
+                const bool wasConnecting = (modbusState_ == ModbusState::Connecting);
+                const bool hadPending     = hasPendingModbus_;
+                modbusState_ = ModbusState::Disconnected;
+                hasPendingModbus_ = false;
+                updateUi();
+                if (wasConnecting) {
+                    // 主动发起的连接失败 —— 常见原因:ModbusSlave 仿真器没起 / IP 端口不对
+                    QMessageBox::warning(this, "Modbus 连不上",
+                        "TCP 连不上 ModbusSlave(默认 127.0.0.1:5000)。\n\n"
+                        "可能原因:\n"
+                        "• ModbusSlave 仿真器/PLC 没起\n"
+                        "• IP / 端口填错\n"
+                        "• 防火墙挡住\n\n"
+                        "调好后点 [发送] 重试。");
+                } else if (hadPending) {
+                    QMessageBox::information(this, "Modbus 断了",
+                        "连接意外中断,刚才排队的请求被丢弃。\n请重新点 [发送]。");
+                }
+            });
+            connect(d, &qwhmi::drivers::IPollDriver::errorOccurred, this,
+                [this](QString msg){
+                    qCDebug(hmiComm) << "Modbus 错误(伴随状态):" << msg;
+                    modbusState_ = ModbusState::Failed;
+                    updateUi();
+                    // 2026-07-09:协议/网络错误也弹窗 —— 之前只 qDebug 太隐了
+                    QMessageBox::warning(this, "Modbus 错误", msg);
+                });
+            // 2026-07-09:UI 防抖 —— pending_ 变空时重新启用发送按钮
+            // ★ C.1:idle 是 ModbusMaster 特有,需要从 ModbusDriver.inner() 取
+            if (modbusDriver) {
+                connect(modbusDriver->inner(), &ModbusMaster::idle, this, [this](){
+                    ui.modbusSendButton->setEnabled(true);
+                    statusBar()->showMessage("Modbus 空闲,可发下一帧", kStatusBarShortMs);  // ★ IMPROVE-B4
+                });
+            }
             updateUi();
-            // 2026-07-09:协议/网络错误也弹窗 —— 之前只 qDebug 太隐了
-            QMessageBox::warning(this, "Modbus 错误", msg);
         });
-    // 2026-07-09:UI 防抖 —— pending_ 变空时重新启用发送按钮
-    // ★ C.1:idle 是 ModbusMaster 特有,需要从 ModbusDriver.inner() 取
-    connect(modbusDriver->inner(), &ModbusMaster::idle, this, [this](){
-        ui.modbusSendButton->setEnabled(true);
-        statusBar()->showMessage("Modbus 空闲,可发下一帧", kStatusBarShortMs);  // ★ IMPROVE-B4
-    });
+
+    // ★ 2b:plc1 被移除/改配置时,modbus_ 立刻置空。
+    //   不置空的话它会指着一个【已被 deleteLater】的 driver ——
+    //   调试面板下一次点击就是 UAF,现场表现是随机崩,而且崩在按钮槽里,难查。
+    connect(plcMgr_, &PlcConnectionManager::driverAboutToBeRemoved, this,
+        [this](const QString& plcId) {
+            // ★ 摘两侧必须在 driver 被 deleteLater 之前 ——
+            //   阶段 1/4 给 PollScheduler / WriteScheduler 的 unhook/removeDriver
+            //   做的都是"先 disconnect 再摘表",前提是 driver 还活着。
+            //   顺序反了的话,那两个对象里会留下一条指向已析构对象的连接,
+            //   表现是下一次重连时随机崩,而且崩在事件循环里,现场极难查。
+            if (pollScheduler_) pollScheduler_->removeDriver(plcId);
+            if (writeScheduler_) writeScheduler_->unhookDriver(plcId);
+
+            if (plcId != QStringLiteral("plc1")) return;
+            modbus_ = nullptr;
+            modbusState_ = ModbusState::Disconnected;
+            // 待发队列里的请求属于"发给 plc1 的",plc1 都没了还留着没有意义
+            hasPendingModbus_ = false;
+            updateUi();
+        });
 
     // 2026-07-07 重设计:通用「发送」按钮 — 靠 fcCombo 区分读/写
     connect(ui.modbusSendButton, &QPushButton::clicked, this, [this](){
+        // ★ 2b:plc1 现在不一定存在 —— 工程里可能只配了 plc2/plc3,
+        //   或者 plc1 刚被配置界面删了。modbus_ 是非拥有指针,这时候是 nullptr。
+        //   原来是 DriverFactory 建出来的一个永远非空的指针,这一层判空以前不需要。
+        if (!modbus_) {
+            statusBar()->showMessage("plc1 没有 driver —— 调试面板只对 plc1 有效,"
+                                     "请在 PLC 配置里确认 plc1 存在", kStatusBarLongMs);
+            return;
+        }
         QString host = ui.ipEdit->text().trimmed();
         bool ok;
         quint16 port = ui.portEdit->text().toUShort(&ok);
@@ -390,6 +430,12 @@ hmi::hmi(QWidget *parent)
                 }
             }
             updateUi();
+            // ★ 2b:连的是【plc1 现有的那条连接】,host/port 只是 UI 上那两个框。
+            //   真正生效的是工程配置里的 host/port —— 这两个框现在只是"看着像"
+            //   在配连接,实际改不动任何东西。
+            //   【为什么不改掉这两个框】面板要连成 N 路才能自洽,那是另一个里程碑;
+            //   而把框留着、只让它们作用于 plc1,是 2b 范围内最小且不骗人的做法
+            //   (至少行为是确定的:发出去的是 plc1)。
             modbus_->connectTo(host, port);
             // 2026-07-09:延长到 5s,失败的话用户盯着屏幕等结果
             statusBar()->showMessage("正在连接 Modbus...(失败会弹窗提示)", kStatusBarLongMs);  // ★ IMPROVE-B4
@@ -438,7 +484,17 @@ hmi::hmi(QWidget *parent)
     Binding::bindEdit(ui.speedWriteEdit, speed);
 
     // 阶段 3.3:启动定时轮询(替代 demoTimer 的 random 数据,真 modbus 读 PLC)
-    pollScheduler_ = new PollScheduler(varMgr_, modbus_, this);   // ★ C.1:modbus_ 现在是 IPollDriver*
+    //
+    // ★★★ 2b(2026-10-19):第二个参数【传 nullptr】。
+    //   改之前是 modbus_ —— 构造函数把它塞进 drivers_["plc1"],
+    //   于是不管工程里配几台,读通路永远只有一个 driver。
+    //   现在 driver 全部由 plcMgr_ 在 applyConfig 时一台一台建、建完 emit driverAdded,
+    //   PollScheduler 在 driverAdded 里 addDriver(阶段 1 已经把 addDriver 修成幂等可重入)。
+    //   传 nullptr 是合法的:PollScheduler 对空 drivers_ 不做任何假设,
+    //   真正开始轮询要等第一台 driver 到位。
+    pollScheduler_ = new PollScheduler(varMgr_, nullptr, this);
+    // ★ 2b:读侧的 slaveId 也统一从 provider 取(原来 PollScheduler 里是写死的 1)。
+    pollScheduler_->setSlaveIdProvider(plcMgr_);
     pollScheduler_->start();
     // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询 —— 单窗口场景初始化
     //   单窗口场景:所有 var 都在 UI 中,所以全部激活
@@ -447,19 +503,16 @@ hmi::hmi(QWidget *parent)
 
     // 阶段 4.3.0:启动写调度(与 PollScheduler 对称,处理 Variable.dirty_ → Modbus 写 PLC)
     //
-    // ★ 2b(2026-10-19):参数从 ModbusMaster* 换成 IPlcDriverProvider*。
-    //   WriteScheduler 现在按变量的 plcId 问 provider 要 driver 和 slaveId,
-    //   而不是握着唯一一个 ModbusMaster 指针。
+    // ★★★ 2b(2026-10-19):第二个参数从阶段 4 的 LegacySinglePlcProvider 换成 plcMgr_。
+    //   LegacySinglePlcProvider 已删除(见本文件上方说明):它的语义是
+    //   "不管问什么 plcId 都回 plc1 那一个 driver",而 plcMgr_ 是【按 plcId 精确查表】,
+    //   查不到回 nullptr。留着那个适配器会把"没配 plc2"悄悄降级成"写到 plc1",
+    //   也就是 2b 要消灭的那个 bug 的原型。
     //
-    //   【这里为什么还是单 PLC 的临时适配器】本提交只做"WriteScheduler 协议无关化
-    //   + 按 plcId 路由",【故意不】同时改接线 —— 那样一旦出问题,
-    //   就分不清是重构坏了还是接线错了。适配器的行为是"所有 plcId 都回 plc1
-    //   那一个 driver",而所有变量的 plcId 默认就是 "plc1"(Variable.h:163),
-    //   所以整个提交对现场行为【可证明地零变化】。
-    //   阶段 5 把这里换成真正的 PlcConnectionManager,并删掉这个适配器。
-    auto* legacyProvider = new LegacySinglePlcProvider(modbus_, this);
-    writeScheduler_ = new WriteScheduler(varMgr_, legacyProvider, this);
-    writeScheduler_->hookDriver(QStringLiteral("plc1"), modbus_);
+    //   【不再在这里 hookDriver】driver 的 writeFinished 连接在下面 driverAdded
+    //   里统一挂 —— 两处挂意味着将来有一处会被漏掉,而漏掉的表现是
+    //   "写发得出去、reply 收不回来",变量永远卡在 dirty,不报任何错。
+    writeScheduler_ = new WriteScheduler(varMgr_, plcMgr_, this);
     writeScheduler_->start();
 
     // 阶段 5.2:报警管理器(空架子,5.3 才注册 Checker)
@@ -565,6 +618,40 @@ hmi::hmi(QWidget *parent)
     // ★ 阶段 6.2(2026-08-07):Project 类(saveToFile 入口)—— 等所有管理器都建好后才能 new
     project_ = new Project(varMgr_, alarmMgr_, actionMgr_, pollScheduler_, tcp_, this);
 
+    // ★★★ 2b(2026-10-19):把"建连接"这个副作用的接收端交给 Project。
+    //   没有这一句,Project 读到 plcs[] 就只是读到了 —— 工程里配 3 台,
+    //   运行期一条连接都不会建,而日志里【不会】有任何提示
+    //   (2a 期间那句"多台同时在线是 2b 的工作"已经在阶段 3 删掉了,
+    //    因为它做完后那句话就是骗人的)。
+    //
+    //   【★ 捕获 this,不能捕获 plcMgr_ 裸指针】
+    //     捕获 this 有它的代价(见 hmi.h 里的构造顺序说明),但捕获裸指针更糟:
+    //     project_ 在析构逆序里比 plcMgr_ 后死还是先死,取决于构造顺序,
+    //     一旦顺序调了,lambda 里那个指针就是野的 —— 而它只在"打开工程"时
+    //     才被调用,现场表现是"平时好好的,某次打开工程崩"。
+    //     捕获 this:崩之前那一下 this 一定还活着。
+    project_->setPlcApplier([this](const QJsonArray& plcs) {
+        if (!plcMgr_) {
+            qCWarning(hmiComm) << "[hmi] ★ 工程里有 PLC 配置,但 plcMgr_ 不存在 ——"
+                               << "不会有任何连接被建立。";
+            return;
+        }
+        const auto r = plcMgr_->applyConfig(plcs);
+        qCInfo(hmiComm) << "[hmi] PLC 配置已应用:"
+                        << "新增" << r.added.size()
+                        << "移除" << r.removed.size()
+                        << "重连" << r.reconnected.size()
+                        << "未变" << r.unchanged.size()
+                        << "拒绝" << r.rejected.size();
+        for (const QString& id : r.rejected) {
+            // ★ 拒绝的要【点名】。原来 PlcConnectionManager 会打,
+            //   但那是 qCDebug 级别,默认日志配置下看不见 ——
+            //   "我配了 3 台,怎么只连上 2 台"这种问题在现场无从查起。
+            qCWarning(hmiComm) << "[hmi] ★ PLC" << id << "被拒绝(协议不支持或地址非法),未连接。";
+        }
+        updateUi();
+    });
+
     // ★ 阶段 D · D.1(2026-09-18):SQLite 历史库记录器
     //   监听所有 Variable 的 valueChanged → 写入 %APPDATA%\QianWei\HMI\history.db
     historyRecorder_ = new qwhmi::history::HistoryRecorder(this);
@@ -644,14 +731,15 @@ hmi::hmi(QWidget *parent)
         // ★ 6.5 收尾(2026-08-08 BugFix #2):auditTable 切工程时清空,避免老数据残留
         ui.auditTable->setRowCount(0);
 
-        // ★ 6.5 收尾(2026-08-08):loadFromFile 后同步 modbus 用新 host/port
-        //   【背景】6.3 改了 host/port 字段,但没真正应用 — 切工程后 TCP 已切,modbus 还连着旧 IP
-        //   【改法】loaded 信号后从 tcp_ 拿 host/port,主动 connectTo 同步
-        //   【取舍】正在通讯时 loadFromFile 会短暂断连,但用户主动打开工程 = 期望切换,合理
-        if (tcp_ && modbus_) {
-            modbus_->connectTo(tcp_->host(), tcp_->port());
-            qCDebug(hmiComm) << "[hmi] loadFromFile 同步 modbus →" << tcp_->host() << ":" << tcp_->port();
-        }
+        // ★★ 2b(2026-10-19):原来这里有一整段"loadFromFile 后从 tcp_ 拿 host/port
+        //   主动 connectTo 同步 modbus"。现在【整段删掉】。
+        //   原因:连接已经由 Project::setPlcApplier → plcMgr_->applyConfig
+        //   在 loadFromFile 【内部】建立了 —— 那个 applier 是在 loaded 之前触发的,
+        //   所以等到 loaded 再同步,是在用一条已经建好的连接去覆盖它。
+        //   而且 tcp_ 的 host/port 和工程里的 plc[0] 是两个来源,
+        //   它们不一致时"谁最后 connectTo 谁赢",界面上看不出区别。
+        //   现在只有一个来源:工程配置。
+        updateUi();
     });
 
     // ★ 阶段 6.3 FIX(2026-08-07):把 connect 提前到 project_ 实例化之后(loadFromFile 之前)
@@ -785,6 +873,10 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
 
     // ★ C.1(2026-09-17):executeModbus 是 Modbus-特定调试 UI,需要 ModbusMaster 接口
     //   从 modbus_(IPollDriver*) cast 回 ModbusDriver*,再拿 inner() 用 ModbusMaster 接口
+    // ★ 2b:modbus_ 现在可能为 nullptr(plc1 没配 / 被删 / 正在重连)。
+    //   调本函数的两处都判过了,但这个函数自己也判一次 ——
+    //   executePendingModbus() 是由 connected 信号异步调的,
+    //   从"点击发送"到"connected 回来"之间 plc1 完全可能被配置界面删掉。
     auto* modbusDriver = qobject_cast<qwhmi::drivers::ModbusDriver*>(modbus_);
     if (!modbusDriver) {
         qCWarning(hmiApp) << "[hmi] executeModbus:modbus_ 不是 ModbusDriver(C.1 协议切换后此函数无效)";
@@ -1346,8 +1438,12 @@ void hmi::onConnectClicked() {// 用户点击连接按钮,发起 TCP 连接
     connState_ = ConnState::Connecting;
     updateUi();
     tcp_->connectTo(host, port);
-    // 2026-07-21 同步连 modbus_(以前只连 TCP 客户端,导致 PollScheduler 一直报未连接)
-    modbus_->connectTo(host, port);
+    // ★ 2b:原来这里还有一行 modbus_->connectTo(host, port)。
+    //   现在【删掉】—— 改地址这件事已经由工程配置接管:
+    //   PlcConfigDialog 里改 host → applyConfig → 那台重连。
+    //   在这里 connectTo 会把 plc1 指到用户随手敲的 IP 上,而工程配置里
+    //   记的还是另一个 —— 于是界面显示"连上了",现场连的却不是配置的那台。
+    //   ★ tcp_ 是【手工调试通道】,跟调度器无关,保留。
 }
 
 void hmi::onDisconnectClicked() {

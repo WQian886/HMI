@@ -6,6 +6,11 @@
 #include "TcpClient.h"  // 阶段 1 第 1 练:TCP 客户端封装
 #include "ModbusMaster.h" // 阶段 2 第 3 练:手写 ModbusMaster 接入 UI
 namespace qwhmi::drivers { class IPollDriver; }  // ★ C.1(2026-09-17):协议抽象层,modbus_ 改为 IPollDriver*
+// ★ 2b(2026-10-19):PlcConnectionManager 在【全局命名空间】,不在 qwhmi::plc 下
+//   (它在 src/plc/ 目录下,但阶段 2 定它时就只前向声明了 IPollDriver,
+//    类本身没套命名空间)。前向声明必须跟真实定义所在的命名空间一致 ——
+//   写错的话编译器报的是"未定义类型",而不是"找不到成员",查起来绕。
+class PlcConnectionManager;
 namespace qwhmi::history { class HistoryRecorder; }  // ★ D.1(2026-09-18):SQLite 历史库
 namespace qwhmi::history { class AlarmRecorder; }   // ★ D.3(2026-09-20):报警持久化
 namespace qwhmi::widgets { class TrendWidget; }  // ★ D.2(2026-09-20):历史曲线控件
@@ -210,7 +215,29 @@ private:
     //   实参:DriverFactory::create("modbus") → ModbusDriver(IPollDriver*)
     //   executeModbus 内 cast 回 ModbusDriver* 拿 inner() 用 Modbus-特定接口(QModbusDataUnit 等)
     //   未来 C.4 协议 UI 切到 S7 时,executeModbus 也要改或被更通用的函数替代
+    // ★ 2b(2026-10-19):【不再】自己 new 一个 driver 握着。
+    //   原来这里是 DriverFactory::create("modbus", this) 建出来的唯一一台,
+    //   PollScheduler 和 WriteScheduler 都指着它 —— 于是工程里配几台都只连一台。
+    //   现在 driver 的所有权 100% 归 plcMgr_,这里只留一个【非拥有】指针
+    //   指向 plcMgr_->driverFor("plc1"),专供手工调试面板用
+    //   (面板要 ModbusMaster::inner() 那种协议特有接口,不改造成 N 路 ——
+    //    开发工具,零测试覆盖,扩 N 路只会增加接错线的面)。
+    //   ★ 它可能是 nullptr:plc1 还没配 / 被删了 / 正在重连。
+    //     每个用到它的地方都必须判空,不能"反正有值"地解引用。
     qwhmi::drivers::IPollDriver* modbus_ = nullptr;
+
+    // ★ 2b:工程里 N 台 PLC 的连接持有者,同时是 PollScheduler/WriteScheduler 的 provider。
+    //   【构造顺序 —— 改的人请先读这一段】
+    //     plcMgr_ 必须【早于】pollScheduler_ / writeScheduler_ / project_ 构造。
+    //     理由不是"谁先 new 谁后 new",而是两条独立的:
+    //     ① 析构:QObject 子对象按【构造顺序的逆序】析构,plcMgr_ 最后死,
+    //        那些 driver 要活到所有用户方都拆完之后才 deleteLater(阶段 5 用 deleteLater,
+    //        不 delete,所以实际更宽松,但顺序别去赌它)。
+    //     ② [this] 捕获:下面那些 lambda 全靠 this 找 plcMgr_,而它们是
+    //        project_->setPlcApplier(...) 装的 —— lambda 在 project_ 加载文件时
+    //        才被调用,那时 plcMgr_ 必须已经存在。晚构造一步 = 打开工程直接崩。
+    PlcConnectionManager* plcMgr_ = nullptr;
+
     VariableManager* varMgr_ = nullptr;  // 阶段 3.2:变量管理器(管理所有 Variable 生命周期)
     PollScheduler* pollScheduler_ = nullptr;  // 阶段 3.3:定时轮询调度器(替代 demoTimer,真 modbus 读)
     WriteScheduler* writeScheduler_ = nullptr; // 阶段 4.3.0:写调度器(Variable.dirty_ → modbus 写 PLC,与 PollScheduler 对称)

@@ -25,6 +25,7 @@
 #include "Variable.h"
 #include "VariableManager.h"
 #include "drivers/IPollDriver.h"
+#include "drivers/IPlcDriverProvider.h"  // ★ 2b:slaveId 从这里问(见 setSlaveIdProvider)
 #include "logging/Logging.h"
 #include <QDateTime>
 #include <QVariant>
@@ -358,7 +359,11 @@ void PollScheduler::onTick() {
 
             qwhmi::drivers::IPollDriver::ReadRequest req;
             req.area      = qwhmi::drivers::RegisterArea::HoldingReg;
-            req.slaveId   = 1;   // slaveId 暂时固定 1,阶段 6 工程文件再做成可配
+            // ★ 2b(2026-10-19):原来这里是字面量 1,注释写着"阶段 6 工程文件再做成可配"
+            //   —— 也就是说这一行【从写下那天起就是一个已知错误】。工程里 slave_id 配 5,
+            //   读请求照样发 Unit ID=1,打到别的从机上,读回来的值还"看着正常"。
+            //   现在统一从 provider 取;没装 provider(单元测试 / 老单 driver 用法)退回 1。
+            req.slaveId   = slaveIdProvider_ ? slaveIdProvider_->slaveIdFor(plcId) : 1;
             req.addr      = first->address();
             req.count     = count;
             req.requestId = reqId;
