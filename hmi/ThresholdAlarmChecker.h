@@ -7,9 +7,17 @@
 #pragma once
 
 #include <QTimer>          // ★ 5.3 收尾:durationTimer_ 成员需要(指针,不指也安全但加更稳)
+#include <QPointer>        // ★★ 2026-10-19:variable_ 改成 QPointer,理由见下面那一段
 #include "Alarm.h"
+#include "Variable.h"      // ★★ 2026-10-19:【不能只前向声明】
+                          //   裸指针可以对着一个前向声明的类用,QPointer 不行 ——
+                          //   它是模板,QPointer<T> 实例化时要做 static_cast<T*>(QObject*)，
+                          //   那个转换要求 T 【已经完整定义】且确实是 QObject 的子类。
+                          //   只留 `class Variable;` 的话,编译报的是
+                          //     qpointer.h(75): error C2440: 无法从 "QObject*" 转成 "Variable*"
+                          //   而报错点在 Qt 的头文件里,离"你少 include 了一个头"很远。
+                          //   无环:Variable.h 只 include Qt 的头,不回引本文件。
 
-class Variable;
 class PollScheduler;
 
 class ThresholdAlarmChecker : public AlarmChecker {
@@ -60,8 +68,12 @@ private slots:
     // v 可能是 PollScheduler 监控的任何 Variable,Checker 只关心 variable_
     void onRawRead(Variable* v, quint16 rawValue);
 
-    // ★ 阶段 6.3(2026-08-07):监听 varMgr->variableReplaced,旧 Variable 死了换新 Variable
-    void onVariableReplaced(Variable* oldVar, Variable* newVar);
+    // ★★ 2026-10-19:onVariableReplaced 已删除,变量指针改用 QPointer。
+    //   理由见下面 variable_ 的注释 —— 那条槽【从来没有被 connect 过】
+    //   (hmi.cpp 里那条在 E#29 改成"按名查"时被删了),所以它一直是个孤儿:
+    //   写它的那个"变量死了就置 nullptr"的意图,从来到底没有生效过。
+    //   QPointer 不需要谁来通知:变量一被 delete,它自己就变空。
+    //   留着这个槽只会让人以为"已经有人在管这件事了"。
 
 private:
     // ★ F2(2026-09-30):三态显式化 —— 替换掉原来的 bool active_
@@ -80,7 +92,39 @@ private:
     //         Fired:  已 emit triggered,在等恢复沿(★ 滞回在这一档才生效)
     enum class State { Idle, Pending, Fired };
 
-    Variable*       variable_;        // 不 delete(VariableManager 管)
+    // ★★ 2026-10-19:从裸 `Variable*` 改成 `QPointer<Variable>`。
+    //
+    // 【它曾经是一个真实的 use-after-free,今天崩得很硬】
+    //   变量被删 → VariableManager 广播 variableReplaced(v, nullptr) 并 delete v
+    //   → 本类【没有 connect 那个信号】(见上面 onVariableReplaced 已删除那段)
+    //   → variable_ 继续指着已释放的堆内存,而且【非空】
+    //   → Project::saveToFile 里那一行
+    //         tc->variable() ? tc->variable()->name() : QString()
+    //     三元判的是"指针是不是空",而悬空指针【不是空】
+    //     → 进 true 分支 → 解引用已释放内存
+    //
+    //   实测(2026-10-19,offscreen 下跑 tst_ProjectMultiPlc):
+    //     Exception code 0xc0000005,栈是
+    //       Variable::name() ← Project::saveToFile() ← 用例
+    //   也就是【不是"存出来的工程打不开",是当场崩】。
+    //   我在动手之前写进计划的判断是"三元的 false 分支给空串,文件打不开",
+    //   —— 那个判断建立在一个错误前提上(以为这个槽有人在 connect)。
+    //
+    // 【为什么 QPointer 是对的,而不是把那个槽接上】
+    //   槽的问题不在于"少接了一根线",在于它【要靠别人记得接】。
+    //   VariableManager 在 clear()(直接 delete,不广播)和 removeVariable()
+    //   (广播了才 delete)两条路上表现不一样,而 QPointer 对两条路一视同仁 ——
+    //   对象一死指针自动变空,不需要任何人通知。
+    //   WriteScheduler::pending_ 早就用了同样的招(见 WriteScheduler.h:60),
+    //   这里只是把同一个理由用在同一个地方。
+    //
+    // 【QPointer 变空之后会怎样】
+    //   它不会"自动修好"工程文件。变空后 saveToFile:686 的三元会走 false 分支,
+    //   写出 `"variable": ""`,下次加载仍然 findVariable("") 失败 → 工程打不开。
+    //   那一半由"删除前先查引用"堵(见 VariableManager 的引用查询),不是这一行。
+    //   QPointer 解决的是【不该崩的地方不崩】,不是【不该写坏的文件不写坏】。
+    //   两件事分开做,才分得清哪条测试钉的是哪一头。
+    QPointer<Variable> variable_;   // 不 delete(VariableManager 管)
     PollScheduler*  pollScheduler_;   // 不 delete(hmi 管)
     CheckerConfig   config_;
     State           state_        = State::Idle;  // 当前状态(取代 active_)

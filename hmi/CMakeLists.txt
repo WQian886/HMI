@@ -50,6 +50,8 @@ set(SOURCES
     WriteFailChecker.cpp # 写入失败检查
     JsonSerializer.cpp  # JSON 序列化
     Project.cpp         # 项目(保存/加载)
+    # ★★ 2026-10-19:变量引用扫描(删变量前查"还有谁在用",纯只读)
+    VariableRefScan.cpp
     # ★ D.2(2026-09-20):QCustomPlot 曲线控件(LGPL v2.1,3rdparty/qcustomplot/)
     3rdparty/qcustomplot/qcustomplot.cpp
     # ★ E.1(2026-09-20):控件基类 + 第 1 个显示控件 LabelControl(QGraphicsObject 派生)

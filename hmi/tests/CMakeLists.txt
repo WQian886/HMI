@@ -64,6 +64,15 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/PollScheduler.cpp
     ${HMI_SRC_DIR}/ModbusMaster.cpp
     ${HMI_SRC_DIR}/WriteScheduler.cpp
+    # ★ 2026-10-19:WriteFailChecker 此前【一直】没进这个列表。
+    #   变量引用扫描要证明"非阈值报警会被列成查不到的",就得有一个真的
+    #   非阈值报警实例 —— 而唯一那种就是它。它是生产代码,不是测试替身,
+    #   用真类才能证明"生产里那类报警确实落进查不到那个桶"。
+    #   这也正是上面 AlarmSoundPlayer 那段注释说的那个坑:
+    #   漏一行 = 链接期报一串"无法解析的外部符号",报错点在测试文件里,离病根很远。
+    ${HMI_SRC_DIR}/WriteFailChecker.cpp
+    # ★ 2026-10-19:变量引用扫描(阶段 1)
+    ${HMI_SRC_DIR}/VariableRefScan.cpp
     # 阶段 C · C.1 协议抽象层
     ${HMI_SRC_DIR}/src/drivers/IPollDriver.cpp
     ${HMI_SRC_DIR}/src/drivers/ModbusDriver.cpp
@@ -262,6 +271,10 @@ add_hmi_test(tst_PlcConfigDialog)
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。
 add_hmi_test(tst_MenuBar)
+# ★ 2026-10-19:派生变量不许进轮询。
+#   它 address=0(没有寄存器),而 onTick 原来没有 isDerived 过滤 ——
+#   于是去读 plc1 的 0 号寄存器,回包把算出来的值覆盖掉。
+add_hmi_test(tst_PollSchedulerDerived)
 add_hmi_test(tst_Serializer)
 # 阶段 B · B1
 add_hmi_test(tst_PasswordHasher)

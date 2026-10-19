@@ -287,6 +287,22 @@ void PollScheduler::onTick() {
     // ★ C.5:同时按 Variable.plcId() 找对应 driver
     QHash<QString, QList<Variable*>> dueByPlc;  // plcId → 该 plc 到期的变量
     for (Variable* v : varMgr_->allVariables()) {
+        // ★★★ 2026-10-19:派生变量【不许】进轮询。
+        //   派生变量的值是本地算出来的(addDerivedVariable 把它建成
+        //   address=0,靠 recomputeDerivedVariables 算),它【没有寄存器】。
+        //   而上面这一圈原来没有任何过滤,于是:
+        //     ① 它被排进 dueByPlc,plcId 默认 "plc1" → 向 plc1 申请读地址 0
+        //     ② reply 回来,onDriverReadFinished 把【算出来的值覆盖掉】,
+        //        写进 plc1 的 0 号寄存器 —— 那【是真的现场寄存器】,
+        //        不是没人用的占位符
+        //     ③ 画面上那个派生量从此变成 plc1 某个随机寄存器的值,
+        //        而且下一次有人重算表达式时它又被改回去,来回跳
+        //   这是"把计算结果和现场数据混在同一个寄存器上"——
+        //   往真实设备的一个真实地址写了一个假的值。
+        //   它今天没被发现,是因为派生变量在 UI 上没法建(TagImporter 能导,
+        //   但没有界面),而 CSV 导进来的表达式变量恰好 alwaysPoll 默认关,
+        //   逃过了这层筛选。详见 tst_PollSchedulerDerived.cpp。
+        if (v->isDerived()) continue;
         // ★ 阶段 6.x.1(2026-08-11 Wqian 拍板)分级轮询
         if (!v->alwaysPoll() && !activeVariables_.contains(v)) continue;
         if (inFlight_.contains(v)) continue;

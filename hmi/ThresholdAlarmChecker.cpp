@@ -128,13 +128,9 @@ void ThresholdAlarmChecker::setVariable(Variable* v) {
                       << (v ? v->name() : QStringLiteral("(无)"));
 }
 
-// ★ 阶段 6.3(2026-08-07):loadFromFile 重建 Variable 时,自动更新 variable_ 指针
-//   旧 Variable 被 delete,新 Variable 同名替换;由 hmi.cpp connect varMgr_->variableReplaced 触发
-void ThresholdAlarmChecker::onVariableReplaced(Variable* oldVar, Variable* newVar) {
-    if (oldVar == variable_) {
-        variable_ = newVar;  // 可能是 nullptr(被 clear)
-    }
-}
+// ★★ 2026-10-19:onVariableReplaced 已删除,理由见 .h 里同名那一段。
+//   它从来没有被 connect 过,所以"变量死了就换指针"这件事实际上没发生过;
+//   改成 QPointer 之后,变量一被 delete 指针自动变空,不再依赖有人通知。
 
 void ThresholdAlarmChecker::onRawRead(Variable* v, quint16 rawValue) {
     if (v != variable_) return;                       // ★ 只关心自己监控的 Variable

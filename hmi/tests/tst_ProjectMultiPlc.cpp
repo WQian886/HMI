@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // tst_ProjectMultiPlc —— 多 PLC 2a:配置要"存得住",一个都不能丢
 //
 // 【2a 到底做了什么】
@@ -77,6 +77,9 @@
 #include "AlarmManager.h"
 #include "ActionManager.h"
 #include "PollScheduler.h"
+#include "VariableRefScan.h"   // ★ 阶段 1:变量引用扫描
+#include "ThresholdAlarmChecker.h"  // 造一条阈值报警
+#include "WriteFailChecker.h"  // ★ 造一个"查不到变量"的非阈值报警
 
 namespace {
 
@@ -137,6 +140,47 @@ private slots:
     //   补了会在用户版本控制里冒出一片"我什么都没改"的 diff。
     //   这条同时守着 saveToFile 那道"一个字都不许动"的硬约束。
     void slaveId_absentInFile_isNotGeneratedOnSave();
+
+    // ★★★ 删掉一个被报警引用的变量,存出来的工程【必须还能打开】。
+    //   今天的真实行为是打不开 —— 详见下面那条用例的注释。
+    void deleteReferencedVariable_savedProjectStillLoads();
+
+    // ★★★ 同上,但走 actions 那一侧。
+    //   这两条【必须同时存在】:变量被引用有两个独立的来源
+    //   (alarms / actions),只查一个就等于漏了另一个。
+    void deleteVariableReferencedByAction_savedProjectStillLoads();
+
+    // ★★★ 上面两条钉的是"文件会坏"。这条钉的是修掉崩溃那一步本身。
+    //   没有它,有人把 variable_ 改回裸指针(或者把 QPointer 换成别的),
+    //   上面两条只是重新变成崩溃,而不是干净的断言失败 —— 那时候
+    //   测试进程直接死掉,后面所有用例都不跑,一次失败看不到全貌。
+    void deleteReferencedVariable_savingDoesNotCrash();
+
+    // ---- 引用扫描本身(阶段 1 的正题)----
+
+    // 扫得到阈值报警
+    void refScan_findsThresholdAlarmReference();
+
+    // 扫得到联动引用
+    void refScan_findsActionReference();
+
+    // ★ 两条引用源【同时】存在时两条都要报出来(不是二选一)
+    void refScan_findsBothSourcesAtOnce();
+
+    // 没人引用 → 真的没人引用(反向:查得出"有",也要查得出"没有")
+    void refScan_unreferenced_isEmpty();
+
+    // ★★ 扫不到的东西必须被点名报出来(画面的控件绑定)
+    //   这条钉的是"诚实"本身:把 blindSpots 悄悄丢掉的话,
+    //   界面上就会显示"无引用可删",用户以为已经看全了,
+    //   而画面上那个显示温度的表正定格在上一次读到的值。
+    void refScan_alwaysDisclosesScreenBlindSpot();
+
+    // 非阈值报警(WriteFailChecker)要被点名 —— 不能静默当成"没有引用"
+    void refScan_namesUnscannableCheckers();
+
+    // ★ 只给一半的 manager,另一半必须被报成"未检查",而不是当作"没有"
+    void refScan_missingManagerIsReportedNotAssumedClean();
 
 private:
     QTemporaryDir m_dir;
@@ -515,6 +559,438 @@ void tst_ProjectMultiPlc::slaveId_absentInFile_isNotGeneratedOnSave() {
     const QJsonObject root2 = QJsonDocument::fromJson(f2.readAll()).object();
     QCOMPARE(root2["plcs"].toArray().at(0).toObject().value(QStringLiteral("slave_id")).toInt(),
              9);
+}
+
+// ============================================================================
+// ★★★ 删掉一个被报警引用的变量,存出来的工程【必须还能打开】
+//
+// 【今天(写这条用例时)的真实行为】——★ 这段被改过两次,留个痕迹
+//
+//   我在动手之前写进计划的判断是:"删变量的那一刻,VariableManager 广播
+//   variableReplaced(v, nullptr),ThresholdAlarmChecker::onVariableReplaced
+//   把 variable_ 置成 nullptr,于是存盘时写出空串,下次打不开"。
+//
+//   ★【错的】这个判断建立在一个错误前提上:以为那个槽有人在 connect。
+//     全仓库搜下来,ThresholdAlarmChecker::onVariableReplaced
+//     【从来没有被 connect 过】—— hmi.cpp 里那条连接在 E#29 改成
+//     "按名查"时被删了,槽就成了孤儿(这一点 CHANGELOG.md:228 早就记过)。
+//
+//     所以 variable_ 在变量被删之后仍然【非空】,只是指着已释放的内存。
+//     而 Project.cpp:686 那一行
+//         tc->variable() ? tc->variable()->name() : QString()
+//     三元判的是"指针是不是空",悬空指针【不是空】 → 进 true 分支
+//     → 解引用已释放内存。
+//
+//     实测:Exception code 0xc0000005,整个测试进程当场死掉(exit code 5),
+//     栈是 Variable::name() ← Project::saveToFile() ← 本用例。
+//     【不是"存出来的工程打不开",是存的那一下就崩。】
+//
+//   第一处修复(2026-10-19):variable_ 改成 QPointer<Variable> —— 不依赖
+//   "有人记得 connect",对象一被 delete 指针自己就变空。崩没有了。
+//
+// 【现在钉住的是另一半:文件还是坏的】
+//   改成 QPointer 之后,存盘不再崩,但写出的是 `"variable": ""`,
+//   下次加载仍然 findVariable("") 失败 → 工程打不开。
+//   这一半要靠"删除前先查引用"堵(阶段 1),不是靠改存盘那一行。
+//
+//   这条链今天【没有任何 UI 能触发】—— 没有界面能删变量。
+//   但它是一个已经存在的坑:手改 JSON 删掉一个变量名就能踩到,
+//   而且症状是"我明明存成功了,怎么打不开了",现场很难往回想。
+//   变量管理界面(下一个提交)做完之后,它会变成"点一下删"的直接后果。
+//
+// 【这条钉的是哪一头】
+//   断言的重心是【存出来的文件能不能重新加载】,而不是"变量字段是不是空串"。
+//   因为空串只是症状,"打不开"才是用户真正承受的后果 ——
+//   而且只断言空串的话,将来有人把 :686 的三元去掉改成别的写法就绕过去了,
+//   但用户照样打不开工程。
+// ============================================================================
+void tst_ProjectMultiPlc::deleteReferencedVariable_savedProjectStillLoads() {
+    QJsonArray plcs;
+    plcs.append(makePlc("plc1", "192.168.1.10", 502));
+
+    QJsonObject root;
+    root["schema_version"] = 3;
+    QJsonObject v;
+    v["name"]       = QStringLiteral("Temp");
+    v["address"]    = 100;
+    v["data_type"]  = QStringLiteral("Int16");
+    v["access"]     = QStringLiteral("ReadOnly");
+    v["plc_id"]     = QStringLiteral("plc1");
+    root["variables"] = QJsonArray{v};
+
+    QJsonObject alarm;
+    alarm["name"]      = QStringLiteral("TempHigh");
+    alarm["variable"]  = QStringLiteral("Temp");
+    alarm["level"]     = QStringLiteral("Warning");
+    alarm["direction"] = QStringLiteral("Above");
+    alarm["threshold"] = 80.0;
+    root["alarms"] = QJsonArray{alarm};
+    root["plcs"] = plcs;
+
+    const QString src = writeRoot(root, "delvar.hmi.json");
+    QVERIFY2(!src.isEmpty(), "写源工程失败");
+
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
+    Project p(&vm, &am, &ag, &poll, nullptr);
+    QVERIFY(p.loadFromFile(src));
+    QCOMPARE(am.checkers().size(), 1);
+
+    // ★ 删掉那个被引用的变量 —— 这一步今天没有任何界面会做,
+    //   所以这条用例是整个文件里唯一一条"从外面捅进来"的用例。
+    QVERIFY(vm.removeVariable(QStringLiteral("Temp")));
+    QCOMPARE(vm.count(), 0);
+
+    const QString dst = m_dir.filePath("delvar-saved.hmi.json");
+    QVERIFY(p.saveToFile(dst));
+
+    // ★★★ 真正的断言:存出去的东西,自己必须读得回来。
+    //   这跟上面 saveAndReload_threePlcs_allSurvive 是同一条原则,
+    //   只不过那次验的是"数据别丢",这次验的是"文件别坏"。
+    VariableManager vm2;  AlarmManager am2;  ActionManager ag2;
+    PollScheduler poll2(&vm2, nullptr);
+    Project p2(&vm2, &am2, &ag2, &poll2, nullptr);
+    const bool loaded = p2.loadFromFile(dst);
+
+    // 把中间产物也读出来,好让失败消息能说清是哪一步坏的
+    QFile f(dst);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QJsonObject saved = QJsonDocument::fromJson(f.readAll()).object();
+    const QString varRef = saved["alarms"].toArray().at(0).toObject()
+                               .value(QStringLiteral("variable")).toString();
+
+    QVERIFY2(loaded,
+             qPrintable(QStringLiteral(
+                 "★ 删掉被报警引用的变量之后,存出来的工程【打不开】了。\n"
+                 "  存出来的 alarms[0].variable = \"%1\"(本该是变量名 \"Temp\")。\n"
+                 "  空串会让下次加载在 Project.cpp:556 直接 failWith ——\n"
+                 "  用户看到的是\"我明明存成功了,怎么打不开了\",而且无从推断。\n"
+                 "  修法:存盘前要么拒绝这种状态,要么把悬空的报警一并处理掉。")
+                 .arg(varRef)));
+}
+
+// ★★★ 同一条链,走 actions 那一侧。
+//
+//   【为什么必须单独一条,而不是把 alarms 那条的断言抄一遍】
+//   变量被引用有两个【完全独立】的来源,它们坏的方式不一样:
+//     · alarms  :存盘时写的是 tc->variable()->name(),变量没了 → 变【空串】
+//     · actions :存盘时写的是 m.variableName(ActionManager 存的是【字符串】,
+//                见 ActionManager.h:64 和 E #29),变量没了它【不会被清空】,
+//                于是文件里留下的是 "Temp" —— 一个指向不存在变量的名字。
+//   后果一样致命(加载时 findVariable 拿不到 → failWith → 整个工程打不开),
+//   但机制完全不同。只查 alarms 的话,修完 alarms 那条,actions 这条照样坏着,
+//   而它坏的方式还更隐蔽:文件里看起来有个正常的变量名,不是空串,
+//   肉眼看 JSON 完全看不出哪里坏了。
+//
+//   ★ 顺带纠正一处我自己的判断错误:写这条用例之前我以为
+//     "actions 那条顶多是联动失效,不致命" —— 错的。
+//     联动失效说的是【运行期】;而【存盘/加载】这条路一样走 findVariable,
+//     一样 failWith。这条用例就是那个判断错误的证据。
+// ============================================================================
+void tst_ProjectMultiPlc::deleteVariableReferencedByAction_savedProjectStillLoads() {
+    QJsonArray plcs;
+    plcs.append(makePlc("plc1", "192.168.1.10", 502));
+
+    QJsonObject root;
+    root["schema_version"] = 3;
+    QJsonObject v;
+    v["name"]      = QStringLiteral("Valve");
+    v["address"]   = 200;
+    v["data_type"] = QStringLiteral("Int16");
+    v["access"]    = QStringLiteral("ReadWrite");
+    v["plc_id"]    = QStringLiteral("plc1");
+    root["variables"] = QJsonArray{v};
+
+    // 先有一条报警 —— actions 段在加载时要求它引用的报警存在
+    QJsonObject alarm;
+    alarm["name"]      = QStringLiteral("ValveOpen");
+    alarm["variable"]  = QStringLiteral("Valve");
+    alarm["level"]     = QStringLiteral("Warning");
+    alarm["direction"] = QStringLiteral("Above");
+    alarm["threshold"] = 1.0;
+    root["alarms"] = QJsonArray{alarm};
+
+    QJsonObject action;
+    action["alarm_name"]   = QStringLiteral("ValveOpen");
+    action["variable"]    = QStringLiteral("Valve");
+    action["write_value"] = 0;
+    root["actions"] = QJsonArray{action};
+    root["plcs"] = plcs;
+
+    const QString src = writeRoot(root, "delaction.hmi.json");
+    QVERIFY2(!src.isEmpty(), "写源工程失败");
+
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
+    Project p(&vm, &am, &ag, &poll, nullptr);
+    QVERIFY(p.loadFromFile(src));
+    QCOMPARE(ag.mappings().size(), 1);
+
+    QVERIFY(vm.removeVariable(QStringLiteral("Valve")));
+
+    const QString dst = m_dir.filePath("delaction-saved.hmi.json");
+    QVERIFY(p.saveToFile(dst));
+
+    VariableManager vm2;  AlarmManager am2;  ActionManager ag2;
+    PollScheduler poll2(&vm2, nullptr);
+    Project p2(&vm2, &am2, &ag2, &poll2, nullptr);
+    const bool loaded = p2.loadFromFile(dst);
+
+    QVERIFY2(loaded,
+             "★ 删掉被联动引用的变量之后,存出来的工程【打不开】了。\n"
+             "  和 alarms 那条不同:这里存出来的 variable 不是空串,\n"
+             "  而是仍然存在的 \"Valve\" —— 一个指向已被删除变量的名字。\n"
+             "  文件看起来完全正常,肉眼看 JSON 找不出哪里坏了,\n"
+             "  但加载时 findVariable 拿不到它,整个工程直接拒绝加载。");
+}
+
+// ============================================================================
+// ★★★ 钉住"修掉崩溃"这一步本身
+//
+// 【为什么上面两条还不够】
+//   上面两条(存出来的工程打不开)在【今天】是红的,而它们红的方式
+//   就是这个 bug —— 修好之后它们转绿,并不再覆盖崩溃那一半。
+//   如果没人记得还有崩溃这一半,把 variable_ 改回裸指针是很自然的事
+//   ("QPointer 在这里没必要,反正没人删变量"),改回去之后:
+//     · 上面两条重新变红,但【变红的方式是进程崩溃】
+//     · 0xc0000005 会让整个测试进程当场退出
+//     · 后面所有用例一条都不跑,ctest 只看到一个 exit code 5
+//   一次失败看不到全貌,是这个仓库反复吃过的那种"失败方式本身掩盖了别的失败"。
+//
+// 【所以这条的形状和上面两条【不一样】】
+//   它【不】断言工程能不能打开 —— 那是上面两条的活。
+//   它只断言"存盘这一步【不崩】",崩了 QtTest 会直接死,
+//   所以"这条用例跑完了"本身就是通过。这就是它的全部价值。
+// ============================================================================
+void tst_ProjectMultiPlc::deleteReferencedVariable_savingDoesNotCrash() {
+    QJsonArray plcs;
+    plcs.append(makePlc("plc1", "192.168.1.10", 502));
+
+    QJsonObject root;
+    root["schema_version"] = 3;
+    QJsonObject v;
+    v["name"]       = QStringLiteral("Temp");
+    v["address"]    = 100;
+    v["data_type"]  = QStringLiteral("Int16");
+    v["access"]     = QStringLiteral("ReadOnly");
+    v["plc_id"]     = QStringLiteral("plc1");
+    root["variables"] = QJsonArray{v};
+
+    QJsonObject alarm;
+    alarm["name"]      = QStringLiteral("TempHigh");
+    alarm["variable"]  = QStringLiteral("Temp");
+    alarm["level"]     = QStringLiteral("Warning");
+    alarm["direction"] = QStringLiteral("Above");
+    alarm["threshold"] = 80.0;
+    root["alarms"] = QJsonArray{alarm};
+    root["plcs"] = plcs;
+
+    const QString src = writeRoot(root, "nocrash.hmi.json");
+    QVERIFY2(!src.isEmpty(), "写源工程失败");
+
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
+    Project p(&vm, &am, &ag, &poll, nullptr);
+    QVERIFY(p.loadFromFile(src));
+
+    QVERIFY(vm.removeVariable(QStringLiteral("Temp")));
+
+    // ★ 存盘:【不许】崩。
+    //   崩了的话这一行之后什么都执行不到,QtTest 直接以 0xc0000005 退出 ——
+    //   那正是 QPointer 改成裸指针之后会发生的事(2026-10-19 实测)。
+    //   返回值【不断言】:存出来的文件是坏的还是好的,归上面两条管。
+    const bool saved = p.saveToFile(m_dir.filePath("nocrash-saved.hmi.json"));
+
+    // 走到这里就说明没崩。留一句日志让"这条为什么通过"在 CI 输出里看得见,
+    // 免得将来有人看到一条不做断言的用例,以为是没写完。
+    qInfo() << "[nocrash] 删掉被引用变量后存盘未崩溃,saved =" << saved;
+}
+
+// ============================================================================
+// ---- 引用扫描(阶段 1 的正题)----
+//
+// 【这些用例在防什么】
+//   界面上要做"有引用就不让删",前提是这个查询【真的查得准】。
+//   查询有三种坏法,而且都很难自查:
+//     ① 查得到有的、查不到没有的 —— 少报,用户以为删干净了
+//     ② 两个来源只查一个 —— 联动那条特别容易漏(它存的是字符串不是指针)
+//     ③ 查不到的那部分【不说】 —— 最危险,见 refScan_alwaysDisclosesScreenBlindSpot
+// ============================================================================
+
+// 造一个"变量 + 一条监控它的阈值报警"
+static void makeAlarmOn(VariableManager* vm, AlarmManager* am,
+                        const QString& varName, const QString& alarmName) {
+    auto* v = new Variable(varName, quint16(100), Variable::DataType::Int16,
+                           Variable::Access::ReadOnly, vm);
+    vm->addVariable(v);
+    CheckerConfig cfg;
+    cfg.level     = AlarmLevel::Warning;
+    cfg.direction = Direction::Above;
+    cfg.threshold = 80.0;
+    am->addChecker(new ThresholdAlarmChecker(alarmName, v, nullptr, cfg));
+}
+
+void tst_ProjectMultiPlc::refScan_findsThresholdAlarmReference() {
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    makeAlarmOn(&vm, &am, QStringLiteral("Temp"), QStringLiteral("TempHigh"));
+
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("Temp"), &am, &ag);
+
+    QVERIFY(r.hasRefs());
+    QCOMPARE(r.refs.size(), 1);
+    QCOMPARE(r.refs.first().kind, VariableRef::Kind::Alarm);
+    QCOMPARE(r.refs.first().source, QStringLiteral("TempHigh"));
+    // ★ describe() 要能直接显示 —— 它会被原样塞进对话框的提示框
+    QVERIFY2(r.refs.first().describe().contains(QStringLiteral("TempHigh")),
+             qPrintable(r.refs.first().describe()));
+}
+
+// ★ 联动这一侧:存的是【字符串】不是指针,比的是字符串。
+//   之前那句"联动顶多是运行期失效"的判断就是漏了这一侧 —— 见上面那条用例注释。
+void tst_ProjectMultiPlc::refScan_findsActionReference() {
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    auto* v = new Variable(QStringLiteral("Valve"), quint16(200),
+                           Variable::DataType::Int16,
+                           Variable::Access::ReadWrite, &vm);
+    vm.addVariable(v);
+    ag.addMapping(QStringLiteral("ValveOpen"), QStringLiteral("Valve"), 0);
+
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("Valve"), &am, &ag);
+
+    QVERIFY(r.hasRefs());
+    QCOMPARE(r.refs.size(), 1);
+    QCOMPARE(r.refs.first().kind, VariableRef::Kind::Action);
+    // 联动的来源是【触发它的报警名】,不是变量名
+    QCOMPARE(r.refs.first().source, QStringLiteral("ValveOpen"));
+    QVERIFY2(r.refs.first().describe().contains(QStringLiteral("ValveOpen")),
+             qPrintable(r.refs.first().describe()));
+}
+
+// ★ 两个来源同时存在时【两条都要报】。
+//   写成"二选一"的话,界面上会告诉用户"只有报警在用",他就去把报警删了,
+//   然后联动的名字还留在文件里 —— 下一条联动照样把工程写坏。
+void tst_ProjectMultiPlc::refScan_findsBothSourcesAtOnce() {
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    makeAlarmOn(&vm, &am, QStringLiteral("Temp"), QStringLiteral("TempHigh"));
+    ag.addMapping(QStringLiteral("TempHigh"), QStringLiteral("Temp"), 0);
+
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("Temp"), &am, &ag);
+
+    QCOMPARE(r.refs.size(), 2);
+    int alarms = 0, actions = 0;
+    for (const VariableRef& x : r.refs) {
+        if (x.kind == VariableRef::Kind::Alarm)  ++alarms;
+        if (x.kind == VariableRef::Kind::Action) ++actions;
+    }
+    QCOMPARE(alarms, 1);
+    QCOMPARE(actions, 1);
+}
+
+// 反向:该说"没人用"的时候必须真说。
+//   只测"查得到有"的话,一个永远返回第一条引用的实现也能全绿 ——
+//   而那种实现在界面上表现为"什么都删不掉",用户会以为程序坏了。
+void tst_ProjectMultiPlc::refScan_unreferenced_isEmpty() {
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    makeAlarmOn(&vm, &am, QStringLiteral("Temp"), QStringLiteral("TempHigh"));
+
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("SomethingElse"), &am, &ag);
+
+    QVERIFY2(!r.hasRefs(), "Temp 被引用,但 SomethingElse 没人用,不该报出来");
+}
+
+// ★★★ 这条钉的是"诚实"本身,不是功能。
+//
+//   【它防的事故】将来有人觉得那句"画面控件查不到"是啰嗦,
+//   清理代码时把它删掉 —— 代码里不会红,测试全绿,一切看起来更干净。
+//   而界面上会开始显示"无引用,可以删",用户点了删,
+//   画面上那个显示温度的表【静默定格在上一次读到的值,不报错】,
+//   工程操作员看着一个已经不再更新的读数以为那是现场实际值。
+//
+//   工业场景下这是能出事的:画面上那个数就是操作员做判断的依据。
+//   所以这条用例存在的意义是:让"承认自己看不见"这件事本身
+//   变成一条【删不掉】的断言。
+void tst_ProjectMultiPlc::refScan_alwaysDisclosesScreenBlindSpot() {
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    // ★ 故意【不】造任何引用 —— 一个变量都没人用,是最容易"看起来很干净"的情况
+    auto* v = new Variable(QStringLiteral("Lonely"), quint16(1),
+                           Variable::DataType::Int16,
+                           Variable::Access::ReadOnly, &vm);
+    vm.addVariable(v);
+
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("Lonely"), &am, &ag);
+
+    QVERIFY2(!r.hasRefs(), "这个变量确实没人引用");
+
+    // ★ 但即便如此,扫描【仍然】必须说出"画面控件查不到"
+    const QString joined = r.blindSpots.join('\n');
+    QVERIFY2(joined.contains(QStringLiteral("画面")),
+             qPrintable(QStringLiteral(
+                 "★ 画面控件绑定查不到这件事必须被说出来。\n"
+                 "  ControlBase::bind() 存 QPointer 但不监听 variableReplaced,\n"
+                 "  变量被删时绑它的控件静默定格在最后一个值、不报错。\n"
+                 "  而界面上如果不写这句,用户会以为已经看全了。\n"
+                 "  当前 blindSpots 内容:%1").arg(joined)));
+}
+
+// ★ 非阈值报警要被【点名】,不能静默当成"没有引用"。
+//   今天 WriteFailChecker 确实不引用任何变量,所以"查不到"恰好等于"没有" ——
+//   但那只是【当前恰好如此】,不是接口保证:
+//   基类 AlarmChecker 没有 variable() getter,类型系统答不了这个问题。
+//   差一条明确列出来的名字,将来哪个子类开始引用变量就会静默漏掉。
+void tst_ProjectMultiPlc::refScan_namesUnscannableCheckers() {
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    auto* v = new Variable(QStringLiteral("Temp"), quint16(100),
+                           Variable::DataType::Int16,
+                           Variable::Access::ReadOnly, &vm);
+    vm.addVariable(v);
+
+    // 造一个【不是】阈值报警的 checker
+    auto* wf = new WriteFailChecker();
+    wf->setName(QStringLiteral("WriteFail"));
+    am.addChecker(wf);
+
+    const QStringList unscannable = unscannableCheckers(&am);
+    QCOMPARE(unscannable.size(), 1);
+    QCOMPARE(unscannable.first(), QStringLiteral("WriteFail"));
+
+    // 并且它必须出现在扫描结果的 blindSpots 里(而不只是"有个函数能列出来")
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("Temp"), &am, &ag);
+    QVERIFY2(r.blindSpots.join('\n').contains(QStringLiteral("WriteFail")),
+             qPrintable(r.blindSpots.join('\n')));
+
+    // 反向:阈值报警【不该】被列进"查不到"里
+    //   列错了会让界面提示"以下报警类型无法检查",把好好的报警说成可疑
+    makeAlarmOn(&vm, &am, QStringLiteral("Temp2"), QStringLiteral("Temp2High"));
+    const QStringList unscannable2 = unscannableCheckers(&am);
+    QVERIFY2(!unscannable2.contains(QStringLiteral("Temp2High")),
+             "阈值报警是有 variable() 的,不该被列成查不到");
+}
+
+// ★ 只给一半的 manager,另一半必须被报成"未检查",不能当作"没有引用"。
+//   这两种"空"的含义完全不同:
+//     · "扫过了,没人引用" → 可以放心删
+//     · "根本没看"       → 不能放心删
+//   混为一谈的话,界面上就会在拿不到 AlarmManager 的场景里
+//   显示"无引用",而实际上有一整层引用从没被检查过。
+void tst_ProjectMultiPlc::refScan_missingManagerIsReportedNotAssumedClean() {
+    VariableManager vm;  AlarmManager am;
+    makeAlarmOn(&vm, &am, QStringLiteral("Temp"), QStringLiteral("TempHigh"));
+
+    // 故意不传 ActionManager
+    const VariableRefScanResult r =
+        scanVariableRefs(QStringLiteral("Temp"), &am, nullptr);
+
+    // 报警这一侧照常查得到
+    QCOMPARE(r.refs.size(), 1);
+    // 联动那一侧必须被说成"未检查"
+    QVERIFY2(r.blindSpots.join('\n').contains(QStringLiteral("未检查")),
+             qPrintable(r.blindSpots.join('\n')));
 }
 
 QTEST_MAIN(tst_ProjectMultiPlc)
