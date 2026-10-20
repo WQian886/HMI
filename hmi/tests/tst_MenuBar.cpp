@@ -160,6 +160,30 @@ QString plainText(const QString& s) {
     return out;
 }
 
+// ★ 菜单用到的 17 个槽名 —— 本文件唯一的一份"名字清单"。
+//   三个地方都用它:
+//     · FakeReceiver 的槽(照着它写)
+//     · hmiHeader_menuSlots_... 那条(和生产 MenuBuilder.cpp 求交集校验)
+//     · moc_reallyRegistersPrivateSlots 那条(断言 moc 逐个查得到)
+//   【为什么它可以手写,而槽名那处不能】槽名【本来就要手写】——
+//   moc_reallyRegistersPrivateSlots 需要 moc 一个"形状已知"的类,
+//   而那个类的槽名只能由测试自己指定,没法从生产代码生成(moc 发生在编译期)。
+//   真正的"生产槽名对不对"由 hmiHeader_... 那条现读 MenuBuilder.cpp 负责。
+//   两者分工:这里验 moc 的行为,那里验生产的名字。
+const QStringList kMenuSlotNames = {
+    QStringLiteral("onOpenClicked"),      QStringLiteral("onSaveClicked"),
+    QStringLiteral("onStartClicked"),     QStringLiteral("onStopClicked"),
+    QStringLiteral("onResetClicked"),     QStringLiteral("onConnectClicked"),
+    QStringLiteral("onDisconnectClicked"),
+    QStringLiteral("onPlcConfigClicked"),
+    QStringLiteral("onEditorClicked"),    QStringLiteral("onRuntimeCanvasClicked"),
+    QStringLiteral("onDemoCanvasClicked"),
+    QStringLiteral("onAlarmConfigClicked"), QStringLiteral("onAlarmSoundSettings"),
+    QStringLiteral("onVariableConfigClicked"),
+    QStringLiteral("onExportVariablesClicked"), QStringLiteral("onExportAlarmsClicked"),
+    QStringLiteral("onShowCapabilities"),
+};
+
 } // namespace
 
 class tst_MenuBar : public QObject {
@@ -219,6 +243,10 @@ private slots:
     //   moc 只为带 slots 关键字的段生成元方法 —— 这是 Qt 的硬规则,
     //   也是本次事故的唯一根因,所以值得用一条测试钉死。
     void hmiHeader_menuSlots_areDeclaredInsideASlotsSection();
+
+    // ★★ moc 到底认不认 private slots: —— 用【真 moc 一份】的类来验,
+    //   而不是靠我复述 moc 的规则。详见实现处那段注释。
+    void moc_reallyRegistersPrivateSlots();
 
 private:
     QMenuBar m_bar;
@@ -648,6 +676,98 @@ void tst_MenuBar::hmiHeader_menuSlots_areDeclaredInsideASlotsSection() {
     QVERIFY2(problems.isEmpty(),
              qPrintable(QStringLiteral("以下菜单槽不会被 moc 收录(菜单点了没反应):\n  %1")
                  .arg(problems.join(QStringLiteral("\n  ")))));
+}
+
+// ---------------------------------------------------------------------------
+// ★★ 2026-10-20 加固:上一条查的是【我读源码得出的结论】,这条查 moc 的【真实产物】。
+//
+// 【为什么上一条不够】它复刻的是 moc 的规则,不是 moc 本身。
+//   复刻和原件可能不一致,而这次事故的教训恰恰是"我以为我懂了"——
+//   真正的判决者是 moc_hmi.cpp 里那张 qt_static_metacall 分发表:
+//   字符串 connect 查的就是那张表,表里没有 = 点了没反应。
+//   所以最硬的证据不是"它在 slots: 段里",而是"case N 真的出现在产物里"。
+//
+// 【为什么不能直接查 moc_hmi.cpp】它在构建目录里,而构建目录名随构建系统变:
+//   CMake/Ninja → build*/hmi_autogen/<8位哈希>/moc_hmi.cpp(哈希每次都不一样)
+//   VS         → <OutDir>/qt/moc/moc_hmi.cpp
+//   两条轨、两个路径、还可能"产物还没生成"。写死一条 = 另一种单点故障。
+//
+// 【本条的取舍】不去找产物,而是让【本测试自己 moc 一份】:
+//   本文件已经 include 了 MenuBuilder.h,而 hmi.h 依赖 uic 生成的 ui_*.h ——
+//   hmi 编不了,那就在本文件里放一个【形状和 hmi 一模一样的小类】,
+//   把 17 个菜单槽声明在 private slots: 里(和 hmi 修好之后一样),
+//   然后断言 QObject::staticMetaObject.indexOfSlot() 能【逐个查到】。
+//
+//   ★ 这测的不是"hmi.h 写对了吗"(那是上一条干的),而是:
+//     【moc 对这种写法到底会不会生成元方法】—— 也就是这条不变量的物理基础。
+//   两者合起来才闭环:
+//     上一条 保证 hmi.h 的声明位置对
+//     本条   保证 moc 认这种位置
+//     任一条单独成立都不够,缺另一条就还是哑菜单。
+//
+// 【负向对照 —— 实跑,数字如实记】
+//   把 ClassUnderTest 的 17 个槽挪回普通 private: →
+//     红 1:moc_reallyRegistersPrivateSlots
+//         (一次列全 17 个名字:onOpenClicked … onShowCapabilities)
+//     绿 11 —— 其中 hmiHeader_menuSlots_areDeclaredInsideASlotsSection
+//          绿得【天经地义】:它查的是 hmi.h,根本不看这个类。
+// ★ 这正是两条都需要存在的证明:各红各的,互不重叠。
+//   只有上一条 → moc 哪天改规则,测试照绿;只有本条 → hmi.h 挪错段,测试照绿。
+// ---------------------------------------------------------------------------
+
+// ★ 和 hmi 形状对齐的替身:同一批菜单槽,同样声明在 private slots: 里。
+//   【为什么它不能继承 FakeReceiver】继承了就连上了 ——
+//   那正是本文件第一次运行时踩的坑(测试替身天然"正确",看不见真 bug)。
+class ClassUnderTest : public QObject {
+    Q_OBJECT
+private slots:
+    void onOpenClicked()  {}
+    void onSaveClicked()  {}
+    void onStartClicked()   {}
+    void onStopClicked()    {}
+    void onResetClicked()   {}
+    void onConnectClicked() {}
+    void onDisconnectClicked() {}
+    void onPlcConfigClicked() {}
+    void onEditorClicked() {}
+    void onRuntimeCanvasClicked() {}
+    void onDemoCanvasClicked() {}
+    void onAlarmConfigClicked() {}
+    void onAlarmSoundSettings() {}
+    void onVariableConfigClicked() {}
+    void onExportVariablesClicked() {}
+    void onExportAlarmsClicked() {}
+    void onShowCapabilities() {}
+
+    // ★ 故意放在【普通 private:】里的一个 —— 它必须查不到。
+    //   这一条是本用例的阴性对照:如果它也能查到,
+    //   说明下面的 indexOfSlot 根本没在查元方法表(或者查错了对象),
+    //   那"17 个全查到"就是【空洞地绿】。
+private:
+    void onThisOneMustNotBeARealSlot() {}
+};
+
+void tst_MenuBar::moc_reallyRegistersPrivateSlots() {
+    // staticMetaObject 本身就是指针(staticMetaObject 声明为 const QMetaObject*),
+    //   别再取地址 —— 那是第一次编译报 C2440 的原因。
+    const QMetaObject* mo = &ClassUnderTest::staticMetaObject;
+
+    // ★ 先证伪:普通 private: 里的方法【必须】查不到。
+    //   这一条是整个用例的地基 —— 它保证下面那些"查到了"不是假阳性。
+    QVERIFY2(mo->indexOfSlot("onThisOneMustNotBeARealSlot()") == -1,
+             "普通 private: 里的方法居然能被 indexOfSlot 查到 —— "
+             "那么 moc 不生成元方法这条前提就不成立,本用例失去意义");
+
+    // 再证真:17 个菜单槽必须全部能被查到。
+    //   ★ 逐个断言而不是只比数量 —— 少一个和全错,两种失败要能分开。
+    QStringList missing;
+    for (const QString& slot : kMenuSlotNames) {
+        const QByteArray sig = (slot + QStringLiteral("()")).toLatin1();
+        if (mo->indexOfSlot(sig) == -1) missing << slot;
+    }
+    QVERIFY2(missing.isEmpty(),
+             qPrintable(QStringLiteral("这些槽 moc 没生成元方法(菜单会点了没反应): %1")
+                 .arg(missing.join(QStringLiteral(", ")))));
 }
 
 QTEST_MAIN(tst_MenuBar)
