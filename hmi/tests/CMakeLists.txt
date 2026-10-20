@@ -280,6 +280,14 @@ add_hmi_test(tst_VariableConfigDialog)
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。
 add_hmi_test(tst_MenuBar)
+# ★ 2026-10-20:两条路径宏,给 tst_MenuBar 里那条"菜单槽必须在 slots: 段"的用例。
+#   它现读 MenuBuilder.cpp(取槽名)和 hmi.h(查访问说明符段)——
+#   不抄一份槽名表是关键:抄了就又变成"测副本",生产代码改了测试照样绿。
+#   加宏而不是写死相对路径:cwd 由 ctest / 手跑 / CI 三处决定,写死必有一处错。
+target_compile_definitions(tst_MenuBar PRIVATE
+    HMI_SRC_DIR_STRING="${HMI_SRC_DIR}"
+    MENU_SRC_DIR_STRING="${HMI_SRC_DIR}/src"
+)
 # ★ 2026-10-19:派生变量不许进轮询。
 #   它 address=0(没有寄存器),而 onTick 原来没有 isDerived 过滤 ——
 #   于是去读 plc1 的 0 号寄存器,回包把算出来的值覆盖掉。

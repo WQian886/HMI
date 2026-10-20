@@ -60,6 +60,59 @@ private slots:
     //   与运行时画布的 AlarmListControl 是两个权威,已经漂开了。
     //   现在两边都调 src/alarm/AlarmRowPalette。
     void repaintAlarmRow(int row);
+
+    // ★★★ 2026-10-20:下面这 10 个槽原来【声明在 private: 段里】,
+    //   而 private: 不是 private slots: —— moc 不会为普通私有函数生成元方法。
+    //   于是:
+    //     · 主画面上的按钮没事 —— hmi.cpp 用的是【成员函数指针】connect
+    //       (connect(btn, &QPushButton::clicked, this, &hmi::onEditorClicked)),
+    //       编译期就解析了,根本不需要 moc。
+    //     · 菜单栏【点了没反应】—— MenuBuilder 用的是【字符串】connect
+    //       (SLOT(onEditorClicked())),它靠 moc 生成的元方法表查找;
+    //       找不到就【静默返回 false】,Qt 只往 stderr 打一行 "No such slot",
+    //       编译期一个字都不报。
+    //   ★ 同一个槽、两种 connect 写法,只有一种能工作 ——
+    //     这就是"按钮好好的、菜单却是哑的"的原因。
+    //   ★ 顺带解释了为什么 tst_MenuBar 一直是绿的:它测的是 buildApplicationMenu
+    //     和一个【假接收者】,假接收者由测试自己声明在 public slots: 里,
+    //     所以那条路永远是通的,发现不了真 hmi 类的槽其实没被 moc 收录。
+    //
+    //   【为什么不干脆把菜单也改成成员函数指针 connect】
+    //     做不到 —— MenuBuilder 是独立编译单元,它不认识 hmi 类,
+    //     而 hmi 依赖 uic 生成的 ui_*.h,测试链的 hmi_core 里根本没有 ui_*.h,
+    //     连编译都过不了。抽 MenuBuilder 的全部目的就是能被测试单独调用。
+    //     所以只能让 moc 这条路通。
+    //
+    //   【以后加槽的规矩】凡是要给菜单用的,必须声明在【带 slots 关键字的段】里。
+    //   只接按钮、不进菜单的,放哪都行。
+
+    // ★ E.1a(2026-09-20):演示画布按钮触发(6 控件实时数据 demo)
+    void onDemoCanvasClicked();
+    // ★ E.4a:弹/隐藏 EditorMainWindow(调色板 + 画布 + 属性面板 + JSON 存读)
+    void onEditorClicked();
+    // ★ E.5(2026-09-29):弹/隐藏 RuntimeCanvas(把编辑器存的工程文件显示出来)
+    //   这是"编辑器画的画面怎么在主画面里显示"的答案。
+    void onRuntimeCanvasClicked();
+    // ★ F4-a(2026-10-08):弹 AlarmConfigDialog(报警阈值/等级/滞回/屏蔽)
+    //   F2 滞回和 F2-c 屏蔽配完一直没地方点,只能手改 JSON ——
+    //   这个按钮是它们对真实用户存在的唯一途径。
+    void onAlarmConfigClicked();
+    void onAlarmSoundSettings();   // ★ F5:报警声音设置对话框
+    // ★ 2b 阶段6(2026-10-19):弹 PlcConfigDialog(N 台 PLC 的地址/协议/从站号)
+    //   2a/2b 把多 PLC 的存读和运行期连接都做完了,但 plcs[] 只能手改 JSON ——
+    //   host 写错要停机改文件、slave_id 填 0(广播地址)没有任何人拦。
+    //   改现场设备的配置却只存在于 JSON 里,等于这个功能对真实用户不存在。
+    void onPlcConfigClicked();
+    // ★ 2026-10-19:弹 VariableConfigDialog(变量归属哪台 PLC / 轮询 / 死区 / 常轮询)
+    //   变量至今没有 UI 入口,plcId 只能手改 JSON 或导 CSV ——
+    //   多 PLC 配了 3 台,却没有任何正常途径把变量分配给它们。
+    void onVariableConfigClicked();
+    void onExportVariablesClicked();
+    void onExportAlarmsClicked();
+    // 帮助 → "当前支持的功能":把程序的能力边界直接写在界面上。
+    //   【为什么不是个装饰性的"关于"】用户在菜单里点了个没反应的项,
+    //   最该立刻知道的是"这功能到底有没有"。藏起来只会被反复试。
+    void onShowCapabilities();
     // ★ 改某一行的状态列(文字 + UserRole + 重新上色)。三样必须一起改,
     //   只改文字就会出现"文字说已确认、颜色说未确认"——那一行既灰着又在闪。
     void setAlarmRowState(int row, AlarmState st);
@@ -174,8 +227,9 @@ private:
     // ★ D.4.1(2026-09-20):D.4 CSV 导出 UI 集成
     //   QFileDialog 选路径 → 调 qwhmi::export_::writeVariablesCsv / writeAlarmsCsv
     //   失败用 QMessageBox 提示(便于操作员看到)
-    void onExportVariablesClicked();
-    void onExportAlarmsClicked();
+    //   【这两个槽的声明已移到 private slots: 段】—— 它们原先在这里(普通 private:),
+    //   moc 不收录,菜单栏点"导出变量表/导出报警表"全是哑的。
+    //   实现体没动,仍是 QFileDialog 选路径 → 调 writeVariablesCsv/writeAlarmsCsv。
 
     // ★ IMPROVE-B4(2026-07-29):magic number 提常量,改超时/提示时长集中一处
     //   【背景】原代码 statusBar(...) 调 13 处,timeout 参数 1500/3000/5000 散落;timer interval 1000/3000 散落
@@ -257,28 +311,6 @@ private:
     // ★ 阶段 D · D.3(2026-09-20):报警持久化(同 history.db 的 alarm_history 表 + 接 AlarmManager)
     qwhmi::history::AlarmRecorder* alarmRecorder_ = nullptr;
 
-    // ★ E.1a(2026-09-20):演示画布按钮触发(6 控件实时数据 demo)
-    void onDemoCanvasClicked();
-    // ★ E.4a:弹/隐藏 EditorMainWindow(调色板 + 画布 + 属性面板 + JSON 存读)
-    void onEditorClicked();
-    // ★ E.5(2026-09-29):弹/隐藏 RuntimeCanvas(把编辑器存的工程文件显示出来)
-    //   这是"编辑器画的画面怎么在主画面里显示"的答案。
-    void onRuntimeCanvasClicked();
-    // ★ F4-a(2026-10-08):弹 AlarmConfigDialog(报警阈值/等级/滞回/屏蔽)
-    //   F2 滞回和 F2-c 屏蔽配完一直没地方点,只能手改 JSON ——
-    //   这个按钮是它们对真实用户存在的唯一途径。
-    void onAlarmConfigClicked();
-    void onAlarmSoundSettings();   // ★ F5:报警声音设置对话框
-    // ★ 2b 阶段6(2026-10-19):弹 PlcConfigDialog(N 台 PLC 的地址/协议/从站号)
-    //   2a/2b 把多 PLC 的存读和运行期连接都做完了,但 plcs[] 只能手改 JSON ——
-    //   host 写错要停机改文件、slave_id 填 0(广播地址)没有任何人拦。
-    //   改现场设备的配置却只存在于 JSON 里,等于这个功能对真实用户不存在。
-    void onPlcConfigClicked();
-    // ★ 2026-10-19:弹 VariableConfigDialog(变量归属哪台 PLC / 轮询 / 死区 / 常轮询)
-    //   变量至今没有 UI 入口,plcId 只能手改 JSON 或导 CSV ——
-    //   多 PLC 配了 3 台,却没有任何正常途径把变量分配给它们。
-    void onVariableConfigClicked();
-
     // ★★ 2026-10-19:这三个原来是【函数内 static】,提成成员是为了让
     //   变量配置对话框能枚举到"画面上有哪些控件绑着哪个变量"。
     //   函数内 static 的话这个类没有任何成员指得过去,那层引用就永远查不到,
@@ -294,11 +326,6 @@ private:
     //   buildMenus() 在构造函数里调一次,全部 connect 到上面那些【已有槽】,
     //   没有一行新逻辑 —— 菜单和按钮必须指向同一个实现,否则两边行为会分叉。
     void buildMenus();
-
-    // 帮助 → "当前支持的功能":把程序的能力边界直接写在界面上。
-    //   【为什么不是个装饰性的"关于"】用户在菜单里点了个没反应的项,
-    //   最该立刻知道的是"这功能到底有没有"。藏起来只会被反复试。
-    void onShowCapabilities();
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)
