@@ -769,4 +769,47 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <!-- 2026-10-20 bu deng, sui hmi.vcxproj tong bu bu deng -->
+  <!-- zhe ge wen jian zhi guan VS zi yuan guan li qi ba fen zu xian shi, bu ying xiang bian yi. -->
+  <ItemGroup>
+    <ClCompile Include="src\plc\PlcConnectionManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\plc\PlcConfigDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\plc\VariableConfigDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\MenuBuilder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="VariableRefScan.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\plc\PlcConnectionManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\plc\PlcConfigDialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\plc\VariableConfigDialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\MenuBuilder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VariableRefScan.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <QtMoc Include="src\plc\PlcConnectionManager.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\plc\PlcConfigDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="src\plc\VariableConfigDialog.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+  </ItemGroup>
 </Project>

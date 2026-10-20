@@ -409,4 +409,28 @@
     <ClCompile Include="src\alarm\AlarmRowPalette.cpp" />
     <ClInclude Include="src\alarm\AlarmRowPalette.h" />
   </ItemGroup>
+  <!-- 2026-10-20 bu deng: 2026-10-16 qi xin zeng de yuan wen jian -->
+  <!--   [wei shen me yi qian yue le] CMakeLists.txt mo wei you file(GLOB ... CONFIGURE_DEPENDS) -->
+  <!--     fang di, xin .cpp zi dong jian jin SOURCES, suo yi Ninja/ctest na tiao gui yi lu lv deng; -->
+  <!--     er hmi.vcxproj shi shou gong wei hu de, mei you zhe ceng fang di, yu shi [zhi you VS gui duan duan]. -->
+  <!--     luo diao de di yi fen shi MenuBuilder.cpp (2026-10-16 cai dan lan na ci), bu shi zui jin zhe ci. -->
+  <!--     zheng zhuang shi LNK2019 yi chuan wei jie xi fu hao, er bian yi jie duan quan lv, -->
+  <!--     bu kan lian jie ri zhi fa xian bu liao. -->
+  <ItemGroup>
+    <!-- QtMoc bi xu he ClCompile cheng dui deng ji: san ge tou dou you Q_OBJECT, -->
+    <!-- shao deng ji QtMoc jiu shi moc bu pao, jiu shao staticMetaObject, jiu LNK2001 -->
+    <QtMoc Include="src\plc\PlcConnectionManager.h" />
+    <QtMoc Include="src\plc\PlcConfigDialog.h" />
+    <QtMoc Include="src\plc\VariableConfigDialog.h" />
+    <ClCompile Include="src\plc\PlcConnectionManager.cpp" />
+    <ClCompile Include="src\plc\PlcConfigDialog.cpp" />
+    <ClCompile Include="src\plc\VariableConfigDialog.cpp" />
+    <ClCompile Include="src\ui\MenuBuilder.cpp" />
+    <ClCompile Include="VariableRefScan.cpp" />
+    <ClInclude Include="src\plc\PlcConnectionManager.h" />
+    <ClInclude Include="src\plc\PlcConfigDialog.h" />
+    <ClInclude Include="src\plc\VariableConfigDialog.h" />
+    <ClInclude Include="src\ui\MenuBuilder.h" />
+    <ClInclude Include="VariableRefScan.h" />
+  </ItemGroup>
 </Project>
