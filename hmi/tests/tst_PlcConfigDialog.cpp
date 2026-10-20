@@ -60,6 +60,45 @@
 //       改成拿"真的没配过 slave_id"的那份夹具后,它才真的盖住了这个问题。
 //       记在这里是因为这个教训比结论本身更值得留:
 //       【一条用例能不能守住它声称的作用范围,取决于夹具像不像真实用户的数据】。
+//
+// 【★ 负向对照 —— 第 3 轮,2026-10-19 实跑】(阶段3:修那句指向不存在之处的文案)
+//
+//   起因:删 PLC 确认框里写着"请删完到变量表里手工改它们的 PLC ID",
+//         而整个仓库【没有任何新增/编辑变量的界面】—— plcId 只能手改 JSON。
+//         这段文案在把用户指向一个空地址。VariableConfigDialog 落地之后
+//         它才第一次成立,于是改成指向「数据 → 变量配置」。
+//         同时删掉末尾那句无条件追加的"(它们在变量表里的 PLC ID 不会被改动。)"
+//         —— 同义反复,而且【无人引用时也会出现】,那时"它们"指代不存在的东西。
+//   由 removeReferencedPlc_messagePointsAtAVerifiablePlace 守住。
+//
+//   ★★★ 这一轮还顺手挖出一个【早就存在、一直没人发现】的 bug:
+//     那段文案三个占位符【全写成 %1】。QString::arg() 替换的是
+//     【编号最小的占位符、且替换它出现的全部位置】,所以
+//     .arg(r.refCount) 一出手就把三处全填成了"变量个数",
+//     后面 .arg(r.id) 无处可填(Qt 在 stderr 报 "Argument missing")。
+//     用户实际看到的字是:
+//         原本发给「3」的数据悄悄发给另一台机器        ← 3 是变量个数!
+//     ★ 错得最难察觉的地方:被填错的是"【哪一台】PLC"。
+//       用户读到一台叫"3"的设备,而界面上没有任何异常提示。
+//     改法:PLC id 用 %2。
+//
+//     怎么发现的:给它补测试、把弹框全文记下来之后,stderr 上那行
+//     "QString::arg: Argument missing" 直接跳了出来 ——
+//     这行警告一直在,只是以前没有一条测试去读那段文字,所以没人听见。
+//     ★ 教训:"没有任何症状"不等于"没有问题",也可能只是【没人看】。
+//
+//   本轮实跑:
+//     第 3 轮负向对照:把 %2 改回 %1 → 红 1(removeReferencedPlc_...),
+//       绿 39。
+//     ★★ 但第一次做这轮负向对照时,测试【没有红】—— 断言写成了
+//       msg.contains("\"plc2\"")。而 msg 的第一行就是
+//       "确定删除 PLC "plc2"(10.0.0.2:502)吗?",那一句与本 bug 无关
+//       且永远成立,于是整条断言恒真。
+//       改成只截取"原本发给"之后那一小段再比对,才真的红。
+//       ★★ 这是本仓库第三次栽在同一个坑上:【负向对照红不出来,
+//         通常不是代码没坏,是断言问错了地方】。
+//         所以每轮做完都要问一句:红的那条,是因为【测到了问题】,
+//         还是因为【它压根测不到东西】。
 // ============================================================================
 
 #include <QtTest>
@@ -144,6 +183,12 @@ QString writeProject(const QJsonObject& root) {
     return path;
 }
 
+// ★ 每次弹框的正文,按顺序。必须【声明在 answerNextModalDialog 之前】——
+//   那个 lambda 里要用它。
+//   2026-10-19 加的:原来只回答不记录,于是"删除确认框里到底写了什么"
+//   一条测试都写不了 —— 界面上一段关键的指引就这么没人看得住。
+QStringList g_capturedBoxes;
+
 // 排一次事件循环,顺带回答下一个弹出的模态框。
 //   ★ offscreen 下 QMessageBox::question 是【阻塞】的(静态函数自己 exec),
 //     直接点按钮会把测试卡满 300s 超时 —— AlarmConfigDialog 就这么卡过一次。
@@ -154,6 +199,9 @@ void answerNextModalDialog(QMessageBox::StandardButton answer) {
     QTimer::singleShot(0, qApp, [answer] {
         auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
         if (!box) return;
+        // ★ 把这次弹框的全文留下来:删除确认框里那几句"不会自动改指向"
+        //   是本文件最不该被删掉的东西,而它【只能】通过读全文来验。
+        g_capturedBoxes << box->text();
         if (answer == QMessageBox::Yes) {
             if (auto* yes = box->button(QMessageBox::Yes)) { yes->click(); return; }
         }
@@ -181,6 +229,7 @@ private slots:
     void removeReferencedPlc_doesNotTouchAnyVariable();
     void removeButton_clicked_asksBeforeRemoving();
     void removeButton_confirmed_actuallyRemoves();
+    void removeReferencedPlc_messagePointsAtAVerifiablePlace();
 
     // ---- 校验 ----
     void validate_rejectsEmptyId();
@@ -483,6 +532,108 @@ void TestPlcConfigDialog::removeButton_confirmed_actuallyRemoves() {
     QCOMPARE(dlg.rowCount(), 2);
     QVERIFY(dlg.idAt(0) == QStringLiteral("plc1"));
     QVERIFY(dlg.idAt(1) == QStringLiteral("plc3"));
+}
+
+void TestPlcConfigDialog::removeReferencedPlc_messagePointsAtAVerifiablePlace() {
+    // ★★★ 2026-10-19:这段文案原来让用户"删完到变量表里手工改它们的
+    //   PLC ID" —— 而【变量表当时根本不存在】。
+    //   整个仓库没有任何新增/编辑变量的界面,plcId 只能手改 JSON 或导 CSV。
+    //   也就是说这个确认框在把用户指向一个空地址。
+    //   现在 VariableConfigDialog 接上了,这句话才第一次成立。
+    //
+    //   ★ 钉住它的理由和"钉住诚实"是同一条:这句话读起来像废话
+    //     (上一句"程序不会自动把它们改到别的 PLC 上"已经说过一遍了),
+    //     所以它特别容易被当成冗余清理掉 —— 而删掉之后用户就不知道
+    //     变量变成 Bad 之后该怎么办了。
+    //
+    //   ★★ 顺带钉住另一半:那句话原来是无条件追加的,
+    //     所以【一个变量都没被引用时也会出现】,而那时"它们"指代
+    //     不存在的对象。下面第 ③ 条就是这个。
+    VariableManager vm;
+    auto* v = new Variable(QStringLiteral("Press"), 100,
+                           Variable::DataType::Int16,
+                           Variable::Access::ReadOnly);
+    v->setPlcId(QStringLiteral("plc2"));
+    vm.addVariable(v);
+
+    PlcConnectionManager mgr;
+    mgr.applyConfig(threePlcs());
+    PlcConfigDialog dlg(&mgr, &vm);
+
+    auto* table = dlg.findChild<QTableWidget*>(QStringLiteral("plcConfigTable"));
+    auto* rm    = dlg.findChild<QPushButton*>(QStringLiteral("plcConfigRemoveBtn"));
+    QVERIFY(table);
+    QVERIFY(rm);
+
+    // ① 删一台【被引用】的 plc2 → 提示里必须指向一个【真的存在】的地方
+    table->selectRow(1);
+    answerNextModalDialog(QMessageBox::No);
+    rm->click();
+    QVERIFY(!g_capturedBoxes.isEmpty());
+    const QString msg = g_capturedBoxes.last();
+    QVERIFY2(!msg.contains(QStringLiteral("变量表")),
+             qPrintable(QStringLiteral("★ 提示里还在指向「变量表」,而那个界面"
+                                       "不存在(或已被改名):%1").arg(msg)));
+    QVERIFY2(msg.contains(QStringLiteral("变量配置")),
+             qPrintable(QStringLiteral("提示里没有指出改 plcId 的地方在哪:%1").arg(msg)));
+
+    // ② ★ 那句"不会自动改指向"必须【还在】—— 它是这个框最要紧的一句。
+    //   没有它,用户会以为删 PLC 时程序会帮他把变量挪到别的机器上。
+    QVERIFY2(msg.contains(QStringLiteral("不会")),
+             qPrintable(QStringLiteral("提示里没有「程序不会自动改指向」这句关键"
+                                       "警告:%1").arg(msg)));
+
+    // ★★★ ②b 2026-10-19:顺手修掉一个【早就存在】的 bug,加测试把它钉住。
+    //   原文三个占位符全写成 %1,而 QString::arg() 替换的是【编号最小的
+    //   占位符、且替换它出现的【全部】位置】—— 所以 .arg(r.refCount)
+    //   把三处 %1 全填成了"变量个数",.arg(r.id) 随后无处可填
+    //   (Qt 在 stderr 打出 "QString::arg: Argument missing")。
+    //   用户实际看到的字是:
+    //     原本发给「1」的数据悄悄发给另一台机器      ← 1 是变量个数!
+    //   ★ 错得最难察觉的地方:被填错的是"【哪一台】PLC"。
+    //     用户读到的是一台【不存在的、叫"1"的设备】,而界面没有任何异常。
+    //   改法:PLC id 用 %2。
+    //
+    //   ★★ 这里踩过一次坑,值得记下来:断言一开始写成
+    //      msg.contains("\"plc2\"") —— 而 msg 的【第一行】就是
+    //      "确定删除 PLC "plc2"(10.0.0.2:502)吗?",那一句跟这个 bug 无关,
+    //      而且永远成立。于是把 %2 改回 %1 做负向对照时,【测试照样全绿】。
+    //      负向对照红不出来,通常不是代码没坏,是断言问错了地方。
+    //      所以下面只截取"原本发给"那一小段来比对。
+    const int at = msg.indexOf(QStringLiteral("原本发给"));
+    QVERIFY2(at >= 0, qPrintable(QStringLiteral("提示里找不到「原本发给」那句:%1").arg(msg)));
+    const QString sentence = msg.mid(at, 40);   // 只够截住这一小句
+    QVERIFY2(sentence.contains(QStringLiteral("plc2")),
+             qPrintable(QStringLiteral("★ 「原本发给」后面填的不是 PLC id。"
+                                       "很可能占位符又被写成 %1 了,"
+                                       "于是填进去的是变量个数 —— "
+                                       "用户会读到一台不存在的设备。原句:%1")
+                            .arg(sentence)));
+
+    // ③ ★ 反向:一个变量都没被引用时,不该再冒出那句提到"它们"的话。
+    //     无条件追加的副句在这个场景里指代一个不存在的集合,
+    //     用户会花时间找"到底哪几个变量的 PLC ID 没被动过"。
+    g_capturedBoxes.clear();
+    PlcConnectionManager mgr2;
+    mgr2.applyConfig(threePlcs());
+    PlcConfigDialog dlg2(&mgr2);          // ★ 没传 VariableManager → 引用数全是 0
+    auto* table2 = dlg2.findChild<QTableWidget*>(QStringLiteral("plcConfigTable"));
+    auto* rm2    = dlg2.findChild<QPushButton*>(QStringLiteral("plcConfigRemoveBtn"));
+    QVERIFY(table2);
+    QVERIFY(rm2);
+    QCOMPARE(dlg2.refCountAt(0), 0);
+    table2->selectRow(0);
+    answerNextModalDialog(QMessageBox::No);
+    rm2->click();
+    QVERIFY(!g_capturedBoxes.isEmpty());
+    const QString msg2 = g_capturedBoxes.last();
+    QVERIFY2(!msg2.contains(QStringLiteral("变量表")),
+             qPrintable(QStringLiteral("无人引用时也不该冒出指向「变量表」"
+                                       "的话:%1").arg(msg2)));
+    QVERIFY2(!msg2.contains(QStringLiteral("PLC ID 不会被改动")),
+             qPrintable(QStringLiteral("★ 没有任何变量被引用,提示里却出现了"
+                                       "「PLC ID 不会被改动」—— 它指代的"
+                                       "「它们」不存在:%1").arg(msg2)));
 }
 
 // ---------------------------------------------------------------------------
