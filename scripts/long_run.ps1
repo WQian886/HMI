@@ -152,7 +152,11 @@ param(
     #  默认值 5.0 的来由:第一轮实测 idle 约 0.5%。真正跑着报警引擎 +
     #  Modbus 轮询的 HMI,CPU 至少要高一个数量级。5.0 留足了余量,
     #  又不会把"低负载但确实在跑"的现场误判成 idle。
-    [double] $MinCpuPercent = 5.0     # 低于这个占用率判定为 idle
+    [double] $MinCpuPercent = 5.0,    # 低于这个占用率【且日志也不长】才判定为 idle
+                                       # ★ 2026-10-20:单看 CPU 在当前负载下没有分辨力
+                                       #   (实测:真在跑 0.86% / 卡在登录框 0.5%),所以 idle
+                                       #   现在要求两条证据同时成立。见下面 静默期快照。
+    [int]    $SettleSec     = 90      # 启动后静默多久再取"活体快照"(等启动日志写完)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -355,6 +359,43 @@ if (-not $AdoptExisting) {
     Say ("已启动 PID={0}" -f $owned.Id) 'Green'
 }
 
+# ---- 静默期快照:判断"进程还在干活"的分界点 -------------------------
+#  ★ 为什么需要它(2026-10-20 改)
+#  ---------------------------------------------
+#  原来的 idle 判据只有一条:平均 CPU < MinCpuPercent(默认 5%)→ 判 idle。
+#  那条判据是【从一个猜测来的】,原注释写的是
+#  "真正跑着报警引擎 + Modbus 轮询的 HMI,CPU 至少要高一个数量级"。
+#  2026-10-20 实测把这个猜测证伪了:
+#      真的在跑(MBSlave 已连上、3 个变量 1Hz 轮询、历史在写)→ 平均 CPU 0.86%
+#      卡在登录框不动(第一轮实测)                      → 平均 CPU 0.5%
+#  0.5% 和 0.86% 差 1.7 倍,而且这个差值还会随日志量、GC、机器负载漂。
+#  【拿它当判据 = 分不出"真在跑"和"冻住了"】—— 这不是阈值没调好,
+#  是这个量在当前负载下【根本没有分辨力】。
+#  而它判错的方向是:真在跑 → 判 idle → 报告写"进程没在跑业务"。
+#  那是【一句假话】,比判不出来更坏。
+#
+#  改成:idle = 【CPU 低】 AND 【日志不再增长】。
+#  日志增长是"这个进程还在做它该做的事"的【客观证据】——
+#  进程被模态框冻住时事件循环停了,定时器不跑,日志就不增长;
+#  真在跑的时候 HistoryRecorder 每 60 秒写一行心跳,日志就在长。
+#  判据因此是可以失败的:进程一冻,立刻判 idle → UNKNOWN。
+#
+#  ★ 为什么快照要放在"启动之后"而不是用开头的基线
+#  启动那几秒本身也会写日志(24 行启动日志)。拿【启动前】的基线去比,
+#  卡在登录框的进程也会显得"日志长了" → 判成不 idle → 假绿。
+#  所以要在启动之后、确认"启动噪声已经写完"的位置再取一次快照,
+#  之后拿它跟最终快照比。只看【中途之后还有没有新日志】,
+#  启动噪声就被排除在外了。
+Say ("静默期 {0} 秒(等启动日志写完,再取活体快照)..." -f $SettleSec) 'Cyan'
+Start-Sleep -Seconds $SettleSec
+$settledLog = Get-LogStats
+if ($null -eq $settledLog) {
+    Say "静默期快照:没有日志目录 —— 拿不到活体证据,按'没在干活'处理" 'Yellow'
+} else {
+    Say ("静默期快照:日志 {0} 个文件 / 合计 {1} KB" -f `
+         $settledLog.Count, [math]::Round($settledLog.Bytes/1KB,1)) 'Cyan'
+}
+
 $samples   = New-Object System.Collections.Generic.List[object]
 $csvPath   = Join-Path $OutDir 'samples.csv'
 $deadline  = (Get-Date).AddHours($Hours)
@@ -461,7 +502,15 @@ $wsPerHr = ($lastN.WorkingSetMB - $first.WorkingSetMB) / ($spanMin / 60.0)
 #   让一个实际在闲置的进程蒙混过关。
 $cpuSpan = $lastN.CpuSeconds - $first.CpuSeconds
 $cpuPct  = if ($spanMin -gt 0) { ($cpuSpan / ($spanMin * 60.0)) * 100.0 } else { 0 }
-$isIdle  = ($cpuPct -lt $MinCpuPercent)
+
+# ★ 活体证据:静默期快照之后,日志还在不在长。
+#   长 = 进程还在做它该做的事(轮询/历史/报警心跳)→ 不是 idle。
+#   不长 = 进程可能冻在某个模态框上,事件循环停了 → idle。
+#   两条证据一起用:idle = CPU 低 AND 日志不长。
+#   CPU 高而日志不长 → 进程在忙(只是不记日志),不算 idle。
+$logGrewBytes = if ($null -ne $finalLog -and $null -ne $settledLog) { $finalLog.Bytes - $settledLog.Bytes } else { 0 }
+$logGrew      = ($logGrewBytes -gt 0)
+$isIdle       = ($cpuPct -lt $MinCpuPercent) -and (-not $logGrew)
 
 # idle 时降级为 UNKNOWN:不是"通过",是"这一轮没有资格下结论"。
 # 一个没登录、没连 PLC、没跑报警引擎的进程,内存当然不涨 ——
@@ -476,9 +525,17 @@ $memTxt = ("私有内存 {0} -> {1} MB ({2:N3}x),斜率 {3:N2} MB/小时;线程 
     $first.PrivateMB, $lastN.PrivateMB, $memRatio, $memPerHr, $first.Threads, $lastN.Threads,
     $MaxMemRatio, $MaxMemPerHour)
 if ($isIdle) {
-    $memTxt += ("`n        ★ 本轮进程平均 CPU 仅 {0:N2}%,低于阈值 {1}% —— 判定为 idle。" -f $cpuPct, $MinCpuPercent)
+    $memTxt += ("`n        ★ 本轮进程平均 CPU 仅 {0:N2}%,低于阈值 {1}%;且静默期之后日志【没有增长】" -f $cpuPct, $MinCpuPercent)
+    $memTxt += "`n          ({0} KB)—— 两条证据都指向 idle,判定为 idle。" -f [math]::Round($logGrewBytes/1KB,1)
     $memTxt += "`n        idle 进程本来就不涨内存,这一轮【不构成对程序稳定性的验收】。"
     $memTxt += "`n        要真验,先登录进主界面、连上 PLC,让报警引擎和轮询跑起来再重跑。"
+} elseif ($cpuPct -lt $MinCpuPercent) {
+    # ★ 这条分支要写出来,不然读报告的人会以为脚本判错了:
+    #   CPU 明明低于 5% 阈值,怎么不是 idle?
+    $memTxt += ("`n        CPU {0:N2}%(低于阈值 {1}%),但静默期之后日志【增长了 {2} KB】" -f `
+        $cpuPct, $MinCpuPercent, [math]::Round($logGrewBytes/1KB,1))
+    $memTxt += "`n        —— 进程还在干活,只是这个活儿本身不吃 CPU,所以【不判 idle】。"
+    $memTxt += "`n        (旧判据只看 CPU,这里会被误判成 idle,报出'进程没在跑业务'这句假话 —— 2026-10-20 已改)"
 }
 $memTxt += ("`n        参考(不参与判定):工作集 {0} -> {1} MB,斜率 {2:N1} MB/小时 —— 这个量会被 Windows 回收" -f `
     $first.WorkingSetMB, $lastN.WorkingSetMB, $wsPerHr)
@@ -559,7 +616,7 @@ Say "判定: $reportPath" 'Gray'
 #   不单独说一句的话,读报告的人容易只扫到别的 PASS 就以为验过了。
 if ($isIdle) {
     Say "" ; Say "════════════════════════════════════════════════════" 'Red'
-    Say ("★ 本轮没有结论(进程 idle,平均 CPU {0:N2}%)" -f $cpuPct) 'Red'
+    Say ("★ 本轮没有结论(进程 idle:平均 CPU {0:N2}%,且静默期之后日志 0 增长)" -f $cpuPct) 'Red'
     Say "  进程没在跑业务 —— 资源曲线平坦是必然的,不是'稳定'的证据。" 'Red'
     Say "  先登录进主界面并连上 PLC,再重跑。退出码 4 表示'没验成'。" 'Red'
     Say "════════════════════════════════════════════════════" 'Red'
