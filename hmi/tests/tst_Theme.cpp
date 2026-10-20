@@ -107,6 +107,14 @@ const RequiredRule kRequiredRules[] = {
     {"QGroupBox",        "对话框里大量用分组框"},
     {"QMessageBox",      "权限不足/删除确认 —— 操作员最常看到的弹框"},
     {"QScrollBar",       "深底上默认滚动条和内容糊在一起"},
+    // ★ P1-d(2026-10-20):Modbus 调试行的五个字段名。
+    //   这条【容易被当成多余的删掉】,所以进表:
+    //   字段名是"框架",输入框里的值才是"内容" —— 两者同色同字号时,
+    //   用户得先读一遍才知道哪个字是标签哪个是值,
+    //   而这一行的值恰好是 1 / 0 / 1 这种看不出含义的数字。
+    //   (内容层的断言在 tst_ModbusPanel::fieldLabels_haveTheirOwnThemeRule,
+    //    它额外要求这条规则真的带着次要色,而不只是有个选择器。)
+    {"QLabel#fieldLabel", "Modbus 行的字段名标签;少了它会和输入框里的值同色同字号,层次就没了"},
 };
 
 } // namespace

@@ -317,6 +317,17 @@ target_compile_definitions(tst_MenuBar PRIVATE
     HMI_SRC_DIR_STRING="${HMI_SRC_DIR}"
     MENU_SRC_DIR_STRING="${HMI_SRC_DIR}/src"
 )
+# ★ P1-d(2026-10-20):Modbus 调试行的【形状】。
+#   不用 add_hmi_test —— 它要 HMI_SRC_DIR_STRING 读 hmi.ui 和 qss 源码文本。
+#   (同 tst_Theme 的理由:hmi_core 不编 hmi.cpp,建不出主窗口那一排控件。)
+#   这里【不要】把 hmi.qrc 加进来:本测试读的是磁盘上的文件,
+#   不是 :/ 资源。加了反而让人以为测的是二进制里那份。
+add_executable(tst_ModbusPanel tst_ModbusPanel.cpp)
+target_link_libraries(tst_ModbusPanel PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_ModbusPanel PRIVATE /utf-8)
+target_compile_definitions(tst_ModbusPanel PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_ModbusPanel COMMAND tst_ModbusPanel)
+
 # ★ 2026-10-19:派生变量不许进轮询。
 #   它 address=0(没有寄存器),而 onTick 原来没有 isDerived 过滤 ——
 #   于是去读 plc1 的 0 号寄存器,回包把算出来的值覆盖掉。
