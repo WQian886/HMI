@@ -274,6 +274,21 @@ private:
     //   host 写错要停机改文件、slave_id 填 0(广播地址)没有任何人拦。
     //   改现场设备的配置却只存在于 JSON 里,等于这个功能对真实用户不存在。
     void onPlcConfigClicked();
+    // ★ 2026-10-19:弹 VariableConfigDialog(变量归属哪台 PLC / 轮询 / 死区 / 常轮询)
+    //   变量至今没有 UI 入口,plcId 只能手改 JSON 或导 CSV ——
+    //   多 PLC 配了 3 台,却没有任何正常途径把变量分配给它们。
+    void onVariableConfigClicked();
+
+    // ★★ 2026-10-19:这三个原来是【函数内 static】,提成成员是为了让
+    //   变量配置对话框能枚举到"画面上有哪些控件绑着哪个变量"。
+    //   函数内 static 的话这个类没有任何成员指得过去,那层引用就永远查不到,
+    //   只能靠一句免责说明顶着。改的是【可见性】不是【生命周期】——
+    //   三者本来就是进程内单例、都靠 WA_DeleteOnClose=false 不随关窗口销毁。
+    //   【为什么不顺手把 demoWindow_ 也一起改】它也是同一类问题,一起改了;
+    //   留着它反而不一致 —— "另外两个改了它没改"比"三个都还是 static"更难读。
+    qwhmi::editor::EditorMainWindow* editorWindow_ = nullptr;
+    qwhmi::editor::RuntimeCanvas*     canvas_       = nullptr;
+    QWidget*                          demoWindow_   = nullptr;
 
     // ★★ 2026-10-16:菜单栏
     //   buildMenus() 在构造函数里调一次,全部 connect 到上面那些【已有槽】,

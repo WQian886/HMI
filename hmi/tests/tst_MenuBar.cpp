@@ -99,6 +99,7 @@ public slots:
     // --- PLC(2b 阶段 6)---
     void onPlcConfigClicked()  { fired << QStringLiteral("onPlcConfigClicked"); }
     // --- 数据 ---
+    void onVariableConfigClicked(){ fired << QStringLiteral("onVariableConfigClicked"); }
     void onExportVariablesClicked(){ fired << QStringLiteral("onExportVariablesClicked"); }
     void onExportAlarmsClicked()  { fired << QStringLiteral("onExportAlarmsClicked"); }
     // --- 帮助 ---
@@ -257,6 +258,7 @@ void tst_MenuBar::everyAction_reachesItsOwnSlot() {
         {"画面", "演示画布...",  "onDemoCanvasClicked"},
         {"报警", "报警配置...",  "onAlarmConfigClicked"},
         {"报警", "报警声音...",  "onAlarmSoundSettings"},
+        {"数据", "变量配置...",  "onVariableConfigClicked"},
         {"数据", "导出变量表...", "onExportVariablesClicked"},
         {"数据", "导出报警表...", "onExportAlarmsClicked"},
         {"帮助", "当前支持的功能", "onShowCapabilities"},
@@ -291,7 +293,7 @@ void tst_MenuBar::actionCount_matchesSlotsWired() {
     // 工程 = 2 项(没有多余的分隔符);运行 = 5 项 + 1 分隔符;其余各项全列
     static const Count kCounts[] = {
         {"工程", 2}, {"运行", 6}, {"PLC", 1}, {"画面", 3},
-        {"报警", 2}, {"数据", 2}, {"帮助", 1}
+        {"报警", 2}, {"数据", 3}, {"帮助", 1}
     };
     int total = 0;
     for (const Count& c : kCounts) {
@@ -374,15 +376,18 @@ void tst_MenuBar::nullMenuBar_isNoCrash() {
 
 void tst_MenuBar::missingSlot_isReportedNotSwallowed() {
     // ★★★ 替 hmi 兜底的最后一道。
-    //   HalfReceiver 只有 onOpenClicked 一个槽,其余 15 个 connect 必然失败 ——
+    //   HalfReceiver 只有 onOpenClicked 一个槽,其余 16 个 connect 必然失败 ——
     //   这正是"hmi 里少了个槽"在真实运行时的样子。
     //   改之前这些失败被 addItem 静默吞掉,菜单照样建出来,
-    //   用户点那 15 个菜单项【什么都不会发生】,而程序一声不吭。
+    //   用户点那 16 个菜单项【什么都不会发生】,而程序一声不吭。
     HalfReceiver half;
     const QStringList failed = qwhmi::ui::buildApplicationMenu(&m_bar, &half);
 
-    // 16 个菜单项,只有 1 个能连上 → 15 个必须被报出来,一个都不能少
-    QCOMPARE(failed.size(), 15);
+    // 17 个菜单项,只有 1 个能连上 → 16 个必须被报出来,一个都不能少
+    //   ★ 加了"变量配置"之后从 15 变成 16。这是【故意】写死数字而不是
+    //     "总数 - 1"的原因:后者在有人加了菜单项却忘了接槽时会【照样绿】,
+    //     而那正是这个用例存在的意义 —— 那条静默失败必须被抓住。
+    QCOMPARE(failed.size(), 16);
 
     // 报出来的内容必须【指得出是哪个菜单的哪一项、想连的是哪个槽】
     //   —— 只报一个数字("14 个没连上")的话,排查的人还得自己去猜是哪里错了。

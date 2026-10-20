@@ -35,6 +35,7 @@
 #include "alarm/AlarmConfigDialog.h"  // ★ F4-a(2026-10-08):报警配置对话框(报警配置按钮)
 #include "alarm/AlarmSoundDialog.h"   // ★ F5(2026-10-08):报警声音设置对话框
 #include "plc/PlcConfigDialog.h"      // ★ 2b 阶段6:N 台 PLC 的配置界面
+#include "plc/VariableConfigDialog.h" // ★ 2026-10-19:变量配置界面(变量 plcId 的 UI 入口)
 #include "AlarmSoundPlayer.h"         // ★ F5(2026-10-08):报警声音/蜂鸣(报警声音按钮)
 #include <QIntValidator>
 #include <QTimer>                 // counter / resetTimer_ / alarmBlinkTimer_ 共用
@@ -1102,7 +1103,15 @@ void hmi::onResetFinished() {
 //   再点同一按钮关窗口(类比演示画布的 static QWidget* 单例模式)
 void hmi::onEditorClicked() {
     // ★ E.4a:EditorMainWindow 在 qwhmi::editor 命名空间,这里用全限定
-    static qwhmi::editor::EditorMainWindow* editorWindow_ = nullptr;
+    //
+    // ★★ 2026-10-19:原来是【函数内 static】,现在是成员 editorWindow_。
+    //   为什么提上来:变量配置对话框要枚举"画面上有哪些控件绑着哪个变量",
+    //   而编辑器窗口的控件列表在 EditorMainWindow::controls() 里 ——
+    //   函数内 static 的话,这个类【没有任何成员指得过去】,对话框拿不到。
+    //   那就等于"查不到画面引用"只能靠一句免责说明,而不是真的查一遍。
+    //   (函数内 static 和成员的生命周期一样长:都是进程内单例、
+    //    都靠 WA_DeleteOnClose=false 不随关窗口销毁。改的是【可见性】,
+    //    不是【生命周期】。)
     if (editorWindow_ && editorWindow_->isVisible()) {
         editorWindow_->hide();
         return;
@@ -1125,7 +1134,7 @@ void hmi::onEditorClicked() {
 //   而且变量是活的(varMgr_ 传的是主画面正在轮询的那张表)。
 //   以前这条链的终点不存在:编辑器只写不读,主画面只有 9 个 C++ 硬编码的 demo 控件。
 void hmi::onRuntimeCanvasClicked() {
-    static qwhmi::editor::RuntimeCanvas* canvas_ = nullptr;   // 进程内单例
+    // ★★ 2026-10-19:canvas_ 由函数内 static 提成成员,理由见 onEditorClicked。
     if (canvas_ && canvas_->isVisible()) {
         canvas_->hide();
         return;
@@ -1223,12 +1232,31 @@ void hmi::onPlcConfigClicked() {
     qwhmi::plc::PlcConfigDialog dlg(plcMgr_, varMgr_, this);
     dlg.exec();
 }
+
+// ★ 2026-10-19:变量配置 —— 让变量 plcId 有 UI 入口(多 PLC 2b 的收尾缺口)
+//
+//   【为什么必须存在】
+//   2a/2b 把 N 台 PLC 的配置存读和运行期连接都做完了,但"变量属于哪台 PLC"
+//   至今没有任何入口:plcId 只能手改 JSON 或导 CSV。
+//   这不是"还没画界面",是 2b 的多 PLC 架构只完成了一半 ——
+//   配了 3 台 PLC,却没有任何正常途径把变量分配给它们。
+//
+//   【三个管理器都传进去,一个都不省】
+//   varMgr_   :数据源
+//   alarmMgr_ / actionMgr_ :查引用。传 nullptr 的后果不是"少个提示",
+//     是【查不到却看起来像没有】—— 对话框会把 blindSpots 记上并显示,
+//     但既然这里拿得到,就没理由让用户去面对一句免责说明。
+//   plcMgr_   :plcId 下拉的候选来源。
+void hmi::onVariableConfigClicked() {
+    qwhmi::plc::VariableConfigDialog dlg(varMgr_, alarmMgr_, actionMgr_, plcMgr_, this);
+    dlg.exec();
+}
 // ★ E.1a 演示画布(2026-09-20):弹独立 QGraphicsView 窗口 + 6 控件 + 绑现有 Variable
 //   临时 demo,后续 E.4 WYSIWYG 完整编辑器替换
 //   点击"演示画布"按钮 → 切换显示/隐藏 demoWindow_
 // ★ E.1b-2(2026-09-21):加 Trend + Table + AlarmList 3 个数据控件(6 → 9)
 void hmi::onDemoCanvasClicked() {
-    static QWidget* demoWindow_ = nullptr;       // 进程内单例
+    // ★★ 2026-10-19:demoWindow_ 由函数内 static 提成成员,理由见 onEditorClicked。
     if (demoWindow_ && demoWindow_->isVisible()) {
         demoWindow_->hide();
         return;

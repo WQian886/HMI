@@ -150,6 +150,12 @@ QStringList buildApplicationMenu(QMenuBar* bar, QObject* receiver) {
 
     // ---- 数据 ----
     QMenu* mData = bar->addMenu(QStringLiteral("数据(&D)"));
+    // ★★ 2026-10-19:变量配置放在"导出变量表"【正上面】,不是另起一个菜单。
+    //   为什么挨着放:这一对是同一个对象的两个方向 ——
+    //   "导出变量表"是把变量表【拿出来看】,"变量配置"是把它【改掉】。
+    //   用户找"变量在哪儿"时,这两个是最可能的目标,分开放等于让人找两遍。
+    addItem(mData, QStringLiteral("变量配置(&C)..."),
+            receiver, SLOT(onVariableConfigClicked()), &failures);
     addItem(mData, QStringLiteral("导出变量表(&V)..."),
             receiver, SLOT(onExportVariablesClicked()), &failures);
     addItem(mData, QStringLiteral("导出报警表(&A)..."),
