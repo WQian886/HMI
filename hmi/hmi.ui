@@ -200,177 +200,231 @@
      </layout>
     </item>
     <item>
-     <layout class="QHBoxLayout" name="tcpSendLayout">
-      <item>
-       <widget class="QLineEdit" name="sendEdit">
-        <property name="placeholderText"><string>01 03 00 00 0A</string></property>
-        <property name="minimumSize">
-         <size><width>200</width><height>40</height></size>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="sendButton">
-        <property name="minimumSize">
-         <size><width>80</width><height>40</height></size>
-        </property>
-        <property name="text"><string>发送</string></property>
-       </widget>
-      </item>
-     </layout>
-    </item>
-    <item>
-     <!-- 2026-07-07 重设计:阶段 2 第 4 练 — 通用 Modbus 发送面板
-          ★★ 2026-10-20(P1-d)重排:这一行原来是【四个高度】。
-            按 qss 的 min-height + padding 逐个算:
-              QLineEdit   自然高 ≈ padding 4+4 + 边框 1+1 + 行高 17 ≈ 27px
-                           (三个输入框只写了 maximumSize 40,没写 minimumSize
-                            —— maximumSize 只是【上限】,不占满就不生效)
-              QComboBox  min-height 20 + padding 4+4 + 边框 1+1       = 30px
-              QPushButton min-height 20 + padding 6+6 + 边框 1+1       = 34px
-              QLabel      跟着字号走                                   ≈ 20px
-            所以那一行渲染出来是 27/30/30/27/27/34/20 —— 七个控件七种高度。
-            而它上面那一行 tcpSendLayout 是 40/40 —— 同一个折叠面板里的
-            两行连彼此都对不齐,这就是"看着拼凑"的来源,不是配色问题。
-            下面把这一行全部固定成 40px,和上面那行对齐。
+     <!-- ==== debugTabs:调试区拆成两页 ================================================
+          2026-10-20(P1-e)。为什么拆:
 
-          【为什么补了 5 个可见标签】
-            从机 / 地址 / 数据 三个框原本只有 placeholder,
-            而它们三个都有【默认值】(1 / 0 / 1)——
-            placeholder 只在框是空的时候才显示,所以默认状态下
-            那一行是「1 | 读 | 保持寄存器 | 0 | 1 | 发送 | 两个减号」,
-            从头到尾没有一个字说明那几个框是干什么的。
-            ★ 这里必须说为什么那个占位符写成"两个减号":
-              XML 注释里不许出现连续两个 ASCII 减号(uic 会直接报
-              "Expected '>', but got '[a-zA-Z]'",而且行号指到的是
-              注释里的一句无关中文,不看上下文根本猜不出是它干的)。
-            补标签是为了让"哪个框干什么"不依赖于"框恰好是空的"。
-            ★ 五个标签共用 objectName "fieldLabel"(qss 里按 #fieldLabel 上色)。
-              Qt 允许重名 objectName(只有 QML 才要求唯一),
-              这里没有 findChild 会去找它们,换成五个名字只是多五条 qss。
+          【真 bug,不是审美】P1-c 把这两行折进可折叠面板时,用的是
+            centralLayout->takeAt() 把两个 QLayoutItem 摘出来,
+            再 addItem() 给一个新面板的布局。控件本身没搬,只是换了"谁负责摆放它"。
+            ★ 但新布局【没有重新 activate】—— 摘出来的两个布局保留了它们在
+              centralLayout 里的旧几何,于是运行时它们照旧画在老位置上:
+              实测 Modbus 那一行压在【启动/停止/复位】那一行上面,
+              而面板自己的槽位是一块全黑空白。
+              也就是说 P1-c 的折叠一展开就叠在一起,不是"看着不齐"。
 
-          【modbusResultLabel 删掉了 inline 样式表 —— 这次它不是死代码】
-            P1-c 删 stateLabel/connLabel 那两个 inline 样式表时,它们是死的
-            (运行时总被 statusBadgeStyle() 覆盖)。这一个不一样:
-            updateModbusLabel() 只 setText,不碰样式,所以那行
-            `color: blue; font-size: 14px; font-weight: bold;` 是【真的在显示】。
-            而深色主题下 #0000ff 压在 #232e3d 上,对比度只有 1.60:1
-            —— 而这张 qss 的文件头自己写着"正文至少 7:1"。
-            删掉之后回到 qss 的 #dfe8f2,对比度 11.09:1。
-            ★ inline 样式表还会让 qss 对这个控件【完全失效】,留着就是一条
-              与主题并行的第二套样式,改主题时它不会跟着变。 -->
-     <layout class="QHBoxLayout" name="modbusLayout">
-      <item>
-       <widget class="QLabel" name="modbusSlaveLabel">
-        <property name="objectName"><string>fieldLabel</string></property>
-        <property name="text"><string>从机</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="modbusSlaveEdit">
-        <property name="text"><string>1</string></property>
-        <property name="placeholderText"><string>1-255</string></property>
-        <property name="minimumSize">
-         <size><width>50</width><height>40</height></size>
-        </property>
-        <property name="maximumSize">
-         <size><width>50</width><height>40</height></size>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLabel" name="modbusRwLabel">
-        <property name="objectName"><string>fieldLabel</string></property>
-        <property name="text"><string>读写</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QComboBox" name="modbusRwCombo">
-        <property name="minimumSize">
-         <size><width>60</width><height>40</height></size>
-        </property>
-        <item><property name="text"><string>读</string></property></item>
-        <item><property name="text"><string>写</string></property></item>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLabel" name="modbusTypeLabel">
-        <property name="objectName"><string>fieldLabel</string></property>
-        <property name="text"><string>区域</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QComboBox" name="modbusTypeCombo">
-        <property name="minimumSize">
-         <size><width>120</width><height>40</height></size>
-        </property>
-        <item><property name="text"><string>保持寄存器</string></property></item>
-        <item><property name="text"><string>输入寄存器</string></property></item>
-        <item><property name="text"><string>线圈</string></property></item>
-        <item><property name="text"><string>离散输入</string></property></item>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLabel" name="modbusAddrLabel">
-        <property name="objectName"><string>fieldLabel</string></property>
-        <property name="text"><string>地址</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="modbusAddrEdit">
-        <property name="text"><string>0</string></property>
-        <property name="placeholderText"><string>寄存器号</string></property>
-        <property name="minimumSize">
-         <size><width>80</width><height>40</height></size>
-        </property>
-        <property name="maximumSize">
-         <size><width>80</width><height>40</height></size>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLabel" name="modbusDataLabel">
-        <property name="objectName"><string>fieldLabel</string></property>
-        <property name="text"><string>数据</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="modbusDataEdit">
-        <property name="text"><string>1</string></property>
-        <property name="placeholderText"><string>数量 / 值</string></property>
-        <!-- ★ 格式说明搬进 tooltip:placeholder 只有在框空的时候才看得见,
-               而这一栏【永远】有值(默认 1),所以放那儿等于没写。 -->
-        <property name="toolTip"><string>读:这里是数量(1-125)
-写:这里是值,逗号分隔,支持 0x 前缀(如 1, 2, 0xFF)</string></property>
-        <property name="minimumSize">
-         <size><width>160</width><height>40</height></size>
-        </property>
-        <property name="maximumSize">
-         <size><width>160</width><height>40</height></size>
-        </property>
-        <property name="maxLength"><uint>64</uint></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="modbusSendButton">
-        <property name="text"><string>发送</string></property>
-        <!-- ★ 和上面 tcpSendLayout 里的 sendButton 同尺寸(80x40)——
-             同一个折叠面板里两个同名按钮长得不一样,是最扎眼的一处不一致。 -->
-        <property name="minimumSize">
-         <size><width>80</width><height>40</height></size>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLabel" name="modbusResultLabel">
-        <property name="text"><string>--</string></property>
-        <property name="minimumSize">
-         <size><width>110</width><height>40</height></size>
-        </property>
-        <property name="alignment"><set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignVCenter</set></property>
-       </widget>
-      </item>
-     </layout>
+          【这次改法:不再在运行期搬布局】
+            两页直接写在 .ui 里,由 uic 生成正确的父子关系和几何 ——
+            声明式的东西就该声明式地写,不是靠 takeAt/insertWidget 拼出来。
+            centralLayout 里现在只有【一个】新 item(debugTabs),
+            buildDebugPanel() 只负责在它前面插一个开关按钮 ——
+            插一个【新建的】控件进布局是正常操作,没有"摘走旧 item"那类陈旧几何。
+
+          【为什么是"两页"而不是两个折叠区】
+            用户报的是"浮现在连接信息的上面,不好弄"。
+            两页之后同一时刻只显示一行,调试区高度从两行(80px)降到一行(约 40px),
+            既消掉了叠加,也把主画面让出 40px。
+            连接那一行(协议/IP/端口/连接/断开)【不进】页签 ——
+            连接是操作员的主动作,不该先点一下页签才够得着。
+            变量模型展示(varDisplayLayout)也不进:它是实时数据,属于主画面。
+
+          ★ 页内布局 margin 全设 0 —— QVBoxLayout 默认 9px 的四边留白
+            会把 40px 高的那一行挤到 58px,两页高度就不一样了。 -->
+     <widget class="QTabWidget" name="debugTabs">
+      <property name="minimumSize">
+       <size><width>0</width><height>76</height></size>
+      </property>
+      <widget class="QWidget" name="tabManualSend">
+       <attribute name="title"><string>手动发送</string></attribute>
+       <layout class="QVBoxLayout" name="tabManualSendLayout">
+        <property name="leftMargin"><number>0</number></property>
+        <property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property>
+        <property name="bottomMargin"><number>0</number></property>
+        <item>
+           <layout class="QHBoxLayout" name="tcpSendLayout">
+            <item>
+             <widget class="QLineEdit" name="sendEdit">
+              <property name="placeholderText"><string>01 03 00 00 0A</string></property>
+              <property name="minimumSize">
+               <size><width>200</width><height>40</height></size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="sendButton">
+              <property name="minimumSize">
+               <size><width>80</width><height>40</height></size>
+              </property>
+              <property name="text"><string>发送</string></property>
+             </widget>
+            </item>
+           </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tabModbus">
+       <attribute name="title"><string>Modbus</string></attribute>
+       <layout class="QVBoxLayout" name="tabModbusLayout">
+        <property name="leftMargin"><number>0</number></property>
+        <property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property>
+        <property name="bottomMargin"><number>0</number></property>
+        <item>
+           <!-- 2026-07-07 重设计:阶段 2 第 4 练 — 通用 Modbus 发送面板
+                ★★ 2026-10-20(P1-d)重排:这一行原来是【四个高度】。
+                  按 qss 的 min-height + padding 逐个算:
+                    QLineEdit   自然高 ≈ padding 4+4 + 边框 1+1 + 行高 17 ≈ 27px
+                                 (三个输入框只写了 maximumSize 40,没写 minimumSize
+                                  —— maximumSize 只是【上限】,不占满就不生效)
+                    QComboBox  min-height 20 + padding 4+4 + 边框 1+1       = 30px
+                    QPushButton min-height 20 + padding 6+6 + 边框 1+1       = 34px
+                    QLabel      跟着字号走                                   ≈ 20px
+                  所以那一行渲染出来是 27/30/30/27/27/34/20 —— 七个控件七种高度。
+                  而它上面那一行 tcpSendLayout 是 40/40 —— 同一个折叠面板里的
+                  两行连彼此都对不齐,这就是"看着拼凑"的来源,不是配色问题。
+                  下面把这一行全部固定成 40px,和上面那行对齐。
+
+                【为什么补了 5 个可见标签】
+                  从机 / 地址 / 数据 三个框原本只有 placeholder,
+                  而它们三个都有【默认值】(1 / 0 / 1)——
+                  placeholder 只在框是空的时候才显示,所以默认状态下
+                  那一行是「1 | 读 | 保持寄存器 | 0 | 1 | 发送 | 两个减号」,
+                  从头到尾没有一个字说明那几个框是干什么的。
+                  ★ 这里必须说为什么那个占位符写成"两个减号":
+                    XML 注释里不许出现连续两个 ASCII 减号(uic 会直接报
+                    "Expected '>', but got '[a-zA-Z]'",而且行号指到的是
+                    注释里的一句无关中文,不看上下文根本猜不出是它干的)。
+                  补标签是为了让"哪个框干什么"不依赖于"框恰好是空的"。
+                  ★ 五个标签共用 objectName "fieldLabel"(qss 里按 #fieldLabel 上色)。
+                    Qt 允许重名 objectName(只有 QML 才要求唯一),
+                    这里没有 findChild 会去找它们,换成五个名字只是多五条 qss。
+
+                【modbusResultLabel 删掉了 inline 样式表 —— 这次它不是死代码】
+                  P1-c 删 stateLabel/connLabel 那两个 inline 样式表时,它们是死的
+                  (运行时总被 statusBadgeStyle() 覆盖)。这一个不一样:
+                  updateModbusLabel() 只 setText,不碰样式,所以那行
+                  `color: blue; font-size: 14px; font-weight: bold;` 是【真的在显示】。
+                  而深色主题下 #0000ff 压在 #232e3d 上,对比度只有 1.60:1
+                  —— 而这张 qss 的文件头自己写着"正文至少 7:1"。
+                  删掉之后回到 qss 的 #dfe8f2,对比度 11.09:1。
+                  ★ inline 样式表还会让 qss 对这个控件【完全失效】,留着就是一条
+                    与主题并行的第二套样式,改主题时它不会跟着变。 -->
+           <layout class="QHBoxLayout" name="modbusLayout">
+            <item>
+             <widget class="QLabel" name="modbusSlaveLabel">
+              <property name="objectName"><string>fieldLabel</string></property>
+              <property name="text"><string>从机</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="modbusSlaveEdit">
+              <property name="text"><string>1</string></property>
+              <property name="placeholderText"><string>1-255</string></property>
+              <property name="minimumSize">
+               <size><width>50</width><height>40</height></size>
+              </property>
+              <property name="maximumSize">
+               <size><width>50</width><height>40</height></size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="modbusRwLabel">
+              <property name="objectName"><string>fieldLabel</string></property>
+              <property name="text"><string>读写</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="modbusRwCombo">
+              <property name="minimumSize">
+               <size><width>60</width><height>40</height></size>
+              </property>
+              <item><property name="text"><string>读</string></property></item>
+              <item><property name="text"><string>写</string></property></item>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="modbusTypeLabel">
+              <property name="objectName"><string>fieldLabel</string></property>
+              <property name="text"><string>区域</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="modbusTypeCombo">
+              <property name="minimumSize">
+               <size><width>120</width><height>40</height></size>
+              </property>
+              <item><property name="text"><string>保持寄存器</string></property></item>
+              <item><property name="text"><string>输入寄存器</string></property></item>
+              <item><property name="text"><string>线圈</string></property></item>
+              <item><property name="text"><string>离散输入</string></property></item>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="modbusAddrLabel">
+              <property name="objectName"><string>fieldLabel</string></property>
+              <property name="text"><string>地址</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="modbusAddrEdit">
+              <property name="text"><string>0</string></property>
+              <property name="placeholderText"><string>寄存器号</string></property>
+              <property name="minimumSize">
+               <size><width>80</width><height>40</height></size>
+              </property>
+              <property name="maximumSize">
+               <size><width>80</width><height>40</height></size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="modbusDataLabel">
+              <property name="objectName"><string>fieldLabel</string></property>
+              <property name="text"><string>数据</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="modbusDataEdit">
+              <property name="text"><string>1</string></property>
+              <property name="placeholderText"><string>数量 / 值</string></property>
+              <!-- ★ 格式说明搬进 tooltip:placeholder 只有在框空的时候才看得见,
+                     而这一栏【永远】有值(默认 1),所以放那儿等于没写。 -->
+              <property name="toolTip"><string>读:这里是数量(1-125)
+      写:这里是值,逗号分隔,支持 0x 前缀(如 1, 2, 0xFF)</string></property>
+              <property name="minimumSize">
+               <size><width>160</width><height>40</height></size>
+              </property>
+              <property name="maximumSize">
+               <size><width>160</width><height>40</height></size>
+              </property>
+              <property name="maxLength"><uint>64</uint></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="modbusSendButton">
+              <property name="text"><string>发送</string></property>
+              <!-- ★ 和上面 tcpSendLayout 里的 sendButton 同尺寸(80x40)——
+                   同一个折叠面板里两个同名按钮长得不一样,是最扎眼的一处不一致。 -->
+              <property name="minimumSize">
+               <size><width>80</width><height>40</height></size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="modbusResultLabel">
+              <property name="text"><string>--</string></property>
+              <property name="minimumSize">
+               <size><width>110</width><height>40</height></size>
+              </property>
+              <property name="alignment"><set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignVCenter</set></property>
+             </widget>
+            </item>
+           </layout>
+        </item>
+       </layout>
+      </widget>
+     </widget>
     </item>
     <item>
      <!-- 阶段 3.2:变量模型展示(订阅发布 UI 验证) -->

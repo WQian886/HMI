@@ -1083,73 +1083,57 @@ void hmi::buildMenus() {
     }
 }
 
-// ★★ 2026-10-20(P1-c):把两行协议调试工具折进一个可展开区。
-//   设计理由见 hmi.h 里 buildDebugPanel() 的声明处,这里只讲实现上的三个坑。
+// ★★ 2026-10-20(P1-e):调试区的展开/收起开关。
+//   设计理由(以及 P1-c 那个 takeAt 陈旧几何的真 bug)见 hmi.h 里 buildDebugPanel()
+//   的声明处,这里只讲实现。
 void hmi::buildDebugPanel() {
-    // ---- 坑 1:QLayoutItem 是"只有一个主人的东西" ----
-    //   addLayout() 交给 centralLayout 的那个 QLayoutItem,所有权同时属于布局;
-    //   直接 new 一个新布局把同样的控件 addWidget 进去,会造成两个父布局抢同一个控件。
-    //   正确做法是 takeAt() 把原 item 摘出来,再交给新布局 —— 控件本身没被搬,
-    //   只是换了个"谁负责摆放它"。这也是为什么这里必须先按对象名找位置,
-    //   而不是硬写 indexOf(2)。
-    const auto itemIndexOf = [this](QLayout* want) -> int {
+    // ---- 找 debugTabs 在 centralLayout 里的位置 ----
+    //   ★ 这里找的是【一个控件】,不是摘布局。
+    //     P1-c 用 takeAt() 把两个 QLayoutItem 摘给新面板 —— 摘出来的布局不会
+    //     重新激活,保留着旧几何,面板一展开 Modbus 那行就压在启动/停止/复位
+    //     那一行上面(P1-e 修掉的正是这个)。现在两页在 .ui 里由 uic 生成,
+    //     这里只需要知道"开关该插在谁前面"。
+    const auto widgetIndexOf = [this](QWidget* want) -> int {
         for (int i = 0; i < ui.centralLayout->count(); ++i) {
-            if (ui.centralLayout->itemAt(i)->layout() == want) return i;
+            if (ui.centralLayout->itemAt(i)->widget() == want) return i;
         }
         return -1;
     };
-    const int iSend   = itemIndexOf(ui.tcpSendLayout);
-    const int iModbus = itemIndexOf(ui.modbusLayout);
-    if (iSend < 0 || iModbus < 0) {
-        // 找不到就不折 —— 界面退回"两行摊开"这个旧样子,而不是少一个功能。
-        //   刻意不 qWarning:这不是错误,是 .ui 改了布局顺序的正常后果,
-        //   而警告会把日志刷满。真正会出事的是"折了一半",那种情况下面
-        //   少掉的那行会在界面上凭空消失 —— 那才是要喊的,见下面那句。
-        qCDebug(hmiApp) << "[调试面板] hmi.ui 里没找到 tcpSendLayout/modbusLayout,"
-                          "调试面板保持展开(功能没丢)";
+    const int iTabs = widgetIndexOf(ui.debugTabs);
+    if (iTabs < 0) {
+        // 找不到就不折 —— 调试区保持常驻可见,而不是少一个功能。
+        //   刻意不 qWarning:这不是错误,是 .ui 改了布局顺序的正常后果。
+        qCDebug(hmiApp) << "[调试面板] hmi.ui 里没找到 debugTabs,"
+                          "调试区保持常驻(功能没丢)";
         return;
-    }
-
-    QWidget* panel = new QWidget(this);
-    panel->setObjectName(QStringLiteral("debugPanel"));
-    QVBoxLayout* panelLayout = new QVBoxLayout(panel);
-    panelLayout->setContentsMargins(0, 0, 0, 0);
-    panelLayout->setSpacing(0);
-    // ★ 降序 takeAt:取走一个会让后面所有 item 的下标【前移 1】。
-    //   升序取的话,第二次拿到的下标已经指到别人身上了 ——
-    //   表现出来是"折完之后少了一行,而且少的那行内容还是对的",极难看出是顺序错了。
-    for (int idx : {qMax(iSend, iModbus), qMin(iSend, iModbus)}) {
-        panelLayout->addItem(ui.centralLayout->takeAt(idx));
     }
 
     QToolButton* toggle = new QToolButton(this);
     toggle->setObjectName(QStringLiteral("debugToggleButton"));
-    toggle->setText(QStringLiteral("调试面板(手动发送 / Modbus 帧)"));
+    toggle->setText(QStringLiteral("调试区(手动发送 / Modbus)"));
     toggle->setCheckable(true);
     toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     toggle->setArrowType(Qt::RightArrow);
     toggle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    // ---- 坑 2:插回去的位置 ----
-    //   用 iSend(两个里靠前的那个)插两样,顺序是 [开关][面板] ——
-    //   插反了开关会落在面板【下面】,点它时面板已经在开关上面了,
-    //   视觉上就成了"点一下开关,东西出现在开关上方"。
-    ui.centralLayout->insertWidget(iSend, toggle);
-    ui.centralLayout->insertWidget(iSend + 1, panel);
+    // 插在 debugTabs 【前面】—— 插反了开关会落在调试区下面,
+    // 点它时调试区已经在开关上面,视觉上就成了"点一下开关,东西出现在开关上方"。
+    ui.centralLayout->insertWidget(iTabs, toggle);
 
-    // ---- 坑 3:默认值 = 折叠,而且这是有意选的 ----
+    // ---- 默认值 = 折叠,而且这是有意选的 ----
     //   调试工具默认摊在生产界面上,等于每个人每次开机都要先把它关掉。
     //   ★ 但箭头/文字必须跟着 checked 一起变,否则用户点开之后不知道现在是什么状态。
-    const auto syncToggle = [toggle, panel](bool expanded) {
-        panel->setVisible(expanded);
+    QWidget* tabs = ui.debugTabs;
+    const auto syncToggle = [toggle, tabs](bool expanded) {
+        tabs->setVisible(expanded);
         toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
-        toggle->setText(expanded ? QStringLiteral("调试面板(点击收起)")
-                                 : QStringLiteral("调试面板(手动发送 / Modbus 帧)"));
+        toggle->setText(expanded ? QStringLiteral("调试区(点击收起)")
+                                 : QStringLiteral("调试区(手动发送 / Modbus)"));
     };
     connect(toggle, &QToolButton::toggled, this, syncToggle);
     // ★ syncToggle 要手动调一次而不是靠 toggled 发射:
     //   setChecked(false) 在"本来就是 false"时【不发射】toggled,
-    //   于是 panel 会停在 setVisible 的默认值(true)—— 折叠功能看着像没做。
+    //   于是调试区会停在 setVisible 的默认值(true)—— 折叠功能看着像没做。
     syncToggle(false);
 }
 
