@@ -68,6 +68,7 @@
 #include <QFile>
 #include <QString>
 #include <QColor>
+#include <QRegularExpression>   // ★ P1-c:查"选择器后面跟的是不是一个空 {}"
 #include <cmath>
 
 namespace {
@@ -84,8 +85,17 @@ struct RequiredRule {
 };
 
 const RequiredRule kRequiredRules[] = {
-    {"QPushButton",      "主画面 11 个按钮,没有一个统一样式就没法看"},
+    // ★ P1-b(2026-10-20):11 个 → 5 个。撤掉的 6 个功能进了菜单栏,
+    //   主画面只剩启动/停止/复位/连接/断开。为什么数字必须跟着改:
+    //   注释里的数字一旦和现实脱节,下一个人读到"11 个按钮"会以为
+    //   主画面还有一堆按钮没处理 —— 而他不会去数。
+    {"QPushButton",      "主画面 5 个常驻按钮,没有一个统一样式就没法看"},
     {"QPushButton:hover","只有默认态的话,用户不知道鼠标指到哪个了"},
+    // ★ P1-c(2026-10-20):调试面板的折叠开关是 QToolButton。
+    //   它是【另一个类】,不继承上面那几条 QPushButton 规则 ——
+    //   漏了这一段它就退回系统默认的浅灰方块,
+    //   夹在一堆深色控件里最扎眼,而主题测试对此本该无感。
+    {"QToolButton",      "调试面板的折叠开关;QToolButton 不继承 QPushButton 那几条,漏了会退回系统浅灰块"},
     {"QLineEdit",        "8 个输入框(连 PLC 那一片)全是系统默认白底"},
     {"QTableWidget",     "主画面 2 张表 + 5 个对话框里的表"},
     {"QHeaderView::section", "深色表格里表头不做对比,整张表会糊成一块"},
@@ -116,6 +126,13 @@ private slots:
     void themeIsNotEmpty();
 
     // ★ 关键选择器一个都不能少 —— 每个少一条,界面就塌一块。
+    //   ★★ 2026-10-20 加固:查的是"后面跟的是一条【真的、有声明的】规则",
+    //     不是"文本里出现过这个名字"。
+    //     加固的由来是一次负向对照:把规则删掉、只留 `QToolButton { }`,
+    //     原来的 contains() 照样绿 —— 而界面已经退回系统默认了。
+    //   负向对照(实跑):QToolButton 三条规则 → 只留空 {} 一行
+    //     → 红 1:allCriticalSelectorsArePresent("只剩一个空的 {}")
+    //       绿 8
     void allCriticalSelectorsArePresent();
 
     // ★ 主界面和对话框共用一张表,所以字号必须统一在样式表里,
@@ -177,16 +194,56 @@ void tst_Theme::themeIsNotEmpty() {
 }
 
 void tst_Theme::allCriticalSelectorsArePresent() {
-    QStringList missing;
+    // ★★ 这里查的【不是"文本里出现过"】,是"有一条真的、带声明的规则"。
+    //
+    //   【为什么必须查这么多】做 P1-c 的负向对照时发现的:
+    //   我把 QToolButton 那三条规则删掉、只留一行占位 `QToolButton { }`,
+    //   原来的 m_sheet.contains("QToolButton") 照样绿 ———
+    //   选择器还在,界面却已经退回系统默认的浅灰方块了。
+    //   而"这行还在、但里面是空的"恰恰是删除规则时最自然的手滑形状
+    //   (编辑器折叠代码块、或者只删了里面的属性)。
+    //   一个查不出这种失败的测试,不如没有:它让人以为有人看着。
+    //
+    //   【怎么查才算数】取出该选择器的第一条规则块({...}),
+    //   要求里面【去掉注释和空白之后】还剩东西。
+    QStringList missing, emptyRules;
     for (const RequiredRule& r : kRequiredRules) {
-        if (!m_sheet.contains(QLatin1String(r.selector))) {
-            missing << QStringLiteral("%1  (%2)")
-                          .arg(QLatin1String(r.selector), QLatin1String(r.why));
+        const QString sel = QLatin1String(r.selector);
+        const int at = m_sheet.indexOf(sel);
+        if (at < 0) {
+            missing << QStringLiteral("%1  (%2)").arg(sel, QLatin1String(r.why));
+            continue;
+        }
+        const int open = m_sheet.indexOf(QLatin1Char('{'), at);
+        // 找不到 '{' 的话,这个字符串多半出现在注释里 —— 同样算没写。
+        const int close = (open < 0) ? -1 : m_sheet.indexOf(QLatin1Char('}'), open);
+        if (open < 0 || close < 0) {
+            missing << QStringLiteral("%1  (%2) —— 只出现了名字,没有一条真的规则")
+                          .arg(sel, QLatin1String(r.why));
+            continue;
+        }
+        // 剥掉块里的注释,再看还剩不剩声明。
+        QString body = m_sheet.mid(open + 1, close - open - 1);
+        body.remove(QRegularExpression(QStringLiteral("/\\*.*?\\*/"),
+                                       QRegularExpression::DotMatchesEverythingOption));
+        const QStringList decls = body.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+        bool anyDecl = false;
+        for (const QString& d : decls) {
+            const QString code = d.trimmed();
+            if (!code.isEmpty() && !code.startsWith(QLatin1String("//"))) { anyDecl = true; break; }
+        }
+        if (!anyDecl) {
+            emptyRules << QStringLiteral("%1  (%2)").arg(sel, QLatin1String(r.why));
         }
     }
     QVERIFY2(missing.isEmpty(),
              qPrintable(QStringLiteral("样式表少了这些选择器,对应界面会退回系统默认:\n  %1")
                  .arg(missing.join(QStringLiteral("\n  ")))));
+    QVERIFY2(emptyRules.isEmpty(),
+             qPrintable(QStringLiteral(
+                 "这些选择器【只剩一个空的 {}】—— 等于没有规则,"
+                 "而界面上它已经退回系统默认了:\n  %1")
+                 .arg(emptyRules.join(QStringLiteral("\n  ")))));
 }
 
 void tst_Theme::fontSizeIsDefinedOnceInTheSheet() {

@@ -327,6 +327,26 @@ private:
     //   没有一行新逻辑 —— 菜单和按钮必须指向同一个实现,否则两边行为会分叉。
     void buildMenus();
 
+    // ★★ 2026-10-20(P1-c):把"手动发送 + 通用 Modbus 面板"两行折进一个可展开区。
+    //
+    //   【为什么在代码里重排,而不改 .ui】
+    //     这两行要从 centralLayout 里【搬进另一个容器】—— 那要新建 QWidget +
+    //     QVBoxLayout 并把两个 QLayoutItem 转进去,是 .ui 里"结构复杂的新增"。
+    //     本仓库对 .ui 的规矩正是:删整个自闭合 <item> 块可以,
+    //     而"加容器包住已有布局"属于改坏了也不报错的形状。
+    //     所以照 buildMenus() 的先例,改用代码重排 —— diff 里能看清搬了谁。
+    //
+    //   【为什么这两行值得折】它们是【协议调试工具】(手打 hex 帧、手填从站号
+    //     地址数量),现场操作员一天也不碰一次;而它们常年占着主画面两整行。
+    //     折起来之后主画面只剩"连上 → 看数据 → 启停",这才是操作员要的那三步。
+    //     默认折叠 —— 调试工具默认就该是收着的,不是默认摊在生产界面上。
+    //
+    //   【连接那一行为什么不折】protocolComboBox / ipEdit / portEdit /
+    //     connectButton / disconnectButton 是【主操作路径】,不是调试工具。
+    //     把它一起折起来 = 让人为了看现场先展开面板,那是把调试工具的地位
+    //     反过来了。所以分界线画在"主操作"和"协议细节"之间,不在"上面"和"下面"之间。
+    void buildDebugPanel();
+
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)
     QString currentProtocol_ = QStringLiteral("modbus");

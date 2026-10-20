@@ -60,6 +60,7 @@
 #include <QMenuBar>          // ★ 2026-10-16:菜单栏(hmi.ui:400 那个一直是空的)
 #include <QKeySequence>      // ★ 2026-10-16:菜单项快捷键(Ctrl+O / Ctrl+S)
 #include <QHeaderView>       // ★ 2026-10-10:两张表的列宽策略(报警名/Variable 吃余量)
+#include <QToolButton>       // ★ P1-c(2026-10-20):调试面板的展开/折叠开关
 
 // ★ 2026-10-10:两张表里"宽度最不确定"的那一列的下标。
 //   写成常量而不是裸 1 —— 报警名的宽度【取决于用户自己起什么名】,
@@ -177,62 +178,29 @@ hmi::hmi(QWidget *parent)
 	connect(ui.stopButton, &QPushButton::clicked, this, &hmi::onStopClicked);// 当 stopButton 被点击时调用 hmi::onStopClicked
 	connect(ui.resetButton, &QPushButton::clicked, this, &hmi::onResetClicked);//   当 resetButton 被点击时调用 hmi::onResetClicked
 
-    // ★ D.4.1(2026-09-20):D.4 CSV 导出按钮 — QFileDialog → CsvExporter
-    connect(ui.exportVariablesButton, &QPushButton::clicked, this, &hmi::onExportVariablesClicked);
-    connect(ui.exportAlarmsButton,    &QPushButton::clicked, this, &hmi::onExportAlarmsClicked);
-
-    // ★ E.1a 演示画布(2026-09-20)— 1-2 h 临时 demo,挂 6 控件到主窗口
-    //   hmi.ui 没改;程序化建按钮 + 绑 onClicked
-    auto* demoBtn = new QPushButton(QStringLiteral("演示画布"), this);
-    demoBtn->setMinimumSize(80, 32);
-    ui.buttonRowLayout->addWidget(demoBtn);
-    connect(demoBtn, &QPushButton::clicked, this, &hmi::onDemoCanvasClicked);
-
-    // ★ E.4a(2026-09-21):编辑器按钮 — 弹 EditorMainWindow 画布
-    //   左侧调色板(17 控件)+ 中间画布 + 右侧反射属性面板 + 文件菜单 JSON 存读
-    auto* editorBtn = new QPushButton(QStringLiteral("编辑器"), this);
-    editorBtn->setMinimumSize(80, 32);
-    ui.buttonRowLayout->addWidget(editorBtn);
-    connect(editorBtn, &QPushButton::clicked, this, &hmi::onEditorClicked);
-
-    // ★ E.5(2026-09-29):运行时画面按钮 — 显示【编辑器存的】工程文件
-    //   这是"编辑器 → 主画面"这条链的终点。以前没有这个按钮,
-    //   编辑器画完存盘,主画面永远看不到 —— E 阶段标完工时漏掉的就是这一环。
-    auto* runtimeBtn = new QPushButton(QStringLiteral("运行时画面"), this);
-    runtimeBtn->setMinimumSize(80, 32);
-    ui.buttonRowLayout->addWidget(runtimeBtn);
-    connect(runtimeBtn, &QPushButton::clicked, this, &hmi::onRuntimeCanvasClicked);
-
-    // ★ F4-a(2026-10-08):报警配置按钮 — 弹 AlarmConfigDialog
-    //   【为什么必须现在加】F4-a 的对话框 318e7b4 提交时【没有任何入口】,
-    //   用户点不开 —— 那就等于死代码。F2 滞回 / F2-c 屏蔽配完照样只能手改 JSON。
-    //   教训是这个项目自己记的(CHANGELOG 里 4 次"做完了但用不了"),
-    //   不该再犯第五次。
-    //   【为什么放在 buttonRowLayout 而不是 .ui】
-    //   跟上面 编辑器 / 运行时画面 两个按钮同一套路(hmi.cpp:105-116),
-    //   不用改 .ui 就不会撞 UIC 的 AUTOUIC 问题。
-    //   【权限】对话框内部 exec() 自查 EditProject,这里不重复查 ——
-    //   重复检查会出现"按钮该灰却没灰"和"点了才弹窗"两种不一致的反馈。
-    auto* alarmCfgBtn = new QPushButton(QStringLiteral("报警配置"), this);
-    alarmCfgBtn->setMinimumSize(80, 32);
-    alarmCfgBtn->setToolTip(QStringLiteral(
-        "查看/编辑报警的阈值、等级、滞回、屏蔽状态。\n"
-        "需要工程师(Engineer)或管理员(Admin)权限。"));
-    ui.buttonRowLayout->addWidget(alarmCfgBtn);
-    connect(alarmCfgBtn, &QPushButton::clicked, this, &hmi::onAlarmConfigClicked);
-
-    // ★ F5(2026-10-08):报警声音设置按钮 — 弹 AlarmSoundDialog
-    //   【为什么必须紧挨着「报警配置」而不是塞进某个菜单】
-    //   和上面同一个理由:报警声音不响,现场靠手改 JSON 是配不了的。
-    //   而"报警配置"就在隔壁,操作员要找报警相关设置时自然会找过来 ——
-    //   拆到菜单深处的结果就是那个设置永远没人动。
-    auto* alarmSoundBtn = new QPushButton(QStringLiteral("报警声音"), this);
-    alarmSoundBtn->setMinimumSize(80, 32);
-    alarmSoundBtn->setToolTip(QStringLiteral(
-        "设置各等级报警是否发声、未确认时是否重复提醒、静默时段(免打扰)。\n"
-        "需要工程师(Engineer)或管理员(Admin)权限。"));
-    ui.buttonRowLayout->addWidget(alarmSoundBtn);
-    connect(alarmSoundBtn, &QPushButton::clicked, this, &hmi::onAlarmSoundSettings);
+    // ★★ 2026-10-20(P1-b):按钮行里那些"功能在菜单里已经有一份"的按钮,
+    //   全部撤掉 —— 演示画布 / 编辑器 / 运行时画面 / 报警配置 / 报警声音,
+    //   以及 .ui 里的 保存工程 / 打开工程 / 导出历史CSV / 导出报警CSV。
+    //
+    //   【为什么撤】同一个动作有两个入口,后果有三样:
+    //     ① 权限要绑两遍,而且必须永远保持一致 —— P0 之前正是这个状态:
+    //        按钮绑了、菜单没绑,一个 Viewer 绕到菜单里就把权限整个绕过去了。
+    //     ② 主画面第一眼全是按钮(原来那一行 13 个 80x32 的小方块),
+    //        现场真正要按的那三个(启动/停止/复位)被淹没在里面。
+    //     ③ 改功能要记得改两处,漏一处就分叉,而分叉极难被发现。
+    //   菜单那一份是【同一个槽函数】,不是另写一遍 —— 功能一处没少。
+    //
+    //   【每个功能的入口现在在哪儿】(一个都没丢)
+    //     演示画布 / 编辑器 / 运行时画面 → 画面菜单(V)
+    //     报警配置 / 报警声音           → 报警菜单(A)
+    //     保存工程 / 打开工程           → 工程菜单(P),带 Ctrl+S / Ctrl+O
+    //     导出历史CSV / 导出报警CSV     → 数据菜单(D)
+    //
+    //   【★ 为什么这里【不】再 connect 一遍】
+    //     槽函数一个都没删,只是不再从按钮触发。菜单项在 buildMenus() 里连。
+    //     刻意不写"按钮隐藏但保留 connect"这种折中 —— 留着连着但看不见的
+    //     控件,权限绑定还挂在上面,测试还在数它,腐烂的时候没人知道。
+    //     直接不建,漏删的引用就变成【编译错误】。
 
     // ★★ 2026-10-16:菜单栏 —— 把散在按钮行里的功能收进菜单
     //
@@ -254,6 +222,13 @@ hmi::hmi(QWidget *parent)
     //     hmi.ui 里那个空 QMenuBar 保留不动 —— Qt 需要它在,
     //     menuBar() 拿到的就是它,菜单项加在它下面。
     buildMenus();
+
+    // ★★ 2026-10-20(P1-c):调试面板折叠(理由见 hmi.h buildDebugPanel 声明处)
+    //   必须在 buildMenus() 之后、updateUi() 之前 —— updateUi() 会碰
+    //   sendButton/modbusSendButton 的 enabled,那时候它们已经被折进容器里了。
+    //   顺序反了不会崩,但"折"这件事会在第一次刷新时跟 enabled 计算搅在一起,
+    //   出问题时很难看出是哪一步。
+    buildDebugPanel();
 
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
@@ -831,14 +806,10 @@ hmi::hmi(QWidget *parent)
         qCDebug(hmiApp) << "[hmi] default.json 找不到,候选路径:" << defaultPathCandidates;
     }
 
-    // ★ 阶段 6.2(2026-08-07):UI 保存按钮 → onSaveClicked(手动 connect,
-    //   因为 onSaveClicked 不符合 on_<objectName>_<signal>() 自动连接命名)
-    connect(ui.saveButton, &QPushButton::clicked, this, &hmi::onSaveClicked);
-
-    // ★ 阶段 6.4(2026-08-08):UI 打开工程按钮 → onOpenClicked(对称 saveButton)
-    connect(ui.openButton, &QPushButton::clicked, this, &hmi::onOpenClicked);
-
-
+    // ★★ P1-b(2026-10-20):保存/打开工程的入口从【按钮】搬到了【工程菜单】。
+    //   槽函数 onSaveClicked / onOpenClicked 一个字没改,只是不再从按钮触发 ——
+    //   MenuBuilder.cpp 的"打开工程/保存工程"两项 connect 到这两个槽(带 Ctrl+O/Ctrl+S)。
+    //   这里原来的两行 connect 随之撤掉:留着就是第二个入口,又回到"两处要保持一致"的老问题。
 
     // 阶段 4.x 写审计日志(2026-07-28):配置 auditTable + 接 WriteScheduler 信号
     ui.auditTable->setColumnCount(4);
@@ -870,46 +841,33 @@ hmi::hmi(QWidget *parent)
     qwhmi::auth::bindButtonEnable(ui.startButton, qwhmi::auth::Permission::WriteVariable);
     qwhmi::auth::bindButtonEnable(ui.stopButton,  qwhmi::auth::Permission::WriteVariable);
     qwhmi::auth::bindButtonEnable(ui.resetButton, qwhmi::auth::Permission::WriteVariable);
-    qwhmi::auth::bindButtonEnable(ui.saveButton,  qwhmi::auth::Permission::EditProject);
-    qwhmi::auth::bindButtonEnable(ui.openButton,  qwhmi::auth::Permission::EditProject);
 
-    // ★★ P0(2026-10-20):补上代码后加的那 5 个按钮 —— 之前一个都没绑。
+    // ★★ P1-b(2026-10-20):这条绑定还在,但它【不再只靠按钮了】。
     //
-    //   【为什么这件事拖到现在才被发现】
-    //     B4(2026-09-17)加 bindButtonEnable 时,按钮行里只有 .ui 里那 6 个,
-    //     于是就只绑了那 6 个。后来每次加功能都是"new 一个按钮丢进
-    //     buttonRowLayout"(见本构造函数前面几处),而每加一个都只写了
-    //     tooltip(里面写"需要工程师权限"),没人顺手补 bindButtonEnable。
-    //     于是权限门控在一个个加新按钮的过程中被悄悄漏光。
+    //   【背景】P0(2026-10-20)给代码后加的 5 个按钮补了 bindButtonEnable,
+    //   当时绑的是按钮。P1-b 把这些按钮全撤了 —— 入口搬到了菜单栏。
+    //   于是"编辑器的唯一门"从按钮变成了菜单项:
+    //     MenuBuilder.cpp 里"画面 → 编辑器"绑 EditProject,
+    //     那一条现在是 EditorMainWindow(内部零权限检查,直接
+    //     project_->saveToFile())的【唯一一道门】。
     //
-    //     ★ 后果不是"多点一下被拒",是【按钮亮着但没有防线】:
-    //       - 报警配置 / 报警声音:对话框内部自查 EditProject,点了弹"权限不足"。
-    //         属于 UX 问题 —— 摆了个点不动的按钮在那儿。
-    //       - 编辑器:**它内部【完全没有权限检查】**
-    //         (EditorMainWindow.cpp:948 直接 project_->saveToFile() 改写工程文件)。
-    //         所以这里绑的这条【是它唯一的门】,不是"多一层保险"。
-    //         一个 Viewer/Operator 点开编辑器就能存盘改写工程 —— 这是能改
-    //         现场设备配置的操作,不能只靠"他不会去点"。
+    //   【为什么两道门必须一致 —— 不一致比没有门更危险】
+    //     界面上灰着的按钮让人以为"这东西我不能碰",而菜单里却能点开。
+    //     所以 P1-a 把菜单 17 项逐项表态了(见 MenuBuilder.cpp 的权限表),
+    //     而且 addItem 的 perm 参数【没有默认值】—— 加一项不表态就编译不过。
+    //     这正是 P0 事故的形状:每加一个入口只写 tooltip,没人顺手补绑定,
+    //     漏一次不报错、测试也绿,权限在一个个加功能的过程中被悄悄漏光。
     //
-    //   【每个按钮为什么绑成现在这样 —— 都是查过实现,不是照抄同类】
-    //     编辑器      → EditProject  它能存盘改写工程文件(唯一门,见上)
-    //     报警配置    → EditProject  AlarmConfigDialog.cpp:1353 自查同一个权限,
-    //                               按钮这层必须一致,否则按钮亮着却弹窗拒绝
-    //     报警声音    → EditProject  AlarmSoundDialog.cpp:281 同上
-    //     运行时画面  → 【不绑】     它只读,不写任何东西。任何角色都该能看画面 ——
-    //                               绑了就把"看现场"这个最基本的动作给禁掉了
-    //     演示画布    → 【不绑】     只读的演示控件;它是开发期用的,
-    //                               真正该做的是发布时摘掉这个按钮(另议),不是灰它
-    //
-    //   【为什么这层是"置灰"不是"隐藏"】
-    //     隐藏会让 Engineer 换台电脑登录后突然找不到报警配置,
-    //     以为自己装错了版本。置灰 + tooltip 已有的"需要工程师权限"
-    //     把"有这个功能、但你不能改"这件事说清楚了。
-    qwhmi::auth::bindButtonEnable(editorBtn,     qwhmi::auth::Permission::EditProject);
-    qwhmi::auth::bindButtonEnable(alarmCfgBtn,   qwhmi::auth::Permission::EditProject);
-    qwhmi::auth::bindButtonEnable(alarmSoundBtn, qwhmi::auth::Permission::EditProject);
-    // runtimeBtn / demoBtn:只读,任何角色都要能看 —— 刻意不绑。
-    //   漏绑是 bug,这里的不绑是决定 —— 用注释写清,免得下次有人"顺手补上"。
+    //   【P0 补的那几条绑定为什么现在一条都不剩】
+    //     editorBtn / alarmCfgBtn / alarmSoundBtn 三个按钮对象本身没了,
+    //     runtimeBtn / demoBtn 同样。对应的权限现在由【菜单项】承担,
+    //     判定依据一个字没改(查过各对话框内部自查的是哪个权限):
+    //       编辑器      → EditProject  它能存盘改写工程文件(唯一门)
+    //       报警配置    → EditProject  AlarmConfigDialog.cpp:1353 自查同一权限
+    //       报警声音    → EditProject  AlarmSoundDialog.cpp:281 同上
+    //       运行时画面  → 【不绑】     只读,任何角色都要能看现场画面
+    //       演示画布    → 【不绑】     只读的演示控件
+    //     漏绑是 bug,刻意不绑是决定 —— 都写在 MenuBuilder.cpp 的权限表里。
 }
 
 
@@ -1123,6 +1081,76 @@ void hmi::buildMenus() {
         qCWarning(hmiApp) << "[菜单]" << f
                            << "——该菜单项点了不会有任何反应(槽名和 hmi 里的对不上)";
     }
+}
+
+// ★★ 2026-10-20(P1-c):把两行协议调试工具折进一个可展开区。
+//   设计理由见 hmi.h 里 buildDebugPanel() 的声明处,这里只讲实现上的三个坑。
+void hmi::buildDebugPanel() {
+    // ---- 坑 1:QLayoutItem 是"只有一个主人的东西" ----
+    //   addLayout() 交给 centralLayout 的那个 QLayoutItem,所有权同时属于布局;
+    //   直接 new 一个新布局把同样的控件 addWidget 进去,会造成两个父布局抢同一个控件。
+    //   正确做法是 takeAt() 把原 item 摘出来,再交给新布局 —— 控件本身没被搬,
+    //   只是换了个"谁负责摆放它"。这也是为什么这里必须先按对象名找位置,
+    //   而不是硬写 indexOf(2)。
+    const auto itemIndexOf = [this](QLayout* want) -> int {
+        for (int i = 0; i < ui.centralLayout->count(); ++i) {
+            if (ui.centralLayout->itemAt(i)->layout() == want) return i;
+        }
+        return -1;
+    };
+    const int iSend   = itemIndexOf(ui.tcpSendLayout);
+    const int iModbus = itemIndexOf(ui.modbusLayout);
+    if (iSend < 0 || iModbus < 0) {
+        // 找不到就不折 —— 界面退回"两行摊开"这个旧样子,而不是少一个功能。
+        //   刻意不 qWarning:这不是错误,是 .ui 改了布局顺序的正常后果,
+        //   而警告会把日志刷满。真正会出事的是"折了一半",那种情况下面
+        //   少掉的那行会在界面上凭空消失 —— 那才是要喊的,见下面那句。
+        qCDebug(hmiApp) << "[调试面板] hmi.ui 里没找到 tcpSendLayout/modbusLayout,"
+                          "调试面板保持展开(功能没丢)";
+        return;
+    }
+
+    QWidget* panel = new QWidget(this);
+    panel->setObjectName(QStringLiteral("debugPanel"));
+    QVBoxLayout* panelLayout = new QVBoxLayout(panel);
+    panelLayout->setContentsMargins(0, 0, 0, 0);
+    panelLayout->setSpacing(0);
+    // ★ 降序 takeAt:取走一个会让后面所有 item 的下标【前移 1】。
+    //   升序取的话,第二次拿到的下标已经指到别人身上了 ——
+    //   表现出来是"折完之后少了一行,而且少的那行内容还是对的",极难看出是顺序错了。
+    for (int idx : {qMax(iSend, iModbus), qMin(iSend, iModbus)}) {
+        panelLayout->addItem(ui.centralLayout->takeAt(idx));
+    }
+
+    QToolButton* toggle = new QToolButton(this);
+    toggle->setObjectName(QStringLiteral("debugToggleButton"));
+    toggle->setText(QStringLiteral("调试面板(手动发送 / Modbus 帧)"));
+    toggle->setCheckable(true);
+    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toggle->setArrowType(Qt::RightArrow);
+    toggle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
+    // ---- 坑 2:插回去的位置 ----
+    //   用 iSend(两个里靠前的那个)插两样,顺序是 [开关][面板] ——
+    //   插反了开关会落在面板【下面】,点它时面板已经在开关上面了,
+    //   视觉上就成了"点一下开关,东西出现在开关上方"。
+    ui.centralLayout->insertWidget(iSend, toggle);
+    ui.centralLayout->insertWidget(iSend + 1, panel);
+
+    // ---- 坑 3:默认值 = 折叠,而且这是有意选的 ----
+    //   调试工具默认摊在生产界面上,等于每个人每次开机都要先把它关掉。
+    //   ★ 但箭头/文字必须跟着 checked 一起变,否则用户点开之后不知道现在是什么状态。
+    const auto syncToggle = [toggle, panel](bool expanded) {
+        panel->setVisible(expanded);
+        toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+        toggle->setText(expanded ? QStringLiteral("调试面板(点击收起)")
+                                 : QStringLiteral("调试面板(手动发送 / Modbus 帧)"));
+    };
+    connect(toggle, &QToolButton::toggled, this, syncToggle);
+    // ★ syncToggle 要手动调一次而不是靠 toggled 发射:
+    //   setChecked(false) 在"本来就是 false"时【不发射】toggled,
+    //   于是 panel 会停在 setVisible 的默认值(true)—— 折叠功能看着像没做。
+    syncToggle(false);
 }
 
 void hmi::onShowCapabilities() {
@@ -1741,8 +1769,9 @@ void hmi::updateButtons() {
     bool isReconnecting = (connState_ == ConnState::Reconnecting);
 
     // ★ B4 修复(2026-09-17):updateButtons 之前会覆盖 bindButtonEnable 的 setEnabled,
-    //   导致 Viewer 连了 PLC 后 startButton/stopButton/resetButton 变亮(saveButton/openButton
-    //   不在 updateButtons 里所以 B4 生效)。修法:加 canWrite 闸门,跟 B4 形成 AND。
+    //   导致 Viewer 连了 PLC 后 startButton/stopButton/resetButton 变亮
+    //   (当时的 saveButton/openButton 不在 updateButtons 里,所以 B4 生效)。
+    //   修法:加 canWrite 闸门,跟 B4 形成 AND。
     //   切换用户时 B4 自动重算,updateButtons 也会被 onTcpConnected/disconnected/state 变化触发重跑,
     //   两者协同 → Viewer 永远灰,Admin 在 Stopped+已连 时亮。
     const bool canWrite = qwhmi::auth::checkPermission(
@@ -1798,7 +1827,7 @@ void hmi::onSaveClicked() {
         QMessageBox::warning(this, "保存失败", "project_ 指针为空");
         return;
     }
-    // ★ 阶段 6.4 加强(2026-08-08):QFileDialog 选保存路径(跟 openButton 对称)
+    // ★ 阶段 6.4 加强(2026-08-08):QFileDialog 选保存路径(跟"打开工程"对称)
     //   【背景】6.2 写死到 test_save.json,6.4 改成用户选路径(实际工业 HMI 用法)
     //   【取舍】getSaveFileName 跟 getOpenFileName 对称,过滤器一致
     //   【参照】Wqian 2026-08-08 "把'保存工程'也改成 QFileDialog 选路径"
@@ -1815,8 +1844,10 @@ void hmi::onSaveClicked() {
     }
 }
 
-// ★ 阶段 6.4(2026-08-08):UI 打开工程按钮槽函数 → 弹 QFileDialog 选 .json → loadFromFile
-//   【背景】6.4 把"打开工程"这条 UI 入口补上,跟 saveButton 对称
+// ★ 阶段 6.4(2026-08-08):UI 打开工程槽函数 → 弹 QFileDialog 选 .json → loadFromFile
+//   【背景】6.4 把"打开工程"这条 UI 入口补上,跟"保存工程"对称
+//   【P1-b 之后】这个槽不再从按钮触发,只从 工程→打开工程 菜单项(Ctrl+O)触发;
+//     槽本身一行没改 —— 改的只是"从哪儿能点到它"。
 //   【流程】QFileDialog → 选文件 → project_->loadFromFile()(6.3 已实现,失败走 loadError 弹窗)
 //   【取舍】启动默认读 default.json 已经在构造函数里(6.3 修 Bug #3 时写好的),此 slot 只供用户手动切工程
 //   【参照】Wqian 2026-08-08 阶段 6.4 拍板

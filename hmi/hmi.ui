@@ -16,12 +16,36 @@
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="centralLayout">
     <item>
-     <!-- ★ 阶段 6.4 加强(2026-08-08):5 按钮 + 计时 6 个元素横排,80x32 紧凑布局(替代原 5 行竖排) -->
+     <!-- ★★ 2026-10-20(P1-b):按钮行只剩"运行控制 + 计时"。
+          原来这一行有 9 个元素(启动/停止/复位/保存工程/打开工程/导出历史CSV/
+          导出报警CSV/演示画布/编辑器/运行时画面/报警配置/报警声音 + 计数器),
+          每个 80x32 一排,主画面第一眼全是按钮 —— 而其中 8 个的功能
+          在菜单栏里【已经有一模一样的入口】(工程/数据/画面/报警四个菜单)。
+          同一个动作两个入口,权限还得绑两遍、还得永远保持一致 ——
+          P1-a 之前正是这个状态:按钮绑了、菜单没绑。
+          所以这里撤掉重复的那几个,只保留"主画面不放就会找不到"的三键。
+
+          【撤掉的是哪几个、挪到哪】(功能一处没少,只是换了位置)
+            保存工程/打开工程 → 工程菜单(还有 Ctrl+S / Ctrl+O)
+            导出历史CSV/导出报警CSV → 数据菜单
+            演示画布/编辑器/运行时画面 → 画面菜单
+            报警配置/报警声音 → 报警菜单
+          【留下的三个为什么必须留在主画面】启动/停止/复位是现场操作员
+            一天按几十次的动作。塞进菜单 = 每次都要先展开菜单再点第二层 ——
+            戴手套的时候鼠标慢,菜单展开那一下就是差别。
+
+          ★ 为什么可以直接从 .ui 删掉而不是在代码里 hide:
+            uic 生成的 ui.saveButton 等成员会一起消失,于是 hmi.cpp 里
+            任何一处漏删的引用是【编译错误】,而不是"控件还在但看不见、
+            权限还绑着、测试还在数它"这种静默腐烂。
+            这跟"不手改 .ui 加 QMenu"的规矩不冲突:那条规矩针对的是
+            加结构复杂的元素(元素顺序/属性格式写错会静默不生效),
+            这里是删一整个自闭合的 <item> 块,uic 对它的处理是确定的。 -->
      <layout class="QHBoxLayout" name="buttonRowLayout">
       <item>
        <widget class="QPushButton" name="startButton">
         <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
+         <size><width>120</width><height>52</height></size>
         </property>
         <property name="text"><string>启动</string></property>
        </widget>
@@ -29,7 +53,7 @@
       <item>
        <widget class="QPushButton" name="stopButton">
         <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
+         <size><width>120</width><height>52</height></size>
         </property>
         <property name="text"><string>停止</string></property>
        </widget>
@@ -38,74 +62,47 @@
        <widget class="QPushButton" name="resetButton">
         <property name="enabled"><bool>true</bool></property>
         <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
+         <size><width>120</width><height>52</height></size>
         </property>
         <property name="text"><string>复位</string></property>
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="saveButton">
-        <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
+       <spacer name="buttonRowSpacer">
+        <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0">
+         <size><width>40</width><height>20</height></size>
         </property>
-        <property name="text"><string>保存工程</string></property>
-       </widget>
+       </spacer>
       </item>
       <item>
-       <!-- ★ 阶段 6.4:UI 打开工程按钮(跟 saveButton 对称) -->
-       <widget class="QPushButton" name="openButton">
-        <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
-        </property>
-        <property name="text"><string>打开工程</string></property>
-       </widget>
-      </item>
-      <item>
-       <!-- ★ D.4.1(2026-09-20):导出历史 CSV(D.4 CsvExporter 接 UI) -->
-       <widget class="QPushButton" name="exportVariablesButton">
-        <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
-        </property>
-        <property name="text"><string>导出历史CSV</string></property>
-       </widget>
-      </item>
-      <item>
-       <!-- ★ D.4.1(2026-09-20):导出报警 CSV(D.4 CsvExporter 接 UI) -->
-       <widget class="QPushButton" name="exportAlarmsButton">
-        <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
-        </property>
-        <property name="text"><string>导出报警CSV</string></property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="numberLineEdit">
-        <property name="minimumSize">
-         <size><width>80</width><height>32</height></size>
-        </property>
-        <property name="readOnly"><bool>true</bool></property>
-        <property name="text"><string>0</string></property>
-        <property name="alignment">
-         <set>Qt::AlignmentFlag::AlignCenter</set>
-        </property>
-        <property name="styleSheet">
-         <string>font-size: 18px; font-weight: bold; color: black; background-color: white;</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </item>
-    <item>
-     <layout class="QHBoxLayout" name="stateConnLayout">
-      <item>
+       <!-- ★★ P1-c(2026-10-20):状态徽章从原来那一整行搬上来,跟运行控制同一行。
+
+            【为什么要搬 —— 这就是"状态常驻"】
+              原来 stateConnLayout 是 centralLayout 里【单独一行】,排在按钮行下面。
+              而 centralLayout 里还压着一个 bottomTabs(最小高度 420)。
+              纵向空间不够时,挤掉的一定是这行 —— 于是"状态"这个操作员最先
+              要看的东西,反而是全屏唯一可能被压没的东西。
+              搬进按钮行之后它跟 启动/停止/复位 处在同一条 52px 高的带子上,
+              而那条带子是整个窗口最不可能被挤掉的一行(它撑着三个 120x52 的按钮)。
+              ★ 顺带的好处:状态徽章现在紧挨着它描述的那三个按钮 ——
+                按"启动"之后看到的是旁边一行"状态:运行中",而不是往下扫一眼。
+
+            【为什么这里删掉了两个 inline 样式表】
+              原来 stateLabel/connLabel 上写着 "color: red; font-size: 18px"。
+              那是【死代码】:构造函数里的 updateUi() 一上来就调
+              updateStateLabel()/updateConnLabel(),两者都 setStyleSheet(
+              statusBadgeStyle(...)) 把它整个覆盖掉了 —— 也就是说这两行
+              从来没有生效过,只是让人以为"徽章配色在 .ui 里定义"。
+              真正定义它的是 hmi.cpp 的 statusBadgeStyle()(tst_Theme 那条
+              badgeFontSizesStayInCodeNotInTheSheet 钉的就是这件事)。
+              删掉的理由跟 numberLineEdit 那两个一样:inline 样式表会让 qss
+              对这个控件【完全失效】,而且它让人以为改 .ui 能改到徽章。 -->
        <widget class="QLabel" name="stateLabel">
         <property name="minimumSize">
-         <size><width>150</width><height>40</height></size>
+         <size><width>150</width><height>52</height></size>
         </property>
-        <property name="styleSheet">
-         <string>color: red; font-size: 18px; font-weight: bold;</string>
-        </property>
-        <property name="text"><string>已停止</string></property>
+        <property name="text"><string>状态:已停止</string></property>
         <property name="alignment">
          <set>Qt::AlignmentFlag::AlignCenter</set>
         </property>
@@ -114,15 +111,37 @@
       <item>
        <widget class="QLabel" name="connLabel">
         <property name="minimumSize">
-         <size><width>200</width><height>40</height></size>
+         <size><width>200</width><height>52</height></size>
         </property>
-        <property name="styleSheet">
-         <string>color: blue; font-size: 18px; font-weight: bold;</string>
-        </property>
-        <property name="text"><string>未连接</string></property>
+        <property name="text"><string>状态:已断开</string></property>
         <property name="alignment">
          <set>Qt::AlignmentFlag::AlignCenter</set>
         </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="numberLineEdit">
+        <property name="minimumSize">
+         <size><width>110</width><height>52</height></size>
+        </property>
+        <property name="maximumSize">
+         <size><width>160</width><height>16777215</height></size>
+        </property>
+        <property name="readOnly"><bool>true</bool></property>
+        <property name="text"><string>0</string></property>
+        <property name="alignment">
+         <set>Qt::AlignmentFlag::AlignCenter</set>
+        </property>
+        <!-- ★ 原来这里是 "color: black; background-color: white" 的 inline 样式表。
+             深色主题下它是一个刺眼的白色方块,而且 inline 样式表会让 qss
+             对这个控件【完全失效】—— 想靠主题改它是不可能的。
+             删掉它,配色交给 qss 里那两条:
+               · QLineEdit            —— 深底浅字 + 圆角边框(跟别的输入框一致)
+               · QLineEdit:read-only  —— 虚线边框 + 灰字,【只读要看起来就是只读】
+             它就是只读的(由 counter 定时写入),所以走 :read-only 那条。
+             它不是状态徽章、没有 inline 样式表,字号因此由 qss 的
+             QWidget{font-size:11pt} 统一管 —— tst_Theme 的
+             fontSizeIsDefinedOnceInTheSheet 也才不会被它多出一个字号。 -->
        </widget>
       </item>
      </layout>
