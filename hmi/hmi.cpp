@@ -872,6 +872,44 @@ hmi::hmi(QWidget *parent)
     qwhmi::auth::bindButtonEnable(ui.resetButton, qwhmi::auth::Permission::WriteVariable);
     qwhmi::auth::bindButtonEnable(ui.saveButton,  qwhmi::auth::Permission::EditProject);
     qwhmi::auth::bindButtonEnable(ui.openButton,  qwhmi::auth::Permission::EditProject);
+
+    // ★★ P0(2026-10-20):补上代码后加的那 5 个按钮 —— 之前一个都没绑。
+    //
+    //   【为什么这件事拖到现在才被发现】
+    //     B4(2026-09-17)加 bindButtonEnable 时,按钮行里只有 .ui 里那 6 个,
+    //     于是就只绑了那 6 个。后来每次加功能都是"new 一个按钮丢进
+    //     buttonRowLayout"(见本构造函数前面几处),而每加一个都只写了
+    //     tooltip(里面写"需要工程师权限"),没人顺手补 bindButtonEnable。
+    //     于是权限门控在一个个加新按钮的过程中被悄悄漏光。
+    //
+    //     ★ 后果不是"多点一下被拒",是【按钮亮着但没有防线】:
+    //       - 报警配置 / 报警声音:对话框内部自查 EditProject,点了弹"权限不足"。
+    //         属于 UX 问题 —— 摆了个点不动的按钮在那儿。
+    //       - 编辑器:**它内部【完全没有权限检查】**
+    //         (EditorMainWindow.cpp:948 直接 project_->saveToFile() 改写工程文件)。
+    //         所以这里绑的这条【是它唯一的门】,不是"多一层保险"。
+    //         一个 Viewer/Operator 点开编辑器就能存盘改写工程 —— 这是能改
+    //         现场设备配置的操作,不能只靠"他不会去点"。
+    //
+    //   【每个按钮为什么绑成现在这样 —— 都是查过实现,不是照抄同类】
+    //     编辑器      → EditProject  它能存盘改写工程文件(唯一门,见上)
+    //     报警配置    → EditProject  AlarmConfigDialog.cpp:1353 自查同一个权限,
+    //                               按钮这层必须一致,否则按钮亮着却弹窗拒绝
+    //     报警声音    → EditProject  AlarmSoundDialog.cpp:281 同上
+    //     运行时画面  → 【不绑】     它只读,不写任何东西。任何角色都该能看画面 ——
+    //                               绑了就把"看现场"这个最基本的动作给禁掉了
+    //     演示画布    → 【不绑】     只读的演示控件;它是开发期用的,
+    //                               真正该做的是发布时摘掉这个按钮(另议),不是灰它
+    //
+    //   【为什么这层是"置灰"不是"隐藏"】
+    //     隐藏会让 Engineer 换台电脑登录后突然找不到报警配置,
+    //     以为自己装错了版本。置灰 + tooltip 已有的"需要工程师权限"
+    //     把"有这个功能、但你不能改"这件事说清楚了。
+    qwhmi::auth::bindButtonEnable(editorBtn,     qwhmi::auth::Permission::EditProject);
+    qwhmi::auth::bindButtonEnable(alarmCfgBtn,   qwhmi::auth::Permission::EditProject);
+    qwhmi::auth::bindButtonEnable(alarmSoundBtn, qwhmi::auth::Permission::EditProject);
+    // runtimeBtn / demoBtn:只读,任何角色都要能看 —— 刻意不绑。
+    //   漏绑是 bug,这里的不绑是决定 —— 用注释写清,免得下次有人"顺手补上"。
 }
 
 

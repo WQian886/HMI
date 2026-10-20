@@ -337,6 +337,10 @@ add_hmi_test(tst_InactivityWatcher)
 add_hmi_test(tst_Permission)
 # 阶段 B · B4
 add_hmi_test(tst_UIPermission)
+# ★ P0(2026-10-20):tst_UIPermission 要读 hmi.cpp / EditorMainWindow.cpp 的源码文本,
+#   验"主画面那几个按钮到底绑没绑权限"(hmi_core 不编 hmi.cpp,链不到真实控件,
+#   读源码是唯一能钉住"接线"的形状,同 tst_MenuBar / tst_Theme)。
+target_compile_definitions(tst_UIPermission PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 # 阶段 B · B5
 add_hmi_test(tst_AuditLog)
 add_hmi_test(tst_AuditE2E)
