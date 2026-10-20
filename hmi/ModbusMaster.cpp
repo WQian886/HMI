@@ -4,6 +4,59 @@
 #include <QDebug>
 
 // ============================================================
+// 通讯帧监视(2026-10-20)的摘要生成
+// ============================================================
+//
+// 【为什么摘要在这里生成,而不是让界面去猜】
+//   界面拿到的是原始字节。要显示"FC03 读保持寄存器 addr=0x0000 count=2",
+//   就得有人懂 Modbus 的功能码 —— 而界面层不该懂协议。
+//   所以协议相关的翻译留在协议这一层(这里),界面只负责显示字符串。
+//
+// 【为什么用匿名 namespace】
+//   这些是纯内部helper,不需要外部链接,也不想污染 qwhmi::comm 命名空间。
+namespace {
+
+QString fcHex(quint8 fc) {
+    return QStringLiteral("%1").arg(fc, 2, 16, QChar('0')).toUpper();
+}
+
+// 功能码 → 人话。
+// ★ 异常响应(fc & 0x80)必须单列 —— 它跟原功能码是【两件事】:
+//   0x83 是"对 0x03 的异常响应",不是"功能码 0x83"。
+//   把 0x80 位掩掉再查表,界面就会把异常显示成正常响应,
+//   那正好是现场最需要看清的那种帧。
+QString fcName(quint8 fc) {
+    if (fc & 0x80) {
+        return QStringLiteral("异常响应(原功能码 %1)").arg(fcHex(fc & 0x7F));
+    }
+    switch (fc) {
+        case 0x01: return QStringLiteral("读线圈");
+        case 0x02: return QStringLiteral("读离散输入");
+        case 0x03: return QStringLiteral("读保持寄存器");
+        case 0x04: return QStringLiteral("读输入寄存器");
+        case 0x05: return QStringLiteral("写单线圈");
+        case 0x06: return QStringLiteral("写单寄存器");
+        case 0x0F: return QStringLiteral("写多线圈");
+        case 0x10: return QStringLiteral("写多寄存器");
+        default:   return QStringLiteral("未知功能码 %1").arg(fcHex(fc));
+    }
+}
+
+// 数据区域 → 人话(QModbusDataUnit::RegisterType)
+QString areaName(QModbusDataUnit::RegisterType t) {
+    switch (t) {
+        case QModbusDataUnit::DiscreteInputs:  return QStringLiteral("离散输入");
+        case QModbusDataUnit::Coils:           return QStringLiteral("线圈");
+        case QModbusDataUnit::InputRegisters:  return QStringLiteral("输入寄存器");
+        case QModbusDataUnit::HoldingRegisters:return QStringLiteral("保持寄存器");
+        case QModbusDataUnit::Invalid:         break;
+    }
+    return QStringLiteral("未知区域");
+}
+
+} // namespace
+
+// ============================================================
 // 阶段 2 第 4 练 — 重设计版
 // 作者:Wqian + 子衿
 // 时间:2026-07-07
@@ -23,6 +76,17 @@ ModbusMaster::ModbusMaster(QObject* parent) : QObject(parent) {
                 p.reply->setFinished(true);
                 p.reply->deleteLater();
             }
+        }
+        // ★ 2026-10-20:断线时若有在途请求,记一条"作废"帧。
+        //   【为什么必须在【清 pending_ 之前】记】
+        //     数量得从 pending_ 里数,清完了就不知道刚才有几帧在途。
+        //     ★ 第一版把这个判断写在 pending_.clear() 后面 —— 那样它永远是真的 false,
+        //       这条帧永远不出现,而代码读起来完全正常。
+        //       (跟本仓库"两处数字打架"那类坑同一个形状:写错了不报错,只是永远不发生。)
+        if (!pending_.isEmpty()) {
+            emit frameTraced(qwhmi::comm::FrameDir::Error, QByteArray(),
+                             QStringLiteral("连接断开,%1 个在途请求作废").arg(pending_.size()),
+                             -1);
         }
         pending_.clear();
         recvBuf_.clear();
@@ -279,6 +343,21 @@ QModbusReply* ModbusMaster::sendReadRequest(const QModbusDataUnit& readUnit, int
     p.requestId     = requestId;  // 阶段 3.3:PollScheduler 用来反查
     pending_.insert(tid, p);
 
+    // ★ 2026-10-20:通讯帧监视 —— 记录这一帧【发出】。
+    //   【为什么放在 pending_.insert 之后】
+    //     这样"发出去的这一帧"和"登记在册的这个请求"是同一件事 ——
+    //     后面 onTcpReadyRead 靠 TID 找回它算往返耗时,两边必须指同一个 TID。
+    //   【为什么耗时给 -1】发出的时候还不知道要等多久。
+    //     填 0 会被 avgElapsedMs() 当成一次 0ms 的合法样本,把平均值拉到假的 0。
+    {
+        const QString addrHex = QStringLiteral("%1").arg(addr, 4, 16, QChar('0')).toUpper();
+        emit frameTraced(qwhmi::comm::FrameDir::Tx, frame,
+                         QStringLiteral("FC%1 %2 addr=0x%3 count=%4")
+                             .arg(fcHex(fc), areaName(readUnit.registerType()),
+                                  addrHex, QString::number(readUnit.valueCount())),
+                         -1);
+    }
+
     qCDebug(hmiComm) << "[ModbusMaster] 已发读 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID=" << tid << "slave=" << serverAddress
              << "addr=" << addr << "count=" << readUnit.valueCount()
@@ -355,6 +434,16 @@ QModbusReply* ModbusMaster::sendWriteRequest(const QModbusDataUnit& writeUnit, i
     p.requestId     = requestId;  // 阶段 4.3.0:WriteScheduler 用来反查 dirty Variable
     pending_.insert(tid, p);
 
+    // ★ 2026-10-20:通讯帧监视 —— 记录这一帧【发出】(理由同读请求那处)
+    {
+        const QString addrHex = QStringLiteral("%1").arg(addr, 4, 16, QChar('0')).toUpper();
+        emit frameTraced(qwhmi::comm::FrameDir::Tx, frame,
+                         QStringLiteral("FC%1 %2 addr=0x%3 count=%4")
+                             .arg(fcHex(fc), areaName(writeUnit.registerType()),
+                                  addrHex, QString::number(values.size())),
+                         -1);
+    }
+
     qCDebug(hmiComm) << "[ModbusMaster] 已发写 FC=0x" << QString::number(fc, 16).toUpper()
              << "TID=" << tid << "slave=" << serverAddress
              << "addr=" << addr << "values.size=" << values.size()
@@ -395,12 +484,28 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
         auto it = pending_.find(tid);
         if (it == pending_.end()) {
             // 未知 TID,丢弃
+            // ★ 2026-10-20:这一帧【不能默默丢】。
+            //   未知 TID 意味着对端发了一帧我们没在等的 —— 可能是上一轮的残留响应,
+            //   也可能是对端串了会话。两种都是现场要查的事,
+            //   而"悄悄丢掉"的表现是"偶尔多发一帧,PLC 也不报错",极难定位。
+            emit frameTraced(qwhmi::comm::FrameDir::Error, frame,
+                             QStringLiteral("未知 TID=%1(收到的帧已丢弃)").arg(tid), -1);
             recvBuf_.remove(0, frameSize);
             continue;
         }
         Pending req = it.value();
 
+        // ★ 2026-10-20:往返耗时 = 收到响应 - 发出请求。
+        //   req.sentAt 是发出那一刻 —— 这是全项目唯一能算出往返耗时的地方
+        //   (TcpClient 那层没有"请求"的概念)。
+        const qint64 elapsedMs = req.sentAt.msecsTo(QDateTime::currentDateTime());
+
         if (uid != quint8(req.serverAddress)) {
+            // 从站地址对不上:同样是"看不见就查不了"的那类帧
+            emit frameTraced(qwhmi::comm::FrameDir::Error, frame,
+                             QStringLiteral("从站地址不匹配:帧 UID=%1 期望 %2")
+                                 .arg(uid).arg(req.serverAddress),
+                             elapsedMs);
             recvBuf_.remove(0, frameSize);
             continue;
         }
@@ -424,6 +529,10 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
                             .arg(fc, 2, 16, QChar('0'))
                             .arg(exCode, 2, 16, QChar('0'))
                             .arg(exMsg);
+            // ★ 2026-10-20:异常响应【必须】在监视器里显示成"错误"帧。
+            //   它是现场最需要看清的一类帧(地址越界/值越界/从机故障),
+            //   而原来它只走 errorOccurred 弹一次窗,之后就再也找不到了。
+            emit frameTraced(qwhmi::comm::FrameDir::Error, frame, msg, elapsedMs);
             finalizeErrorReply(&req, msg);  // ★ IMPROVE-B5(2026-07-29):5 处重复 helper 替
             pending_.erase(it);
             notifyIdleIfEmpty();   // 2026-07-09:异常响应后可能 pending_ 变空
@@ -432,6 +541,16 @@ void ModbusMaster::onTcpReadyRead(const QByteArray& data) {
         }
 
         // 正常响应 — 按 fc 分发
+        // ★ 2026-10-20:记录这一帧【收到】。
+        //   【为什么在分发【之前】记】
+        //     分发过程可能因为"帧太短""数据不足"判成错误 ——
+        //     那种情况后面走 finalizeErrorReply,会再发一条 errorOccurred。
+        //     但那一帧的字节本身还是收到了,监视器里要能看到它。
+        emit frameTraced(qwhmi::comm::FrameDir::Rx, frame,
+                         QStringLiteral("FC%1 %2 响应(%3 字节)")
+                             .arg(fcHex(fc), fcName(fc), QString::number(frame.size())),
+                         elapsedMs);
+
         if (req.isWrite) {
             handleWriteResponse(fc, &req, frame);
         } else {
@@ -565,6 +684,14 @@ void ModbusMaster::onTimeoutScan() {
                      << "slave=" << req.serverAddress
                      << "elapsedMs=" << req.sentAt.msecsTo(now);
             emit errorOccurred(QString("Modbus 请求超时 TID=%1").arg(it.key()));
+            // ★ 2026-10-20:超时也要在监视器里留一条。
+            //   【为什么 raw 是空的】超时【没有】收到任何字节 ——
+            //     这里要是编一个假的帧填进去,监视器上就会出现一条
+            //     "看起来收到过东西"的记录,比不记更坏。
+            emit frameTraced(qwhmi::comm::FrameDir::Error, QByteArray(),
+                             QStringLiteral("请求超时 TID=%1(等了 %2 ms)")
+                                 .arg(it.key()).arg(req.sentAt.msecsTo(now)),
+                             req.sentAt.msecsTo(now));
             if (req.reply) {
                 req.reply->setError(QModbusDevice::TimeoutError, "请求超时");
                 req.reply->setFinished(true);

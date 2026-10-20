@@ -24,6 +24,10 @@
 #include <QTimer>
 #include <QDateTime>
 #include "TcpClient.h"
+// ★ 2026-10-20:通讯帧监视。方向枚举放在 comm/CommFrame.h ——
+//   本文件(项目根)和 src/comm/CommTraceModel.h 两边都要用,
+//   互相 include 会成环,所以枚举单独放一个没有依赖的小头文件。
+#include "comm/CommFrame.h"
 
 class ModbusMaster : public QObject {
     Q_OBJECT
@@ -63,6 +67,29 @@ signals:
     // 阶段 4.3.0:write 完成后发 → WriteScheduler 用 requestId 反查 + 清 dirty
     // 成功 / 失败 都发(success 区分),失败时 WriteScheduler 保留 dirty 等下一帧重试
     void writeFinished(quint32 requestId, bool success);
+
+    // ★ 2026-10-20:通讯帧监视(调试区第三页"通讯监视")。
+    //
+    //   【为什么挂在这里,而不是 TcpClient】
+    //     TcpClient 那层只有裸字节:它不知道什么是"一帧",
+    //     更不知道收到的那一帧对应哪个请求 —— 而"往返耗时"和
+    //     "这个响应是哪次请求的"都必须有 TID 才能算。
+    //     本类同时握有三样东西:
+    //       ① 请求帧的完整字节(buildFrame 的返回值)
+    //       ② 响应帧的完整字节(onTcpReadyRead 里拆出来的 frame)
+    //       ③ 请求发出的时刻(pending_[tid].sentAt)
+    //     所以耗时 = now - sentAt,在这里才算得出来。
+    //
+    //   【elapsedMs 的含义】
+    //     Rx  = 往返耗时(收到响应 - 发出请求)
+    //     Tx  = -1(发的时候还不知道要等多久)
+    //     Error = 异常响应/超时,能算就带耗时,算不了是 -1
+    //
+    //   【注意】这个信号【每帧都发】。轮询 100ms 一帧,
+    //     跑一夜就是 30 万次 —— 消费方必须自己限制条数
+    //     (CommTraceModel 有行数上限,超了淘汰最旧的)。
+    void frameTraced(qwhmi::comm::FrameDir dir, const QByteArray& raw,
+                     const QString& summary, qint64 elapsedMs);
 
 private slots:
     // TCP 数据到达 → 拆 MBAP 头 + 按 type 分发拆帧

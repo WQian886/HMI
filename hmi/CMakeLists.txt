@@ -126,6 +126,9 @@ set(SOURCES
     # ★ 2b(2026-10-19):多 PLC 连接管理。src/plc/ 目前靠 GLOB 兜底也能捡到,
     #   显式写出来是为了守住"新文件必须登记"的约定(见上面 MenuBuilder 那段)。
     src/plc/PlcConnectionManager.cpp
+    # ★ 2026-10-20:通讯帧监视器(调试区第三页"通讯监视")。
+    #   数据层,纯 QtCore,一行界面代码都没有 —— 所以能在无界面测试里跑。
+    src/comm/CommTraceModel.cpp
 )
 
 set(HEADERS
@@ -207,6 +210,10 @@ set(HEADERS
     src/ui/MenuBuilder.h            # ★ 2026-10-16:菜单栏(抽出来才能被 tst_MenuBar 测到)
     src/plc/PlcConnectionManager.h  # ★ 2b:多 PLC 连接管理
     src/plc/VariableConfigDialog.h  # ★ 2026-10-19:变量配置对话框
+    # ★ 2026-10-20:通讯帧监视器。CommFrame.h 是给 ModbusMaster 和
+    #   CommTraceModel 共用的方向枚举(两边互相 include 会成环)。
+    src/comm/CommTraceModel.h
+    src/comm/CommFrame.h
     src/drivers/IPlcDriverProvider.h  # ★ 2b:纯接口无 Q_OBJECT(写进 HEADERS 便于 VS 里查得到)
 )
 

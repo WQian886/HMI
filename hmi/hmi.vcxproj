@@ -433,4 +433,13 @@
     <ClInclude Include="src\ui\MenuBuilder.h" />
     <ClInclude Include="VariableRefScan.h" />
   </ItemGroup>
+  <!-- 2026-10-20: comm frame monitor (debug area page 3) -->
+  <!--   CommTraceModel.h has Q_OBJECT -> needs QtMoc (no moc -> no staticMetaObject -> LNK2001) -->
+  <!--   CommFrame.h is a plain enum header, no Q_OBJECT -> ClInclude only -->
+  <ItemGroup>
+    <QtMoc Include="src\comm\CommTraceModel.h" />
+    <ClCompile Include="src\comm\CommTraceModel.cpp" />
+    <ClInclude Include="src\comm\CommTraceModel.h" />
+    <ClInclude Include="src\comm\CommFrame.h" />
+  </ItemGroup>
 </Project>

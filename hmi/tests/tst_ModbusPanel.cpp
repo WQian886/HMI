@@ -30,7 +30,7 @@
 //
 // 【诚实的边界】
 //   ✓ 能抓:高度不齐 / inline 样式表 / 少标签 / qss 里少了 fieldLabel 规则
-//           / 调试区不是两页 / 两行又被挂回 centralLayout / 运行期又搬布局
+//           / 调试区不是三页 / 两行又被挂回 centralLayout / 运行期又搬布局
 //   ✗ 不能抓:"好不好看"。深色配色的取舍,自动测试证明不了,
 //     那一半必须人眼看 —— 所以每次改完都要启动一次。
 //
@@ -42,9 +42,14 @@
 //   保留着在 centralLayout 里的旧几何,于是照旧画在老位置上。
 //   改法:两页(debugTabs)直接写进 .ui 由 uic 生成,代码里不再搬布局;
 //   buildDebugPanel() 只插一个【新建的】开关按钮。
-//   本文件下面三条(debugArea_hasExactlyTwoPages /
+//   本文件下面三条(debugArea_hasExactlyThreePages /
 //   neitherDebugRow_hangsDirectlyOffCentralLayout /
 //   buildDebugPanel_doesNotMoveLayoutsAtRuntime)钉的就是这件事。
+//
+//   ★ 2026-10-20:调试区从两页变成三页 —— 第三页是「通讯监视」
+//     (通讯帧监视器)。这一页自己的形状(表格钉死 160px、底下一行 40px、
+//     高度不写死在 .ui、信号接上了没)由 tst_CommTracePanel 钉;
+//     本文件只管"三页都在、都挂在 debugTabs 里、标题都有"。
 //
 // 【负向对照 —— 七轮全部实跑,数字是跑出来的不是推出来的】
 //   ① 删掉 modbusRwCombo 的 minimumSize   → 红 1 绿 6(点名 modbusRwCombo 没写)
@@ -115,9 +120,12 @@ private slots:
     // ★ 另一页那一行也要一致 —— 两行是同一套工具的两种用法,会互相被比较。
     void theOtherPage_hasTheSameHeight();
 
-    // ★★ 调试区必须正好两页,且两行各自待在自己那一页里。
+    // ★★ 调试区必须正好三页,且每一行各自待在自己那一页里。
     //   P1-e 的起因就是这两行的归属被搞乱了。
-    void debugArea_hasExactlyTwoPages();
+    //   ★ 2026-10-20:第三页是「通讯监视」(通讯帧监视器)。
+    //     它的形状(表格钉死 160px、底下一行 40px、高度不写死在 .ui)
+    //     由 tst_CommTracePanel 钉 —— 两边各管各的,别复制。
+    void debugArea_hasExactlyThreePages();
 
     // ★★ 这两行不许再直接挂在 centralLayout 上。
     //   2026-10-20 的真 bug 就是这个:P1-c 用 takeAt() 把它们摘给一个新面板,
@@ -404,34 +412,39 @@ void tst_ModbusPanel::theOtherPage_hasTheSameHeight() {
 // -----------------------------------------------------------------------
 //  以下三条是 P1-e(拆两页)带来的,起因是一个真 bug 不是审美。
 
-void tst_ModbusPanel::debugArea_hasExactlyTwoPages() {
+void tst_ModbusPanel::debugArea_hasExactlyThreePages() {
     const int at = m_ui.indexOf(QStringLiteral("name=\"debugTabs\""));
-    QVERIFY2(at >= 0, "hmi.ui 里没有 debugTabs —— 调试区不是两页了。"
-                      "用户明确要求过\"分成两页,放在不同的页面内\"。");
+    QVERIFY2(at >= 0, "hmi.ui 里没有 debugTabs —— 调试区不是三页了。"
+                      "用户明确要求过\"分成多页,放在不同的页面内\"。");
 
-    // 两页:QTabWidget 直属的 QWidget 孩子
+    // 三页:QTabWidget 直属的 QWidget 孩子
+    //   第三页 tabCommTrace 是 2026-10-20 加的「通讯监视」。
     static const QRegularExpression re(QStringLiteral(
-        "<widget class=\"QWidget\" name=\"(tabManualSend|tabModbus)\">"));
+        "<widget class=\"QWidget\" name=\"(tabManualSend|tabModbus|tabCommTrace)\">"));
     QStringList pages;
     QRegularExpressionMatchIterator it = re.globalMatch(m_ui);
     while (it.hasNext()) pages << it.next().captured(1);
 
-    QVERIFY2(pages.size() == 2,
+    QVERIFY2(pages.size() == 3,
              qPrintable(QStringLiteral(
-                 "调试区应正好 2 页(tabManualSend / tabModbus),实际找到 %1 个:%2")
+                 "调试区应正好 3 页(tabManualSend / tabModbus / tabCommTrace),"
+                 "实际找到 %1 个:%2")
                  .arg(pages.size()).arg(pages.join(QStringLiteral(" / ")))));
 
     // 每一页都得真的装着一行工具 —— 页建了但没放东西,
     // 表现出来是"点开那一页是空的",而从外面完全看不出。
     QVERIFY2(m_ui.indexOf(QStringLiteral("name=\"tcpSendLayout\"")) > 0, "tcpSendLayout 不见了");
     QVERIFY2(m_ui.indexOf(QStringLiteral("name=\"modbusLayout\"")) > 0, "modbusLayout 不见了");
+    QVERIFY2(m_ui.indexOf(QStringLiteral("name=\"commTraceView\"")) > 0, "commTraceView 不见了");
 
-    // 两页的标题必须都有 —— 页签上写"1" "2"而没有名字,
+    // 三页的标题必须都有 —— 页签上写"1" "2" "3"而没有名字,
     // 用户根本不知道哪一页是哪一页。
     QVERIFY2(m_ui.contains(QStringLiteral("<string>手动发送</string>")),
              "第一页没有标题\"手动发送\"");
     QVERIFY2(m_ui.contains(QStringLiteral("<attribute name=\"title\"><string>Modbus</string>")),
              "第二页没有标题\"Modbus\"");
+    QVERIFY2(m_ui.contains(QStringLiteral("<attribute name=\"title\"><string>通讯监视</string>")),
+             "第三页没有标题\"通讯监视\"");
 }
 
 void tst_ModbusPanel::neitherDebugRow_hangsDirectlyOffCentralLayout() {

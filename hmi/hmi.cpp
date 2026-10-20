@@ -1,4 +1,4 @@
-﻿#include "hmi.h"
+#include "hmi.h"
 #include "Variable.h"             // 阶段 3.2:Variable 数据模型
 #include "VariableManager.h"      // 阶段 3.2:Variable 容器
 #include "PollScheduler.h"        // 阶段 3.3:定时轮询调度器
@@ -51,7 +51,8 @@
 #include "auth/CurrentUser.h"   // ★ B4 修复(2026-09-17):updateButtons 需要查 role
 #include "auth/Permission.h"    // ★ B4 修复(2026-09-17):updateButtons 需要查 WriteVariable
 #include "auth/AuditLog.h"      // ★ C.4.2(2026-09-18):protocol.change 审计事件
-#include "ui/MenuBuilder.h"     // ★ 2026-10-16:菜单栏搭建(抽出来才能被 tst_MenuBar 测到真实那份)
+#include "ui/MenuBuilder.h"
+#include "comm/CommTraceModel.h"     // ★ 2026-10-20:通讯帧监视(调试区第三页)     // ★ 2026-10-16:菜单栏搭建(抽出来才能被 tst_MenuBar 测到真实那份)
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
@@ -229,7 +230,12 @@ hmi::hmi(QWidget *parent)
     //   顺序反了不会崩,但"折"这件事会在第一次刷新时跟 enabled 计算搅在一起,
     //   出问题时很难看出是哪一步。
     buildDebugPanel();
-
+    // ★ 2026-10-20:通讯帧监视(调试区第三页「通讯监视」)。
+    //   放在 buildDebugPanel() 之后:那一段会把调试区高度按【当前页】定住,
+    //   本页的表格高度是 .ui 里写死的 160,两者互不影响。
+    //   放在任何 driver 建出来之前:driverAdded 那一段要往这个模型里塞帧,
+    //   模型还没建就塞 = 空指针。
+    buildCommTracePanel();
     // 初始化 UI(让 statusLabel 跟初始 state 一致)
     updateUi();
 
@@ -373,6 +379,36 @@ hmi::hmi(QWidget *parent)
             // 2026-07-09:UI 防抖 —— pending_ 变空时重新启用发送按钮
             // ★ C.1:idle 是 ModbusMaster 特有,需要从 ModbusDriver.inner() 取
             if (modbusDriver) {
+                // ★ 2026-10-20:通讯帧监视 —— 把每一帧塞进第三页的模型。
+                //   【为什么只跟 plc1】调试面板其余部分(状态、Modbus 那一行)
+                //     也只跟 plc1,保持一致。跟 plc2/plc3 混在一起的话,
+                //     两台机器的帧会交错,同一个 TID 看上去像同一台机的 ——
+                //     而"是哪台机"恰恰是现场最先要分清的事。
+                //   【枚举在信号里为什么不注册 metatype】
+                //     这里用的是 lambda(成员函数指针式的重载),编译期就把
+                //     FrameDir 的类型定死了,走的是直接连接,不需要 metatype。
+                //     ★ 但如果以后把这个连接挪到别的线程,就必须补
+                //       qRegisterMetaType<qwhmi::comm::FrameDir>() ——
+                //       少补的话连接会【静默不生效】,帧一条都不进来,
+                //       而且没有任何报错(跨线程队列连接找不到元类型就断开)。
+                connect(modbusDriver->inner(), &ModbusMaster::frameTraced, this,
+                    [this](qwhmi::comm::FrameDir dir, const QByteArray& raw,
+                           const QString& summary, qint64 elapsedMs) {
+                        // 判空:模型是在构造函数里建的,理论上这会儿一定在;
+                        //   但这一行是"运行期才跑"的代码,写代码的人不会想到
+                        //   要回来补判空 —— 判空比注释可靠(同 driverAdded 里
+                        //   pollScheduler_ / writeScheduler_ 那两处)。
+                        if (!commTrace_) return;
+                        qwhmi::comm::FrameRecord rec;
+                        rec.dir       = dir;
+                        rec.raw       = raw;
+                        rec.summary   = summary;
+                        rec.elapsedMs = elapsedMs;
+                        // appendFrame 在暂停时返回 false(这一帧没进来)。
+                        //   这里【不弹框】:暂停是用户自己按的,
+                        //   每来一帧弹一次框会烦死人。
+                        commTrace_->appendFrame(rec);
+                    });
                 connect(modbusDriver->inner(), &ModbusMaster::idle, this, [this](){
                     ui.modbusSendButton->setEnabled(true);
                     statusBar()->showMessage("Modbus 空闲,可发下一帧", kStatusBarShortMs);  // ★ IMPROVE-B4
@@ -1135,6 +1171,97 @@ void hmi::buildDebugPanel() {
     //   setChecked(false) 在"本来就是 false"时【不发射】toggled,
     //   于是调试区会停在 setVisible 的默认值(true)—— 折叠功能看着像没做。
     syncToggle(false);
+
+    // ★★ 2026-10-20:调试区高度跟着【当前页】走。
+    //
+    //   【为什么需要】第三页(通讯监视)要塞一张表(160px),前两页各只有一行 40px。
+    //     而 QStackedLayout 的 sizeHint 取的是【各页 sizeHint 的最大值】——
+    //     也就是说,不显式定住的话,页签控件自己就会按最高的那页(≈240px)算,
+    //     前两页下面各空 160px 黑。那不是"留白",是"面板坏了"的观感。
+    //   【为什么不在 .ui 里写死】页高取决于 qss 里的页签条高度和按钮高度,
+    //     写死就会和主题脱节 —— 改了 qss 之后这里对不上,表现是面板多一截空白。
+    //     运行时算 = 跟着主题走。
+    //   【取舍】切页时面板会伸缩一次。
+    //     另一个选择是"永远按最高页算",那样面板不动,但前两页一直空着。
+    //     伸缩一次,比一直空着强。
+    const auto syncTabHeight = [this](int idx) {
+        if (idx < 0) return;
+        QWidget* page = ui.debugTabs->widget(idx);
+        if (!page || !page->layout()) return;
+        const int pageH = page->layout()->totalSizeHint().height();
+        const int barH  = ui.debugTabs->tabBar()->sizeHint().height();
+        const int h     = barH + pageH + 4;   // +4:QTabWidget 上下边框(各 2px)
+        // 76 = .ui 里 debugTabs 原来的 minimumSize 高度(页签条 + 一行 40 + 边框)
+        ui.debugTabs->setFixedHeight(h > 76 ? h : 76);
+    };
+    connect(ui.debugTabs, &QTabWidget::currentChanged, this, syncTabHeight);
+    syncTabHeight(ui.debugTabs->currentIndex());
+}
+
+// ★★ 2026-10-20:通讯帧监视(调试区第三页「通讯监视」)。
+//
+//   【这一页是干什么的】把 ModbusMaster 真正收发的那一帧一帧摊开:
+//     时间 / 方向 / 摘要 / 往返耗时 / 原始字节。
+//   【为什么值得单独一页】协议出问题时,现场能拿到的只有
+//     「Modbus 错误:…」一个弹窗,几秒之后就没了。
+//     而「是哪一帧错的」「错之前那几帧正常吗」「往返多久」,
+//     才是真正能定位问题的信息 —— 而它们在别的地方从来没留过。
+//     轮询日志只记成功的那一帧,错的那一帧不进日志。
+//   【数据从哪来】ModbusMaster::frameTraced。
+//     只有那一层同时握有【请求帧字节】【响应帧字节】【请求发出的时刻】,
+//     所以「往返耗时」只有它算得出来 ——
+//     TcpClient 那层只有裸字节,连"什么是一帧"都不知道。
+//   【数据层的规矩】CommTraceModel 纯 QtCore,一行界面代码都没有,
+//     所以 tst_CommTraceModel 能在无界面环境里跑 ——
+//     「行数超限之后最旧的那一行真的被淘汰了吗」这种断言才写得出来。
+//   【还没做的(诚实起见写在这)】行着色没做。
+//     方向靠"发送/接收/错误"三个字认,错误帧靠"错误"两个字认。
+//     要上色就得跟 qss 统一(不能再像以前那样两处各写一套配色),
+//     所以它得等一个"配色唯一权威"的地方,而不是随手在模型里塞两个色值。
+void hmi::buildCommTracePanel() {
+    commTrace_ = new qwhmi::comm::CommTraceModel(this);
+    ui.commTraceView->setModel(commTrace_);
+
+    // 行号藏起来:帧列表是滚动淘汰的,行号会一直变 ——
+    //   用户看到"第 37 行"会以为那是个稳定的编号,其实下一帧就变成 36 了。
+    //   时间列才是稳定的定位依据。
+    ui.commTraceView->verticalHeader()->setVisible(false);
+    ui.commTraceView->horizontalHeader()->setStretchLastSection(false);
+
+    // 列宽:时间/方向/耗时按内容收紧,摘要吃余量,原始字节给固定宽度。
+    //   ★ 原始字节不参与 stretch —— 一帧 Modbus TCP 有十几到二十几个字节,
+    //     拉太宽会把摘要挤没,而摘要才是"这一帧在干什么"。
+    QHeaderView* hh = ui.commTraceView->horizontalHeader();
+    using C = qwhmi::comm::CommTraceModel;
+    hh->setSectionResizeMode(C::ColTime,    QHeaderView::ResizeToContents);
+    hh->setSectionResizeMode(C::ColDir,     QHeaderView::ResizeToContents);
+    hh->setSectionResizeMode(C::ColSummary, QHeaderView::Stretch);
+    hh->setSectionResizeMode(C::ColElapsed, QHeaderView::ResizeToContents);
+    hh->setSectionResizeMode(C::ColRaw,     QHeaderView::Interactive);
+    hh->resizeSection(C::ColRaw, 320);
+
+    // 统计标签:跟着模型走。
+    //   statsChanged 在【每一次】appendFrame 后都发 —— 轮询 100ms 一帧,
+    //   也就是每秒十几次 setText。这不贵(一个 QLabel 一次 setText),
+    //   但它意味着"暂停"必须真的冻结统计,否则界面会显示"暂停中"而数字还在涨。
+    connect(commTrace_, &qwhmi::comm::CommTraceModel::statsChanged, this, [this](){
+        ui.commTraceStatsLabel->setText(commTrace_->statsText());
+    });
+    ui.commTraceStatsLabel->setText(commTrace_->statsText());
+
+    // 暂停/继续:按钮是 checkable 的,勾上 = 暂停,文字跟着变。
+    //   ★ 文字是"接下来点我会做什么"(暂停→继续),不是"我现在是什么状态"
+    //     (那样就该是"已暂停")。这两种约定都有产品用,但同一屏里
+    //     只能有一种 —— 这里跟"清空"那个按钮保持一致:都是动作。
+    connect(ui.commTracePauseButton, &QPushButton::toggled, this, [this](bool paused) {
+        commTrace_->setCollecting(!paused);
+        ui.commTracePauseButton->setText(paused ? QStringLiteral("继续") : QStringLiteral("暂停"));
+    });
+
+    // 清空:只清帧列表,统计保留(理由见 CommTraceModel::clear 的注释)
+    connect(ui.commTraceClearButton, &QPushButton::clicked, this, [this]() {
+        commTrace_->clear();
+    });
 }
 
 void hmi::onShowCapabilities() {

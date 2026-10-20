@@ -178,6 +178,12 @@ set(HMI_CORE_SOURCES
     # ★ 崩溃 dump(2026-10-14):此前【零测试覆盖】,pending.txt 静默失效 28 天没人发现。
     #   写 dump 和"崩了有人知道"是两回事,后者一直没被测过。详见 tst_CrashHandler.cpp 头注释。
     ${HMI_SRC_DIR}/src/crash/CrashHandler.cpp
+    # ★ 2026-10-20:通讯帧监视的数据层(纯 QtCore,一行界面代码都没有)
+    #   【为什么必须进这个列表】tst_CommTraceModel 调的是它的真实实现,
+    #   不是副本。漏了它 = 链接期 LNK2019 undefined symbol,
+    #   而报错点全在测试文件里,离病根(这一行没加)很远。
+    #   同 WriteFailChecker / AlarmSoundPlayer 那两段注释说的同一个坑。
+    ${HMI_SRC_DIR}/src/comm/CommTraceModel.cpp
 )
 
 # ============================================================
@@ -481,5 +487,18 @@ add_hmi_test(tst_JsonLoadDiagnostics)
 #   dumpDirectory() 依赖调用方先设好 org/app,而 main() 当时把元数据排在
 #   install()/hasPendingDump()【后面】,于是写和读落在两个不同目录。
 add_hmi_test(tst_CrashHandler)
+
+# ★ 2026-10-20:通讯帧监视器(调试区第三页「通讯监视」)
+#   两个测试分家:
+#     tst_CommTraceModel —— 数据层(行淘汰/暂停/清空/统计算术)。
+#       纯 QtCore,所以用 QTEST_GUILESS_MAIN,没有显示设备也能跑。
+#     tst_CommTracePanel —— 页面形状(表格钉死 160/底下一行 40/
+#       高度不写死在 .ui/信号接上了没)。
+#       读 .ui 和 hmi.cpp 的【文本】,同 tst_ModbusPanel 的老问题:
+#       hmi_core 不编 hmi.cpp,建不出主窗口那一排控件;
+#       而 .ui 写错属性是静默的,读文本能把"写了但写歪了"变成"查得到"。
+add_hmi_test(tst_CommTraceModel)
+add_hmi_test(tst_CommTracePanel)
+target_compile_definitions(tst_CommTracePanel PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)

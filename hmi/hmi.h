@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QtWidgets/QMainWindow>
 #include <QTimer>  // 阶段 0 第 1 练:加 QTimer 头
@@ -14,6 +14,9 @@ class PlcConnectionManager;
 namespace qwhmi::history { class HistoryRecorder; }  // ★ D.1(2026-09-18):SQLite 历史库
 namespace qwhmi::history { class AlarmRecorder; }   // ★ D.3(2026-09-20):报警持久化
 namespace qwhmi::widgets { class TrendWidget; }  // ★ D.2(2026-09-20):历史曲线控件
+// ★ 2026-10-20:通讯帧监视(调试区第三页「通讯监视」)。
+//   前向声明即可 —— 界面层只要一个指针,真正用到的只有 hmi.cpp。
+namespace qwhmi::comm { class CommTraceModel; }
 #include "VariableManager.h"  // 阶段 3.2:把 VariableManager 接入主工程
 #include "PollScheduler.h"  // 阶段 3.3:定时轮询调度器
 #include "WriteScheduler.h" // 阶段 4.3.0:写调度器(Variable.dirty_ → Modbus 写 PLC)
@@ -355,6 +358,20 @@ private:
     //     把它一起折起来 = 让人为了看现场先展开面板,那是把调试工具的地位
     //     反过来了。所以分界线画在"主操作"和"协议细节"之间,不在"上面"和"下面"之间。
     void buildDebugPanel();
+
+    // ★★ 2026-10-20:通讯帧监视(调试区第三页「通讯监视」)。
+    //
+    //   【它是什么】把 ModbusMaster 真正收发的那一帧一帧摊开:
+    //     时间 / 方向 / 摘要 / 往返耗时 / 原始字节。
+    //   【数据从哪来】ModbusMaster::frameTraced —— 只有那一层同时握有
+    //     请求帧字节 + 响应帧字节 + 请求发出的时刻,
+    //     所以「往返耗时」只有在那里才算得出来。
+    //   【为什么模型是成员而不是栈上临时对象】
+    //     视图 setModel 之后长期持有它,而它是 QObject ——
+    //     new(this) 让它跟着窗口一起死,不用管析构顺序。
+    void buildCommTracePanel();
+
+    qwhmi::comm::CommTraceModel* commTrace_ = nullptr;
 
     // ★ 阶段 C · C.4(2026-09-18):当前工程协议(modbus/s7/eip),初始 modbus
     //   跨协议切工程时此值 vs protocolComboBox.currentText() 比对(教训 1.5)

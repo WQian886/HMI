@@ -812,4 +812,18 @@
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\comm\CommTraceModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\comm\CommTraceModel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\comm\CommFrame.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <QtMoc Include="src\comm\CommTraceModel.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+  </ItemGroup>
 </Project>

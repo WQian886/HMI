@@ -424,6 +424,122 @@
         </item>
        </layout>
       </widget>
+      <!-- ★★ 2026-10-20:第三页「通讯监视」—— 帧级监视器。
+           调试区第三页(手动发送 / Modbus 之后),把 ModbusMaster
+           真正收发的那一帧一帧摊开:时间 / 方向 / 摘要 / 往返耗时 / 原始字节。
+
+           【为什么放在调试区而不是底部数据页】
+             它是【协议调试工具】,和「手打 hex 帧」「手填从站号」是同一类东西:
+             现场排障时才用,平时该收着。而底部的实时/曲线/报警历史是
+             值班人员要盯着看的常驻数据 —— 把调试工具混进去等于
+             「值班的人也得面对一屏原始字节」。
+
+           【这一页的高度是算出来的,不是拍脑袋定的】
+             前面两页各只有一行 40px,这一页要塞一张表。
+             若按「最高的页」统一高度,前两页下面会空出一大片黑;
+             QStackedLayout 的 sizeHint 取的是【各页的最大值】,
+             不显式定住的话它自己就会按最高页算 —— 于是前两页各空 160px。
+             所以高度由 hmi.cpp 的 buildDebugPanel() 跟着【当前页】算
+             (切页时面板伸缩一次,比一直空着强)。
+             ★ 下面的 160 是【表格自己的固定高度】,
+               面板总高 = 页签条 + 表格 160 + 底下一行 40 ≈ 240。
+
+           【表格固定 160px 的取舍】
+             固定住,是免得「帧来了面板就长高、面板长了下面全被推走」。
+             代价是同时只看得见五六行 —— 但下面那行有累计统计
+             (发/收/错帧数、字节数、往返耗时 min/平均/max),
+             要看全量可以拖表格的滚动条。 -->
+      <widget class="QWidget" name="tabCommTrace">
+       <attribute name="title"><string>通讯监视</string></attribute>
+       <layout class="QVBoxLayout" name="tabCommTraceLayout">
+        <property name="leftMargin"><number>0</number></property>
+        <property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property>
+        <property name="bottomMargin"><number>0</number></property>
+        <item>
+         <widget class="QTableView" name="commTraceView">
+          <property name="minimumSize">
+           <size><width>0</width><height>160</height></size>
+          </property>
+          <!-- ★ 固定 160:min == max。
+               只写 minimumSize 的话表格的 sizeHint(约 192)会赢,
+               面板高度就随帧数变 —— 帧一多,整个调试区往下长,
+               底下的实时数据区被推走。固定住,面板才稳定。 -->
+          <property name="maximumSize">
+           <size><width>16777215</width><height>160</height></size>
+          </property>
+          <property name="editTriggers">
+           <set>QAbstractItemView::NoEditTriggers</set>
+          </property>
+          <!-- ★ 枚举必须【写全限定值】,不能写成
+               <enum>QAbstractItemView::SelectionBehavior</enum>SelectRows
+               那种"类型 + 行尾值"的写法 —— uic 不认那个写法:
+               它会把类型当【值】照抄,生成
+                 setSelectionBehavior(QAbstractItemView::SelectionBehavior);
+               然后编译报 C2275("应为表达式,而不是类型")。
+               ★★ 而且它是【静默】的:ninja 不会因为只改了 .ui 就重跑 uic,
+               所以这个错要等到一次 -Clean 干净重建才会现形。
+               实测(2026-10-20):两个 <enum> 的写法 uic 会按【控件类】去限定,
+               生成 QTableView::SelectRows —— 能编过,但不是想要的那个类的枚举。 -->
+          <property name="selectionBehavior">
+           <enum>QAbstractItemView::SelectRows</enum>
+          </property>
+          <property name="wordWrap"><bool>false</bool></property>
+          <property name="textElideMode">
+           <enum>Qt::ElideRight</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="commTraceBottomLayout">
+          <item>
+           <widget class="QLabel" name="commTraceStatsLabel">
+            <property name="minimumSize">
+             <size><width>0</width><height>40</height></size>
+            </property>
+            <property name="text">
+             <string>本次运行累计:发 0 / 收 0 / 错 0 帧;字节 出 0 / 入 0;往返 尚无样本</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignVCenter</set>
+            </property>
+            <property name="toolTip"><string>统计是【本次运行】的累计量,点「清空」不会把它抹掉:
+错误帧数是累计的,抹掉会让「一直在报错」看起来像「刚启动」。</string></property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="commTraceSpacer">
+            <property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property>
+            <property name="sizeHint" stdset="0">
+             <size><width>40</width><height>20</height></size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="commTracePauseButton">
+            <property name="minimumSize">
+             <size><width>80</width><height>40</height></size>
+            </property>
+            <property name="text"><string>暂停</string></property>
+            <property name="checkable"><bool>true</bool></property>
+            <property name="toolTip"><string>暂停采集:期间到达的帧一律不记(统计也停)。
+排查时先暂停、再操作,免得新帧把要找的那几行冲掉。</string></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="commTraceClearButton">
+            <property name="minimumSize">
+             <size><width>80</width><height>40</height></size>
+            </property>
+            <property name="text"><string>清空</string></property>
+            <property name="toolTip"><string>只清帧列表,【不清统计】。
+错误帧数是本次运行的累计量,抹掉会让「一直在报错」看起来像「刚启动」。</string></property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
     <item>
