@@ -6,6 +6,11 @@ project(hmi_tests LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
+# ★ 2026-10-20:主工程 CMakeLists.txt 第 8 行有这条,测试工程【漏了】。
+#   漏了它的表现是 qrc 源文件【被静默忽略】—— 不报错、不警告、不生成任何东西,
+#   只有等运行时报"读不到 :/..." 才看得出少了点什么。
+#   tst_Theme 正是靠它才能读到 hmi.qrc 里的样式表(与主程序同一份登记)。
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql PrintSupport UiTools)
 enable_testing()
@@ -280,6 +285,30 @@ add_hmi_test(tst_VariableConfigDialog)
 #   本来这段 UI 逻辑写在 hmi.cpp 里,测试链不到主程序(hmi_core 不含 hmi.cpp),
 #   只能复制一份跑 —— 那样测的是副本。抽成 MenuBuilder 后两边调同一个函数。
 add_hmi_test(tst_MenuBar)
+# ★ 2026-10-20:深色主题样式表。
+#   【为什么它不能直接用 add_hmi_test】那函数只编 tst_Xxx.cpp 一个源文件,
+#   而本测试要验证"qss 真的编进二进制了"—— 资源不进这个目标,
+#   :/hmi/theme/... 在测试里就【根本不存在】,于是测试恒红。
+#
+#   ★★ 这里踩过两次,都记下来:
+#     ① 把 hmi.qrc 直接列进 add_executable 的源文件列表 → CMake 【静默忽略】
+#        (构建日志一行警告都没有,测试只是"读不到资源"这一条红,
+#         看不出是构建系统压根没理它)。qrc 光列出来不会自动编,
+#         必须显式 AUTORCC ON。
+#     ② 改用 qt_add_resources(... FILES <绝对路径>) → CMake 直接 configure 报错:
+#        "was specified with an absolute path and is used in a Qt resource",
+#        要么补 QT_RESOURCE_ALIAS,要么继续用 qrc。
+#     结论:继续用 qrc。它同时是主程序和本测试的资源清单 ——
+#     【只有一份登记】,两处不可能读到不同的东西。
+add_executable(tst_Theme tst_Theme.cpp)
+set_source_files_properties(${HMI_SRC_DIR}/hmi.qrc PROPERTIES AUTORCC ON)
+target_sources(tst_Theme PRIVATE ${HMI_SRC_DIR}/hmi.qrc)
+target_link_libraries(tst_Theme PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_Theme PRIVATE /utf-8)
+# 徽章字号的真实所在是 hmi.cpp(不是 qss —— inline 样式表会让 qss 失效),
+# 要钉住它只能读源码文本,所以要 HMI_SRC_DIR。同 tst_MenuBar 的做法。
+target_compile_definitions(tst_Theme PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_Theme COMMAND tst_Theme)
 # ★ 2026-10-20:两条路径宏,给 tst_MenuBar 里那条"菜单槽必须在 slots: 段"的用例。
 #   它现读 MenuBuilder.cpp(取槽名)和 hmi.h(查访问说明符段)——
 #   不抄一份槽名表是关键:抄了就又变成"测副本",生产代码改了测试照样绿。

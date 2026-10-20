@@ -173,6 +173,47 @@ int main(int argc, char *argv[])
                    << "version=" << QCoreApplication::applicationVersion()
                    << "build=" << __DATE__ << __TIME__;
 
+    // ★★ 2026-10-20:加载深色工业风样式表。
+    //
+    //   【位置是被实测逼出来的,挪过一次】
+    //   初版把它放在 QApplication 之后、日志配置之前。功能是对的,
+    //   但那句 qCInfo/qCWarning 【永远进不了日志文件】——
+    //   因为 qInstallMessageHandler 是在 applyConfig() 里装的,
+    //   那时还没装,消息只走 stderr。
+    //   而"主题没加载上"这件事恰恰是【最需要留痕】的:
+    //   它不报错、不崩,界面默默退回灰白皮,几个月后没人想得起来为什么。
+    //   一个记不进日志的告警等于没有告警。
+    //   所以现在挪到 applyConfig/registerCategories 之后。
+    //
+    //   【仍然必须早于任何控件 —— 这条没变】
+    //   qss 是【构造时】套上去的快照,已经建好的控件不会被后来的
+    //   setStyleSheet 追改。放到登录框之后就变成
+    //   "登录框深色、主窗口浅色"的分裂界面。
+    //   查过这两点之间没有任何控件构造(QMessageBox 最早出现在
+    //   下面的崩溃检查处,单实例锁也不建控件),所以这个位置同时满足
+    //   两个要求:日志已就绪,且控件一个都还没建。
+    //
+    //   【为什么走 qrc 而不是相对路径读盘】
+    //   ":/hmi/theme/dark_industrial.qss" 走的是编译进 exe 的资源:
+    //     · 不受工作目录影响(Qt 里"换个目录就读不到"是最难查的一类 bug)
+    //     · 打包/换机器不用记得把 qss 一起拷
+    //     · 和 hmi.vcxproj 那条构建轨读到的是同一份文件
+    {
+        QFile qss(QStringLiteral(":/hmi/theme/dark_industrial.qss"));
+        if (qss.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QString sheet = QString::fromUtf8(qss.readAll());
+            qss.close();
+            app.setStyleSheet(sheet);
+            qCInfo(hmiApp) << "[theme] 深色工业风已加载,字符数=" << sheet.size();
+        } else {
+            // ★ 不设默认样式表就悄悄跑 —— 那就是"界面丑但没人知道为什么"。
+            qCWarning(hmiApp)
+                << "[theme] ★ 样式表加载失败,界面会退回 Qt 默认皮肤。"
+                   "检查 hmi.qrc 里有没有 theme/dark_industrial.qss,"
+                   "以及编译时有没有带上 hmi.qrc。";
+        }
+    }
+
     // 7. 检查上次是否有崩溃 dump
     //    ★ 位置是挪过来的,两处都是实测逼出来的:
     //      · 必须在 QApplication 之后 —— QMessageBox 是 QWidget,

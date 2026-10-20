@@ -1,0 +1,332 @@
+/* ============================================================================
+   dark_industrial.qss —— 深色工业风主题(2026-10-20)
+   ============================================================================
+   【为什么需要这个文件】
+     建它之前,全仓库【零个样式表】—— 界面就是 Qt 默认 Fusion 灰白皮。
+     11 个按钮全是系统默认样式,主次不分;状态色用的是 lightgray/yellow
+     这种桌面配色,在车间强光下几乎看不出来。
+     "界面太丑"不是配色没调好,是根本没有样式层。
+
+   【为什么不逐个控件改属性】
+     ① 11 个按钮 × 5 个对话框 = 几十处 setStyleSheet,散在 5 个 .cpp 里,
+        改一次颜色要翻 5 个文件;
+     ② setStyleSheet 写在控件上会【盖掉】继承来的 qss —— 状态一变就写死,
+        下次调色全都对不上;
+     ③ 一张 qss 是唯一权威,改颜色只改一个文件,review 时 diff 也清楚。
+
+   【配色从哪来 —— 不是"看着好看"挑的】
+     下面每个色值都标了它的角色和约束。改之前先想清楚三件事:
+       · 对比度:深底浅字,正文至少 7:1(车间屏反光强,要留余量)
+       · 语义:颜色必须对应含义,不能好看优先
+       · 色觉障碍:约 8% 男性有红绿色弱,
+                    所以【不能只靠颜色区分】,形状/文字/位置必须也能区分。
+                    本表所有状态色都配有文字("运行中"/"已停止"),
+                    不存在"只有颜色、没有文字"的状态。
+
+   【★ 深色主题下的报警行 —— 刻意不改】
+     src/alarm/AlarmRowPalette.cpp 是报警配色的唯一权威,它是【浅色系】
+     (浅蓝/浅黄/浅橙红底),而 qss 管不到它 —— 那些格子是逐格 setBackground
+     设上去的,不经过样式表。
+     为什么不跟着改深色:那个文件有 4 条对比度不变量,每一条都被
+     tst_AlarmRowPalette 实测钉住(注释里写明"改颜色就会红")。
+     而且浅色报警行落在深色表格上会像色块一样跳出来 —— 这在报警场景是
+     【优点】:"有报警"这件事本来就该一眼看见,不该融进背景。
+
+   关联:hmi.cpp(状态色)/ src/alarm/AlarmRowPalette.cpp(报警配色,刻意不覆盖)
+   ============================================================================ */
+
+/* ---------------------------------------------------------------------------
+   颜色变量(Qt 的 qss 不支持真正的变量,只能靠"定义一次、下面引用"近似)
+   —— 实际做法是把同一批色值写成注释放在这里,改色时照着这张表逐处替换。
+   想要真变量,得上层用 QPalette + 少量 inline,那是另一种架构,不在本次范围。
+   --------------------------------------------------------------------------- */
+   背景最深   #1b2430   窗口底
+   背景次深   #232e3d   面板/分组框
+   背景控件   #2c3a4d   输入框/下拉/表头
+   背景悬停   #35485f
+   边框       #3d5068
+   正文       #dfe8f2   深底浅字
+   次要文字   #9fb0c4
+   高亮/主色  #3daee9   选中/焦点/强调
+   运行中     #3fb950
+   已停止     #7d8b9c   中灰(徽章底色;不用浅色系的浅灰 —— 深底上会瞎)
+   复位中     #d29922
+   故障       #f85149
+   已连接     #3fb950
+   徽章字色   #0d1117   四档徽章统一用近黑字(亮底深字),
+                          不是逐档挑的 —— 挑出来的白字对比度不够。
+                          见 hmi.cpp statusBadgeStyle() 处的说明。
+
+
+/* =========================  基础  ========================= */
+
+QWidget {
+    background-color: #232e3d;
+    color: #dfe8f2;
+    font-size: 11pt;
+    selection-background-color: #3daee9;
+    selection-color: #0d1117;
+}
+
+QMainWindow, QDialog {
+    background-color: #1b2430;
+}
+
+/* 标签:默认不该有底色块,否则主画面会是一片碎方块 */
+QLabel {
+    background: transparent;
+    color: #dfe8f2;
+    padding: 2px;
+}
+
+/* =========================  按钮  =========================
+   ★ 为什么用描边而不是实心
+     主画面有 11 个按钮,全部实心蓝会变成"11 个都在抢注意力"。
+     描边 + 悬停才填充,是工业界面的通行做法:
+     默认态安静,鼠标指到才亮起 —— 视觉噪声最低。 */
+
+QPushButton {
+    background-color: #2c3a4d;
+    color: #dfe8f2;
+    border: 1px solid #3d5068;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-height: 20px;
+}
+
+QPushButton:hover {
+    background-color: #35485f;
+    border-color: #3daee9;
+}
+
+QPushButton:pressed {
+    background-color: #3daee9;
+    color: #0d1117;
+    border-color: #3daee9;
+}
+
+QPushButton:disabled {
+    background-color: #232e3d;
+    color: #6e7b8b;
+    border-color: #2c3a4d;
+}
+
+/* ★ 主行动按钮:整个界面上只允许【一个】标成 primary。
+   现在没有任何控件用到它 —— 等真有"下一步该做什么"的时候再给具体控件加
+   property。先把口子留着,免得到时候为了"突出某个按钮"就到处改成实心蓝,
+   于是又回到"11 个都在抢"的老路。 */
+QPushButton[primary="true"] {
+    background-color: #3daee9;
+    color: #0d1117;
+    border-color: #3daee9;
+    font-weight: bold;
+}
+
+/* =========================  输入  ========================= */
+
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #1b2430;
+    color: #dfe8f2;
+    border: 1px solid #3d5068;
+    border-radius: 4px;
+    padding: 4px 8px;
+    selection-background-color: #3daee9;
+    selection-color: #0d1117;
+}
+
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: #3daee9;
+}
+
+QLineEdit:read-only {
+    /* ★ 只读控件必须【看起来】就是只读。
+       变量配置对话框里名称/地址/类型/读写四列锁死,
+       如果只读和可编辑长得一样,用户会去改它然后发现改不动 ——
+       那正是"以为能做、实际不能做"最伤人的一种。 */
+    background-color: #232e3d;
+    color: #9fb0c4;
+    border-style: dashed;
+}
+
+QComboBox {
+    background-color: #2c3a4d;
+    color: #dfe8f2;
+    border: 1px solid #3d5068;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-height: 20px;
+}
+
+QComboBox:hover { border-color: #3daee9; }
+QComboBox:disabled { color: #6e7b8b; background-color: #232e3d; }
+
+QComboBox QAbstractItemView {
+    background-color: #2c3a4d;
+    color: #dfe8f2;
+    border: 1px solid #3d5068;
+    selection-background-color: #3daee9;
+    selection-color: #0d1117;
+}
+
+/* =========================  表格  =========================
+   ★ 表头必须和行明显区分:深色表格里表头不做对比,
+     22 个控件 × 6 列的表会变成一坨,眼睛找不到列边界。 */
+
+QTableWidget, QTableView, QTableWidgetItem, QTableViewItem {
+    background-color: #1b2430;
+    color: #dfe8f2;
+    border: none;
+    gridline-color: #2c3a4d;
+    selection-background-color: #3daee9;
+    selection-color: #0d1117;
+}
+
+QHeaderView::section {
+    background-color: #2c3a4d;
+    color: #9fb0c4;
+    border: none;
+    border-right: 1px solid #3d5068;
+    border-bottom: 1px solid #3d5068;
+    padding: 6px 8px;
+    font-weight: bold;
+}
+
+QHeaderView::section:hover { background-color: #35485f; }
+
+/* =========================  菜单  ========================= */
+
+QMenuBar {
+    background-color: #232e3d;
+    border-bottom: 1px solid #3d5068;
+}
+
+QMenuBar::item {
+    background: transparent;
+    padding: 6px 12px;
+}
+
+QMenuBar::item:selected { background-color: #3daee9; color: #0d1117; }
+
+QMenu {
+    background-color: #2c3a4d;
+    border: 1px solid #3d5068;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 6px 24px 6px 20px;
+    border-radius: 3px;
+}
+
+QMenu::item:selected { background-color: #3daee9; color: #0d1117; }
+QMenu::item:disabled { color: #6e7b8b; }
+QMenu::separator {
+    height: 1px;
+    background: #3d5068;
+    margin: 4px 8px;
+}
+
+/* =========================  容器/分组  ========================= */
+
+QGroupBox {
+    border: 1px solid #3d5068;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding-top: 8px;
+    background-color: #232e3d;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #9fb0c4;
+    font-weight: bold;
+}
+
+QTabWidget::pane {
+    border: 1px solid #3d5068;
+    border-radius: 4px;
+    background-color: #232e3d;
+}
+
+QTabBar::tab {
+    background-color: #1b2430;
+    color: #9fb0c4;
+    border: 1px solid #3d5068;
+    border-bottom: none;
+    padding: 6px 16px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background-color: #2c3a4d;
+    color: #dfe8f2;
+    border-top: 2px solid #3daee9;
+}
+
+QTabBar::tab:hover:!selected { color: #dfe8f2; }
+
+/* =========================  滚动条  =========================
+   默认 Fusion 滚动条在深底上是灰块,和内容糊在一起。 */
+
+QScrollBar:vertical {
+    background: #1b2430;
+    width: 12px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #3d5068;
+    border-radius: 6px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover { background: #3daee9; }
+
+QScrollBar:horizontal {
+    background: #1b2430;
+    height: 12px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: #3d5068;
+    border-radius: 6px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover { background: #3daee9; }
+
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+/* =========================  状态栏  ========================= */
+
+QStatusBar {
+    background-color: #232e3d;
+    color: #9fb0c4;
+    border-top: 1px solid #3d5068;
+}
+
+QStatusBar::item { border: none; }
+
+/* =========================  消息框  =========================
+   权限不足、删除确认这些弹框是操作员最常看到的东西,
+   不该跟主界面不是一个配色 —— 那样弹框会"陷进"背景里被忽略。 */
+
+QMessageBox {
+    background-color: #232e3d;
+}
+
+/* 字号【只】在 QWidget 那一条里定一次,这里不再重复 ——
+   重复写了就要维护两处,而两处迟早会不一样。
+   tst_Theme::fontSizeIsDefinedOnceInTheSheet 盯的就是这个。 */
+QMessageBox QLabel {
+    color: #dfe8f2;
+}
+
+/* =========================  提示  ========================= */
+
+QToolTip {
+    background-color: #0d1117;
+    color: #dfe8f2;
+    border: 1px solid #3daee9;
+    padding: 4px 8px;
+}

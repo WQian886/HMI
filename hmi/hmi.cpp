@@ -68,6 +68,62 @@
 namespace {
 constexpr int kColAlarmName = 1;   // 报警表:时间/报警名/等级/值/状态
 constexpr int kColVarName   = 1;   // 审计表:时间/Variable/新值/结果/地址
+
+// ★★★ 2026-10-20:状态徽章配色 —— 状态色原来散在两个函数里各写一遍字符串。
+//
+//   【为什么要抽出来】
+//   深色主题下,原来那些值一个都不能用:
+//     "lightgray" + 黑字 → 深底上一个浅灰块,晃眼且字看不清
+//     "yellow"   + 黑字 → 刺眼,车间强光下更难读
+//   换主题就得换色,而色值散在 updateStateLabel / updateConnLabel 两处、
+//   九个 switch 分支里,改一遍漏一个都不会报任何错。
+//   抽成一处之后,"状态一共有哪几档、每档什么色"变成一张能读完的表。
+//
+//   【★ 为什么不用 qss 里的颜色】qss 管不到它们 ——
+//   状态色是按【运行期状态】变的,必须逐次 setStyleSheet;
+//   而一旦在控件上写了 inline 样式表,qss 对这个控件就【完全失效】。
+//   所以状态色只能在这里写,不能"顺便交给主题文件管"。
+//
+//   【配色约束 —— 不是"看着顺眼"挑的】
+//     kStatusOk    #3fb950 绿  运行/已连接:一切正常
+//     kStatusIdle  #7d8b9c 中灰 已停止:深底上用【灰】而不是浅灰,
+//                            浅灰块在深色界面里比绿色还抢眼
+//     kStatusBusy  #d29922 琥珀 连接中/复位中/重连中:在动,但还没定
+//     kStatusBad   #f85149 红  故障/连接失败:需要人立刻处理
+//   绿-琥珀-红 是工业界面的通行语义,操作员不用学就知道轻重。
+//
+//   【★ 四档字色统一成 #0d1117(近黑),不是随手挑的】
+//     初版红/灰两档用了白字,WCAG 一算只有 3.35:1 和 4.31:1,低于 4.5 ——
+//     现场强光下"故障"两个字会看不清,而故障恰恰是【最该看清的一档】。
+//     改成"亮底 + 近黑字"之后四档分别是 7.45 / 5.45 / 7.50 / 5.65,
+//     全部达标(数字由 tst_Theme::statusBadgeColorsAreLegibleOnDarkBackground 实跑得出)。
+//     附带好处:操作员扫一眼时,四档徽章的【字是一样黑的】,
+//     差异只在色相 —— 这正是"同一类东西"的视觉语言。
+//     ★ 灰档因此从 #6e7b8b 提到 #7d8b9c:原来的暗灰配深字只有 4.39:1,差一点点。
+//       而 #6e7b8b 在 qss 里仍作禁用态文字色 —— 那是对深底的【前景色】,
+//       要求相反(要暗才好和正文区分),两处不必是同一个值。
+//
+//   【★ 色觉障碍】约 8% 男性有红绿色弱 —— 红和绿对ta们可能都偏黄。
+//     所以本表【每一个状态都带文字】("状态:运行中"/"状态:故障"),
+//     不存在"只有颜色、没有文字"的情况。
+//     颜色是第二通道,文字才是第一通道。这个顺序不能反。
+enum StatusTone { kStatusIdle, kStatusBusy, kStatusOk, kStatusBad };
+
+QString statusBadgeStyle(StatusTone tone, bool large = false) {
+    QString bg;
+    switch (tone) {
+    case kStatusOk:   bg = QStringLiteral("#3fb950"); break;
+    case kStatusBusy: bg = QStringLiteral("#d29922"); break;
+    case kStatusBad:  bg = QStringLiteral("#f85149"); break;
+    case kStatusIdle: bg = QStringLiteral("#7d8b9c"); break;
+    }
+    // 字色不再是逐档挑选的 —— 见上面那段"四档字色统一"的说明。
+    const QString fg = QStringLiteral("#0d1117");
+    return QStringLiteral("background-color: %1; color: %2; "
+                          "font-weight: bold; border-radius: 4px; padding: 4px 10px; %3")
+        .arg(bg, fg,
+             large ? QStringLiteral("font-size: 18px;") : QStringLiteral("font-size: 13px;"));
+}
 } // namespace
 
 // ★ 阶段 5(2026-10-19):LegacySinglePlcProvider 已删除 —— 它是阶段 4 的临时
@@ -1583,23 +1639,17 @@ void hmi::updateStateLabel() {
     case State::Running:
         timer->start(kCounterTickMs);  // ★ IMPROVE-B4
         ui.stateLabel->setText("状态:运行中");
-        ui.stateLabel->setStyleSheet(
-            "background-color: green; color: white; "
-            "font-size: 18px; font-weight: bold;");
+        ui.stateLabel->setStyleSheet(statusBadgeStyle(kStatusOk, /*large=*/true));
         break;
     case State::Stopped:
         timer->stop();
         ui.stateLabel->setText("状态:已停止");
-        ui.stateLabel->setStyleSheet(
-            "background-color: lightgray; color: black; "
-            "font-size: 18px; font-weight: bold;");
+        ui.stateLabel->setStyleSheet(statusBadgeStyle(kStatusIdle, /*large=*/true));
         break;
     case State::Resetting:
         timer->stop();
         ui.stateLabel->setText("状态:复位中");
-        ui.stateLabel->setStyleSheet(
-            "background-color: yellow; color: black; "
-            "font-size: 18px; font-weight: bold;");
+        ui.stateLabel->setStyleSheet(statusBadgeStyle(kStatusBusy, /*large=*/true));
         counter = 0; // 复位时把 counter 也重置(保留原逻辑)
         break;
     case State::Fault:
@@ -1609,9 +1659,7 @@ void hmi::updateStateLabel() {
         //   注:5.3 接入报警系统后会加闪烁(QTimer 周期切背景色)
         timer->stop();
         ui.stateLabel->setText("状态:故障");
-        ui.stateLabel->setStyleSheet(
-            "background-color: red; color: white; "
-            "font-size: 18px; font-weight: bold;");
+        ui.stateLabel->setStyleSheet(statusBadgeStyle(kStatusBad, /*large=*/true));
         break;
     }
 }
@@ -1621,24 +1669,24 @@ void hmi::updateConnLabel() {
     switch (connState_) {
     case ConnState::Disconnected:
         ui.connLabel->setText("状态:已断开");
-        ui.connLabel->setStyleSheet("background-color: lightgray; color: black; font-weight: bold;");
+        ui.connLabel->setStyleSheet(statusBadgeStyle(kStatusIdle));
         break;
     case ConnState::Connecting:
         ui.connLabel->setText("状态:连接中...");
-        ui.connLabel->setStyleSheet("background-color: yellow; color: black; font-weight: bold;");
+        ui.connLabel->setStyleSheet(statusBadgeStyle(kStatusBusy));
         break;
     case ConnState::Connected:
         ui.connLabel->setText("状态:已连接");
-        ui.connLabel->setStyleSheet("background-color: green; color: white; font-weight: bold;");
+        ui.connLabel->setStyleSheet(statusBadgeStyle(kStatusOk));
         break;
     case ConnState::Failed:
         ui.connLabel->setText("状态:连接失败(超时或网络错误)");
-        ui.connLabel->setStyleSheet("background-color: red; color: white; font-weight: bold;");
+        ui.connLabel->setStyleSheet(statusBadgeStyle(kStatusBad));
         break;
     case ConnState::Reconnecting:
         ui.connLabel->setText(QString("状态:重连中(%1/%2),%3 秒后重试")
             .arg(reconnectAttempt_).arg(reconnectMax_).arg(reconnectDelayMs_ / 1000));
-        ui.connLabel->setStyleSheet("background-color: orange; color: white; font-weight: bold;");
+        ui.connLabel->setStyleSheet(statusBadgeStyle(kStatusBusy));
         break;
     }
 }

@@ -1,3 +1,12 @@
 <RCC>
-    <qresource prefix="/hmi"/>
+    <qresource prefix="/hmi">
+        <!-- ★ 2026-10-20:深色工业风样式表。
+             之前本文件是空的,全仓库零个 qss —— 界面就是 Qt 默认 Fusion 灰白皮,
+             11 个按钮全是系统默认样式,主画面按钮"按钮没用"的抱怨就是这么来的。
+             挂进 qrc 而不是用相对路径读盘:
+               ① 免掉"工作目录变了就读不到"(Qt 里这种路径问题极难查)
+               ② 进安装包/换机器不用记得把 qss 一起拷
+               ③ 和 hmi.vcxproj 那条轨共用同一份资源,两边不会读到不同文件 -->
+        <file>theme/dark_industrial.qss</file>
+    </qresource>
 </RCC>
