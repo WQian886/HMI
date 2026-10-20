@@ -27,6 +27,8 @@
 
 #include <QStringList>
 
+#include <optional>
+
 class QMenuBar;
 class QObject;
 
@@ -51,6 +53,15 @@ namespace qwhmi::ui {
 //   返回空列表(而不是 void)就是把这份喊话的权力交回给调用方。
 //
 // 【可重复调用】每次重建会先 clear 掉旧菜单项,不会叠加出两层"工程"。
+//
+// ★★ 2026-10-20(P1-a):每个菜单项现在都带一个权限,按角色置灰。
+//   【为什么以前没有】P0 只给主画面的按钮绑了权限,而菜单 17 项一个都没绑 ——
+//   裁掉按钮之后,用户绕到菜单里,权限就整个失效了。
+//   那不是"菜单忘了做",是【两个入口的门禁不一致】,而后者比没有门更危险:
+//   界面上灰着的按钮让人以为"这东西我不能碰",菜单里却能点。
+//   逐项依据写在 MenuBuilder.cpp 的 buildApplicationMenu() 里 ——
+//   权限表就在 bar->clear() 之后那一大段注释,每一项都写了
+//   "为什么是这个权限 / 为什么刻意不绑"。
 QStringList buildApplicationMenu(QMenuBar* bar, QObject* receiver);
 
 } // namespace qwhmi::ui

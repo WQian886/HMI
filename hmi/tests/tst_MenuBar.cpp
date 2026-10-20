@@ -78,6 +78,25 @@
 //   只做一轮的话,另一侧能坏着而新测试照样绿 —— 而 ② 恰好是老测试的地盘,
 //   ① 才是这次事故真正的形状。
 //
+// 【负向对照 —— 2026-10-20 P1-a 新增那三条,实跑两轮】
+//   ① 把"画面 → 编辑器"的权限从 EditProject 改成 std::nullopt
+//      (= P1-a 没做时菜单的样子:菜单里没有门)
+//      → 红 2:menuItems_areGatedByRole(点名"编辑器"这一项)
+//              editorItem_isTheOnlyGateOnProjectWriting
+//        绿 13 —— ★ 其中 everyMenuItem_declaresAPermission 绿得【理直气壮】:
+//          它只查"表态了没有",而 std::nullopt【就是一种表态】。
+//          这正是把"表态"和"表态对不对"拆成两条的理由。
+//   ② 有一项绕过 addItem,直接写 mScreen->addAction(...) + 手写 connect
+//      (= addItem 那个"perm 无默认值"的编译期强制,唯一的缺口)
+//      → 红 2:everyMenuItem_declaresAPermission(指名"菜单项只能从 addItem 出")
+//              missingSlot_isReportedNotSwallowed
+//                (★ 意料之外的收获:手写的 connect 失败【不进 failures 列表】,
+//                 于是 16 变成 15 —— 少了一个本该被喊出来的静默失败)
+//        绿 13
+// ★ 两轮打的是两个方向:① 是"表态了但表错了",② 是"根本没过表态这一关"。
+//   只做一轮的话,另一侧能坏着而三条测试照样绿 ——
+//   而 ② 恰好是 addItem 那个设计的全部意义所在(不给绕过它的机会)。
+//
 // 关联:hmi.cpp buildMenus() / src/ui/MenuBuilder.cpp / hmi.h(访问说明符段)
 // ============================================================================
 
@@ -92,6 +111,9 @@
 #include <QVector>
 
 #include "ui/MenuBuilder.h"
+#include "auth/CurrentUser.h"
+#include "auth/Permission.h"
+#include "auth/User.h"
 
 // ---------------------------------------------------------------------------
 // 假接收者:和 hmi 一样有一组同名槽,每个槽把自己的名字记下来。
@@ -184,6 +206,86 @@ const QStringList kMenuSlotNames = {
     QStringLiteral("onShowCapabilities"),
 };
 
+// ★★ P1-a(2026-10-20):17 项的权限表 —— 【跟 MenuBuilder.cpp 的表态一一对应】。
+//
+//   这份表抄的是 MenuBuilder.cpp 里那些 addItem 的第 6 个参数。
+//   【为什么抄一份还叫"测副本"?这里不是】:
+//     被测对象不是"生产代码写了什么权限",而是"这份权限在四个角色下
+//     实际产生什么 enabled 状态"。后者只能真的建出菜单、切角色、看
+//     QAction::isEnabled() —— 生产代码里【没有】这个函数可以调,
+//     它把权限绑上去就完事了。所以这里不是抄,是将那张表【翻译成断言】。
+//   真正防"生产代码写错了"的那一半在下面那条
+//   everyMenuItem_declaresAPermission(编译期已强制)+ 负向对照第 ① 轮。
+//
+//   【为什么绑定【不】由测试自己调 bindActionEnable】
+//   那样测的就是 UIPermission 而不是菜单了:菜单漏绑一项,测试照样绿。
+//   现在的形状是"菜单自己绑 → 角色自己切 → 看菜单项自己灰不灰",
+//   漏绑一项这一行立刻红 —— 因为 Default 角色是 Viewer,该项该灰却亮着。
+enum Gate { kUngated = 0, kWrite, kEdit, kUsers };
+
+struct GateCase {
+    const char* menu;
+    const char* item;
+    Gate        gate;
+    const char* why;   // 为什么是这一个 —— 抄菜单的"依据"是为了逼自己再想一遍
+};
+
+const GateCase kGateCases[] = {
+    // 工程
+    {"工程", "打开工程...",   kEdit, "打开=把运行中的整个配置换成磁盘上那份"},
+    {"工程", "保存工程...",   kEdit, "写工程文件"},
+    // 运行:启停复位要操作员能按;连接/断开任何角色都要能
+    {"运行", "启动",         kWrite, "现场操作员一天按几十次"},
+    {"运行", "停止",         kWrite, "同上"},
+    {"运行", "复位",         kWrite, "同上"},
+    {"运行", "连接 PLC",     kUngated, "看现场是最基本的动作,绑了就看不见了"},
+    {"运行", "断开",         kUngated, "同上"},
+    // PLC
+    {"PLC",  "PLC 配置...",  kEdit, "改的是现场设备的地址/协议"},
+    // 画面:编辑器是改工程的唯一门;两个画布是只读
+    {"画面", "编辑器...",    kEdit, "★ EditorMainWindow 内部零权限检查,这是唯一的门"},
+    {"画面", "运行时画面...", kUngated, "只读,Viewer 也该看得见现场画面"},
+    {"画面", "演示画布...",  kUngated, "只读;真该做的是发布时摘掉,不是灰它"},
+    // 报警
+    {"报警", "报警配置...",  kEdit, "对话框内自查同一个权限,这里绑一致"},
+    {"报警", "报警声音...",  kEdit, "同上"},
+    // 数据:导出【刻意不绑】,理由写在 MenuBuilder.cpp 那两行注释里
+    {"数据", "变量配置...",  kEdit, "变量表就是工程文件本体的一部分"},
+    {"数据", "导出变量表...", kUngated, "导出只读内存里的表写 CSV,不改任何东西"},
+    {"数据", "导出报警表...", kUngated, "同上"},
+    // 帮助
+    {"帮助", "当前支持的功能", kUngated, "把'你能看说明书'也卡掉是在制造而不是在防"},
+};
+
+// 四个角色下每个 Gate 的 enabled 期望。写成表是为了让
+// "Operator 到底有没有 EditProject"这类问题有个明确答案,
+// 而不是每次靠人回想 Permission.cpp 的映射。
+struct RoleGate { qwhmi::auth::Role role; const char* roleName; };
+const RoleGate kRoles[] = {
+    {qwhmi::auth::Role::Admin,    "Admin"},
+    {qwhmi::auth::Role::Engineer, "Engineer"},
+    {qwhmi::auth::Role::Operator, "Operator"},
+    {qwhmi::auth::Role::Viewer,   "Viewer"},
+};
+
+// Gate → 该权限名(读 Permission.cpp 同一份 checkPermission,不重写映射)
+qwhmi::auth::Permission permOf(Gate g) {
+    switch (g) {
+    case kWrite: return qwhmi::auth::Permission::WriteVariable;
+    case kEdit:  return qwhmi::auth::Permission::EditProject;
+    case kUsers: return qwhmi::auth::Permission::ManageUsers;
+    case kUngated: break;
+    }
+    return qwhmi::auth::Permission::EditRecipe;   // 取一个不会被人当真的值
+}
+
+qwhmi::auth::User userWith(qwhmi::auth::Role r) {
+    qwhmi::auth::User u;
+    u.name = "tester";
+    u.role = r;
+    return u;
+}
+
 } // namespace
 
 class tst_MenuBar : public QObject {
@@ -248,6 +350,28 @@ private slots:
     //   而不是靠我复述 moc 的规则。详见实现处那段注释。
     void moc_reallyRegistersPrivateSlots();
 
+    // ★★★ P1-a(2026-10-20):菜单项的权限门控。
+    //
+    //   P0 只给主画面的按钮绑了权限,菜单 17 项一个都没绑。
+    //   P1-b 把按钮裁掉之后这就变成一个【真漏洞】:界面上的"编辑器"灰着,
+    //   而 画面→编辑器 菜单项点得开,EditorMainWindow 内部零权限检查。
+    //   两个入口门禁不一致,比两个入口都没门更危险 —— 前者让人以为有门。
+    //
+    //   本组三条的分工:
+    //     ① everyMenuItem_declaresAPermission —— 静态:17 项每一项都【表态】了
+    //        (绑什么权限,或刻意不绑)。表态这件事在编译期已经强制
+    //        (addItem 的 perm 参数无默认值),这条查的是"有没有人在
+    //        绕过它" —— 比如手写 menu->addAction 不走 addItem。
+    //     ② menuItems_areGatedByRole —— 行为:四角色 × 17 项的 enabled 全矩阵。
+    //        默认角色是 Viewer,所以"漏绑一项"在这里是【亮着】而不是"灰着"],
+    //        跟"绑错成更严的权限"表现相反,两种失败能分开。
+    //     ③ editorItem_isTheOnlyGateOnProjectWriting —— 单项深挖:
+    //        按钮 editorBtn 已被裁掉,这个菜单项现在是唯一的一道门,
+    //        所以它的权限和"编辑器内部有没有自查"必须同时被钉住。
+    void everyMenuItem_declaresAPermission();
+    void menuItems_areGatedByRole();
+    void editorItem_isTheOnlyGateOnProjectWriting();
+
 private:
     QMenuBar m_bar;
     FakeReceiver m_recv;
@@ -268,6 +392,25 @@ public slots:
 };
 
 void tst_MenuBar::initTestCase() {
+    // ★★★ P1-a(2026-10-20):先以 Admin 登录,再建菜单。
+    //
+    //   【为什么必须先登录】CurrentUser 未登录时 role 是 Viewer,
+    //   而 Viewer 一项权限都没有 —— 菜单一旦建好,17 项里有 10 项是灰的。
+    //   而上面那 11 条老用例里有两条是:
+    //       QVERIFY2(a->isEnabled(), "菜单项不该是禁用的");
+    //       a->trigger();
+    //   灰着的 QAction trigger() 【什么都不会触发】(Qt 自己吞掉),
+    //   于是这两条会以"触发后 fired 为空"的形式红掉 ——
+    //   而那条红跟菜单接得对不对【毫无关系】,纯粹是角色不对。
+    //   那正是本文件开头警告的"报错误导人":一个红指向槽名,一个红指向登录态,
+    //   混在一起排查会先怀疑错的那一半。
+    //
+    //   【为什么是 Admin 而不是"没有角色"]没有角色就是 Viewer,没有中间态。
+    //   Admin 拥有全部 6 项权限,17 项全亮,老用例回到它们本来的样子。
+    //
+    //   ★ 下面 menuItems_areGatedByRole 会依次登录四个角色,并以 Viewer 收尾;
+    //     它之后的用例都自带 login(),不依赖这里留下的角色。
+    qwhmi::auth::CurrentUser::instance().login(userWith(qwhmi::auth::Role::Admin));
     qwhmi::ui::buildApplicationMenu(&m_bar, &m_recv);
 }
 
@@ -768,6 +911,240 @@ void tst_MenuBar::moc_reallyRegistersPrivateSlots() {
     QVERIFY2(missing.isEmpty(),
              qPrintable(QStringLiteral("这些槽 moc 没生成元方法(菜单会点了没反应): %1")
                  .arg(missing.join(QStringLiteral(", ")))));
+}
+
+// ---------------------------------------------------------------------------
+// ★★★ P1-a(2026-10-20):菜单项的权限门控
+//
+// 【为什么这是 P1-b 的【前置条件】而不是配套收拾】
+//   P0 只给主画面那几个按钮绑了权限,菜单 17 项一个都没绑。
+//   单看今天:只是"菜单宽进"了一点,不算漏洞 ——
+//   因为主画面还摆着按钮,能用的人本来就能用。
+//   P1-b 把那 8 个按钮裁掉之后,形状变了:
+//     界面上"编辑器"灰着(按钮还在、只是被权限门控挡住),
+//     而 画面 → 编辑器 菜单项【点得开】——
+//     EditorMainWindow 内部零权限检查,它直接 project_->saveToFile()。
+//   也就是说:【一个 Viewer 能改工程并写盘】。
+//   而"灰着的按钮"比"根本没有按钮"更危险 ——
+//   它让人相信"编辑器对我关着",从而放心地把工程文件交给对方,
+//   而实际上对方从菜单里就进去了。
+//   两个入口门禁不一致,比两个入口都没门更糟。
+//
+// 【为什么"绑权限"这件事本身还要再钉一层】
+//   P0 的事故形状不是"忘了设计",是"加功能时漏了一步":
+//   主画面每加一个按钮都写了 tooltip,没人顺手补 bindButtonEnable,
+//   而漏一次【不报错、测试也绿】。17 项如果靠人自觉,下次加第 18 项就会重演。
+//   所以生产代码把表态做成编译期强制(addItem 的 perm 参数无默认值),
+//   而下面 ① 查的是"有没有人绕过 addItem 手写 menu->addAction"——
+//   那条路绕过编译期强制,是这条防线唯一的缺口。
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// 去掉注释再比对 —— hmi.cpp / MenuBuilder.cpp 的注释里满是
+// "editorBtn / saveButton"这类名字(说明它们为什么被删),
+// 不去掉就会把"注释提到了"当成"代码还在",测试永远绿。
+QString codeOnly(const QString& text) {
+    QString out;
+    out.reserve(text.size());
+    bool inBlock = false;
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    for (const QString& line : lines) {
+        QString keep;
+        int i = 0;
+        while (i < line.size()) {
+            if (inBlock) {
+                const int end = line.indexOf(QLatin1String("*/"), i);
+                if (end < 0) { i = line.size(); break; }
+                inBlock = false;
+                i = end + 2;
+                continue;
+            }
+            const int b = line.indexOf(QLatin1String("/*"), i);
+            const int s = line.indexOf(QLatin1String("//"), i);
+            if (s >= 0 && (b < 0 || s < b)) { keep += line.mid(i, s - i); break; }
+            if (b >= 0) { keep += line.mid(i, b - i); inBlock = true; i = b + 2; continue; }
+            keep += line.mid(i);
+            break;
+        }
+        out += keep;
+        out += QLatin1Char('\n');
+    }
+    return out;
+}
+
+int countOf(const QString& text, const QString& needle) {
+    int n = 0, i = 0;
+    while ((i = text.indexOf(needle, i)) >= 0) { ++n; i += needle.size(); }
+    return n;
+}
+
+} // namespace
+
+// ★★ P1-a ①:静态 —— 17 项每一项都【表态】了
+void tst_MenuBar::everyMenuItem_declaresAPermission() {
+    const QString path = QStringLiteral(MENU_SRC_DIR_STRING "/ui/MenuBuilder.cpp");
+    QFile f(path);
+    QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text),
+             qPrintable(QStringLiteral("打不开 %1").arg(path)));
+    const QString all = QString::fromUtf8(f.readAll());
+    f.close();
+
+    // 只取 buildApplicationMenu 这个函数体 —— addItem 的两个重载定义在它前面,
+    // 一起数会把"定义"数进来。
+    const int fnAt = all.indexOf(QStringLiteral("QStringList buildApplicationMenu"));
+    QVERIFY2(fnAt >= 0, "MenuBuilder.cpp 里找不到 buildApplicationMenu 的定义");
+    const QString body = all.mid(fnAt);
+
+    // ---- 1. 菜单项【只能】从 addItem 出 ----
+    //   addItem 的 perm 参数没有默认值(生产代码的编译期强制),
+    //   这条是那道强制的唯一缺口:menu->addAction(...) 完全绕过它。
+    //   ★ 只在 body 里数 —— addItem 自己的实现里有 menu->addAction(text),
+    //     那是【建出 action】的必要一步,不是绕过表态。
+    const int directAdds = countOf(body, QStringLiteral("->addAction("));
+    QCOMPARE(directAdds, 0);
+
+    // ---- 2. 每一项都必须写了权限,或写了"刻意不绑" ----
+    //   逐条语句查,而不是只查全文含不含 std::nullopt ——
+    //   后者在【漏了一项】时照样绿(别的项写了 nullopt 就搜得到)。
+    const QStringList stmts = body.split(QLatin1Char(';'));
+    QStringList problems;
+    int itemCount = 0;
+    for (const QString& raw : stmts) {
+        const QString s = raw.simplified();
+        if (!s.contains(QStringLiteral("addItem("))) continue;
+        ++itemCount;
+        const bool stated = s.contains(QStringLiteral("Permission::"))
+                         || s.contains(QStringLiteral("std::nullopt"));
+        if (!stated) {
+            problems << QStringLiteral("这一项没有表态: %1")
+                        .arg(s.left(120).append(QStringLiteral(" ...")));
+        }
+    }
+
+    // 17 项(工程2+运行5+PLC1+画面3+报警2+数据3+帮助1)。
+    //   ★ 写死而不是"至少 1 个":解析器写坏时后者红不了,
+    //     而这条测试的全部价值就在"它真的读到了那份文件"。
+    QCOMPARE(itemCount, 17);
+    QVERIFY2(problems.isEmpty(),
+             qPrintable(QStringLiteral(
+                 "这些菜单项没表态权限(加一项却忘了写【绑什么 / 刻意不绑】,"
+                 "就等于绕过编译期强制,门禁又漏了):\n  %1")
+                 .arg(problems.join(QStringLiteral("\n  ")))));
+}
+
+void tst_MenuBar::menuItems_areGatedByRole() {
+    // ★★ 行为:四角色 × 17 项的 enabled 全矩阵。
+    //
+    //   【为什么默认角色是关键】CurrentUser 未登录时 role 是 Viewer,
+    //   而 Viewer 一项权限都没有。所以"菜单漏绑一项"在这里表现为
+    //   【该项亮着】—— 与"绑错成更严的权限"(该项该亮却灰着)方向相反,
+    //   两种失败能被这两类断言分开,不会互相掩盖。
+    //
+    //   【为什么逐项查,不按菜单查】一份表漏一项时按菜单查会整块跳过,
+    //   报错还指出的是菜单名而不是项名,排查要多翻一次。
+    QStringList problems;
+    for (const RoleGate& r : kRoles) {
+        qwhmi::auth::CurrentUser::instance().login(userWith(r.role));
+
+        for (const GateCase& c : kGateCases) {
+            QMenu* m = menuNamed(QString::fromUtf8(c.menu));
+            QVERIFY2(m, qPrintable(QStringLiteral("没有顶级菜单「%1」").arg(QLatin1String(c.menu))));
+            QAction* a = actionIn(m, QString::fromUtf8(c.item));
+            QVERIFY2(a, qPrintable(QStringLiteral("菜单「%1」里没有「%2」")
+                         .arg(QLatin1String(c.menu), QLatin1String(c.item))));
+
+            // 期望值直接问生产的 checkPermission,不在本文件重写角色→权限映射 ——
+            // 那样这张表就会和 Permission.cpp 分叉,而分叉的方向恰好是
+            // "测试说该能、生产说不能"这种最难查的错。
+            const bool expect = c.gate == kUngated
+                || qwhmi::auth::checkPermission(r.role, permOf(c.gate));
+
+            const QString where = QStringLiteral("%1(角色 %2)")
+                .arg(QString::fromUtf8(c.item), QLatin1String(r.roleName));
+            if (a->isEnabled() != expect) {
+                problems += QStringLiteral(
+                    "%1 应%2,实际%3 —— 依据:%4")
+                    .arg(where,
+                         expect ? QStringLiteral("亮着") : QStringLiteral("灰着"),
+                         a->isEnabled() ? QStringLiteral("亮着") : QStringLiteral("灰着"),
+                         QString::fromUtf8(c.why));
+            }
+        }
+    }
+    QVERIFY2(problems.isEmpty(),
+             qPrintable(QStringLiteral("菜单门控矩阵对不上:\n  %1")
+                 .arg(problems.join(QStringLiteral("\n  ")))));
+}
+
+// ★★★ P1-a ③:编辑器菜单项现在是"改工程"的【唯一一道门】
+void tst_MenuBar::editorItem_isTheOnlyGateOnProjectWriting() {
+    QMenu* screen = menuNamed(QStringLiteral("画面"));
+    QVERIFY(screen);
+    QAction* editor = actionIn(screen, QStringLiteral("编辑器..."));
+    QVERIFY(editor);
+
+    // ---- 1. 行为:Viewer / Operator 灰,Engineer / Admin 亮 ----
+    //   两个方向都要查:只查"Viewer 灰"会放过"绑成了 ManageUsers"这种
+    //   过度收紧 —— 结果是【工程师也进不去编辑器】,功能没了但测试全绿。
+    struct Want { qwhmi::auth::Role role; const char* name; bool enabled; };
+    const Want kWant[] = {
+        {qwhmi::auth::Role::Admin,    "Admin",    true},
+        {qwhmi::auth::Role::Engineer, "Engineer", true},
+        {qwhmi::auth::Role::Operator, "Operator", false},
+        {qwhmi::auth::Role::Viewer,   "Viewer",   false},
+    };
+    for (const Want& w : kWant) {
+        qwhmi::auth::CurrentUser::instance().login(userWith(w.role));
+        QCOMPARE(editor->isEnabled(), w.enabled);
+        if (!w.enabled) continue;
+        // ★ 顺带钉住"亮着的时候真的点得动"——
+        //   权限门控只是把 enabled 设成 true,连接断了照样点不动,
+        //   而"菜单项亮着但点了没反应"正是本文件开头写的那类最恶劣 bug。
+        m_recv.clearFired();
+        editor->trigger();
+        QCOMPARE(m_recv.fired, QStringList{QStringLiteral("onEditorClicked")});
+    }
+
+    // ---- 2. 静态:这道门【外面】不能再有第二个入口 ----
+    //   P1-b 把主画面的 editorBtn 撤了。万一将来有人觉得"放在主画面更顺手"
+    //   又加回来,而那个新按钮漏绑权限 —— 那就等于门又漏了一道,
+    //   而界面上的样子是"一个灰按钮 + 一个能点的菜单",没人看得出门在哪。
+    //   所以这里把"主画面【代码里】不再有编辑器按钮"钉住。
+    //   ★ 先剥注释:hmi.cpp 里那段注释【故意】提到了 editorBtn(说明为什么删),
+    //     不剥就会把"注释提到了"当成"代码还在",这条永远绿。
+    const QString hmiCppPath = QStringLiteral(HMI_SRC_DIR_STRING "/hmi.cpp");
+    QFile hf(hmiCppPath);
+    QVERIFY2(hf.open(QIODevice::ReadOnly | QIODevice::Text),
+             qPrintable(QStringLiteral("打不开 %1").arg(hmiCppPath)));
+    const QString hmiCode = codeOnly(QString::fromUtf8(hf.readAll()));
+    hf.close();
+    QVERIFY2(!hmiCode.contains(QStringLiteral("editorBtn")),
+             "hmi.cpp 里【代码中】又出现了 editorBtn —— P1-b 已经把这个按钮撤掉了。"
+             "再放回来之前先想清楚:它绑权限了吗?菜单项是唯一一道门,"
+             "多一个入口就多一处可能没门的地方;要放回主画面,请连 bindButtonEnable 一起加。");
+
+    // ---- 3. 静态:编辑器内部确实没有第二道自查 ----
+    //   这不是"要求它别有自查"(那反而是坏事),而是把"菜单项是唯一的门"
+    //   这个前提【如实写下来】:哪天有人给 EditorMainWindow 加了 checkPermission,
+    //   这条会红,提示他更新注释和第 1 步的说明 —— 因为那时这句话已经不成立了,
+    //   而过期的"安全说明"比没有说明更坏。
+    const QString edPath = QStringLiteral(HMI_SRC_DIR_STRING "/src/editor/EditorMainWindow.cpp");
+    QFile ef(edPath);
+    QVERIFY2(ef.open(QIODevice::ReadOnly | QIODevice::Text),
+             qPrintable(QStringLiteral("打不开 %1").arg(edPath)));
+    const QString edText = QString::fromUtf8(ef.readAll());
+    ef.close();
+    const bool editorSelfChecks = edText.contains(QStringLiteral("checkPermission"));
+    if (editorSelfChecks) {
+        qInfo("EditorMainWindow 里已经出现 checkPermission —— "
+              "『编辑器菜单项是唯一一道门』这句话已过期,MenuBuilder.cpp 的注释也要一起改。");
+    }
+    // 无条件成立的那一半:菜单项【必须】拦住 Viewer,与内部有没有自查无关。
+    qwhmi::auth::CurrentUser::instance().login(userWith(qwhmi::auth::Role::Viewer));
+    QVERIFY2(!editor->isEnabled(),
+             "Viewer 能点开编辑器,而 EditorMainWindow 内部零权限检查 —— "
+             "Viewer 可以改工程并写盘");
 }
 
 QTEST_MAIN(tst_MenuBar)
