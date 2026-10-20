@@ -29,6 +29,8 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>   // ★ reloadFromManager 里的 std::sort
+
 Q_LOGGING_CATEGORY(hmiVarCfg, "hmi.variable.config")
 
 namespace qwhmi::plc {
@@ -169,6 +171,24 @@ void VariableConfigDialog::reloadFromManager() {
         rescanRefs(d);
         rows_.append(d);
     }
+    // ★★★ 必须排序,否则表格的行序【每次打开都不一样】★★★
+    //   VariableManager 内部是 QHash<QString, Variable*>,allVariables()
+    //   返回的是 vars_.values() —— QHash 的遍历顺序【不保证】,
+    //   而且 Qt 每次进程启动的哈希种子不同,所以同一份工程,
+    //   上次打开 Temp 在第 1 行,这次跑到第 5 行去了。
+    //
+    //   后果不只是"看着乱":用户正在看第 3 行的变量,点一下「应用」,
+    //   刷新之后第 3 行变成了【另一个变量】。而草稿的应用是按名字匹配的,
+    //   不会写错数据 —— 但用户会以为自己看错了行、改错了量,
+    //   然后去核对整个配置。排查成本远高于一次排序。
+    //
+    //   按名字排,不按 plcId 或地址:用户认变量靠的是名字
+    //   (画面上绑的、报警里写的、CSV 里导的都是名字),
+    //   而 plcId/地址分组要"选中一行"才用得上。
+    std::sort(rows_.begin(), rows_.end(),
+              [](const VariableDraft& a, const VariableDraft& b) {
+                  return a.name < b.name;
+              });
     fillTable();
 }
 

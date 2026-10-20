@@ -83,6 +83,47 @@
 //     的教训正好相反 —— 那次第一轮"红 2"看着也对,实际上是有一条【测不到】。
 //     所以每轮做完都要问一句:红的那几条,是因为【测到了问题】,
 //     还是因为【它压根测不到东西】。
+//
+// 【★ 负向对照 —— 第 3 轮(2026-10-19 实跑)行序】
+//   这一轮是修 bug 顺手做的,起因值得记下来。
+//
+//   现象:这条文件在 ctest 下第一次跑红、第二次跑绿,
+//         同一份代码、同一个 exe、连着两次运行结果相反。
+//   根因:VariableManager 内部是 QHash<QString, Variable*>,
+//         allVariables() 返回 vars_.values() —— QHash 的遍历顺序不保证,
+//         而 Qt【每次进程启动的哈希种子不同】。于是"第 0 行是哪个变量"
+//         每个进程都可能不一样(本机实测同一组变量有 4 种不同行序)。
+//   ★ 这是【产品缺陷】,不只是测试写错:
+//     用户手指停在第 3 行,点「应用」,刷新之后第 3 行变成了另一个变量。
+//     下次再点第 3 行,改的就是另一个东西了,而且当场看不出来。
+//     (PlcConfigDialog 早就防了这同一件事,那边有一行注释:
+//      "界面显示要稳定顺序,否则用户每刷新一次表格就跳行"。)
+//
+//   做了两件事:
+//     ① 生产代码:reloadFromManager 里加 std::sort(按名字)。
+//     ② 测试:全部改成【按名字查行】(rowIndexByName),故意不依赖行序 ——
+//        排序是显示层实现细节,哪天改成按地址排,断言不该跟着改。
+//
+//   ★★ 但正因为其它用例都不依赖行序,排序就【无人看守】了 ——
+//     删掉 std::sort,整个文件照样 23/23 绿。
+//     所以专门加了 rows_areInStableNameOrder 钉住排序本身。
+//     ★ 这就是"改测试让它不 flaky"和"把不变量钉住"的分界线:
+//       前者容易做、做完没人记得;后者难一点,但只有后者能防住回归。
+//
+//   本轮实跑(实数,不是预测):
+//     去掉 std::sort → 连续 5 次运行,红 1 ×5,绿 22 ×5,
+//       唯一红的都是 rows_areInStableNameOrder。
+//       五次报出来的实际行序各不相同
+//       (Bravo,mike,zulu,Alpha / Alpha,Bravo,zulu,mike /
+//        mike,Alpha,Bravo,zulu / Bravo,zulu,mike,Alpha /
+//        Alpha,mike,Bravo,zulu),把"QHash 顺序每次进程都变"钉得死死的。
+//     恢复 std::sort → 连续 8 次运行,23 绿 ×8,0 红。
+//
+//   ★ 与前两轮的性质区别:前两轮红 2 / 红 1 是【红集互不相交】,
+//     本轮是【同一轮内 5 次运行红集完全一致】——
+//     因为这一轮的 bug 依赖的是跨进程的状态(哈希种子),
+//     所以验证手段必须是"多跑几次",而不是"换一个方向破坏"。
+//     单跑一次的验证在这里等于没验证。
 // ============================================================================
 
 #include <QtTest>
@@ -161,6 +202,28 @@ void loginAs(qwhmi::auth::Role r) {
     qwhmi::auth::CurrentUser::instance().login(u);
 }
 
+// ★★ 按名字找行号,找不到返回 -1。
+//
+//   【为什么每条用例都要用它,而不是直接写 nameAt(0)】
+//   VariableManager 内部是 QHash<QString, Variable*>,allVariables()
+//   返回 vars_.values() —— 遍历顺序【不保证】,而且 Qt 每次进程启动
+//   的哈希种子不同。所以"第 0 行是哪个变量"每次跑都可能不一样。
+//
+//   ★ 这不是假设,是真的踩到过:refusesAndNamesIt(Action) 那条
+//     第一次跑红、第二次跑绿,查下来就是这一行。
+//     同一份代码、同一个工程,连着两次运行结果相反 ——
+//     这种测试在 CI 上会表现成"偶发失败",是最难查的一类。
+//
+//   生产代码那边已经按名字排序了(见 reloadFromManager 里的 std::sort),
+//   但【测试仍然按名字查】:排序是显示层的实现细节,
+//   哪天换成按地址排,这些断言不该跟着一起改。
+int rowIndexByName(const VariableConfigDialog& dlg, const QString& name) {
+    for (int i = 0; i < dlg.rowCount(); ++i) {
+        if (dlg.nameAt(i) == name) return i;
+    }
+    return -1;
+}
+
 // ★ 给某个变量挂一条阈值报警(制造"被报警引用")
 void addAlarmOn(AlarmManager* am, Variable* v, const QString& alarmName) {
     CheckerConfig cfg;
@@ -181,6 +244,7 @@ private slots:
 
     // ---- 读取 ----
     void readsAllFieldsFromManager();
+    void rows_areInStableNameOrder();
     void derivedVariable_isShownWithItsExpression();
 
     // ---- ★ 删被引用的变量:拒删 + 点名 ----
@@ -267,6 +331,57 @@ void TestVariableConfigDialog::readsAllFieldsFromManager() {
     QCOMPARE(t->item(0, kColAlwaysPoll)->checkState(), Qt::Checked);
 }
 
+void TestVariableConfigDialog::rows_areInStableNameOrder() {
+    // ★★ 这条钉住的是排序本身,不是"某一行是谁"。
+    //
+    //   为什么要单独一条:本文件其它用例全部改成按名字查行了
+    //   (见 rowIndexByName),所以它们【故意】不依赖行序 ——
+    //   哪天改成按地址排,那些断言也不该跟着改。
+    //   但正因为都不依赖,如果没有这一条,生产代码里的排序就【无人看守】:
+    //   删掉 std::sort 之后整个测试文件照样全绿,而用户会重新遇到
+    //   "同一个变量每次打开都在不同的行"。
+    //
+    //   ★ 用户实际受害的方式(不是"看着乱",是这个):
+    //     用户手指停在第 3 行的某个变量上,点「应用」,
+    //     刷新之后第 3 行变成了【另一个变量】。
+    //     下次再点第 3 行,改的就是另一个东西了,而且当场看不出来。
+    //
+    //   ★ 怎么复现这个 bug(不然它会一直绿着):
+    //     它依赖 QHash 的遍历顺序,而 Qt 每次进程启动的哈希种子不同 ——
+    //     也就是【同一个 exe 连跑两次,结果可能不同】。
+    //     所以单跑一次是复现不出来的,这也是它当初能一路溜到 CI 的原因。
+    VariableManager vm;
+    // ★ 故意【乱序】添加,而且用 Z 开头/小写开头这种会被排到首尾的名字,
+    //   保证"照添加顺序排"和"按名字排"结果不一样 —— 否则这条测不出东西。
+    addVar(&vm, QStringLiteral("zulu"), 100);
+    addVar(&vm, QStringLiteral("Alpha"), 101);
+    addVar(&vm, QStringLiteral("mike"), 102);
+    addVar(&vm, QStringLiteral("Bravo"), 103);
+
+    VariableConfigDialog dlg(&vm);
+    QCOMPARE(dlg.rowCount(), 4);
+
+    // 按名字升序(界面里显式带 QString::SkipCase 之外的默认排序,见 reloadFromManager)
+    QStringList names;
+    for (int i = 0; i < dlg.rowCount(); ++i) names << dlg.nameAt(i);
+    QStringList sorted = names;
+    sorted.sort();
+    QVERIFY2(names == sorted,
+             qPrintable(QStringLiteral("表格行序不是按名字排的,实际:%1")
+                            .arg(names.join(QStringLiteral(", ")))));
+
+    // ★ 再开一个对话框,行序必须【一模一样】。
+    //   这一段是这条用例真正的价值:它抓的不是"有没有排序",
+    //   是"两次打开之间会不会变"。
+    VariableConfigDialog dlg2(&vm);
+    QStringList names2;
+    for (int i = 0; i < dlg2.rowCount(); ++i) names2 << dlg2.nameAt(i);
+    QVERIFY2(names == names2,
+             qPrintable(QStringLiteral("两次打开的行序不一样:%1 vs %2")
+                            .arg(names.join(QStringLiteral(", ")),
+                                 names2.join(QStringLiteral(", ")))));
+}
+
 void TestVariableConfigDialog::derivedVariable_isShownWithItsExpression() {
     // ★ 派生量在界面上的样子和普通变量【不一样】:
     //   它的 PLC 没有意义(不读任何寄存器),所以 plcId 下拉【置灰】。
@@ -338,17 +453,21 @@ void TestVariableConfigDialog::deleteVariable_referencedByAction_refusesAndNames
     ag.addMapping(QStringLiteral("压力高"), QStringLiteral("Valve"), 1);
 
     VariableConfigDialog dlg(&vm, nullptr, &ag);
-    QCOMPARE(dlg.refCountAt(0), 1);
+    // ★ 两个变量,行号不能写死 —— 见 rowIndexByName 的注释。
+    //   这条用例【真的】踩过:第一次跑红、第二次跑绿。
+    const int rowOfValve = rowIndexByName(dlg, QStringLiteral("Valve"));
+    QVERIFY2(rowOfValve >= 0, "表格里找不到 Valve 这一行");
+    QCOMPARE(dlg.refCountAt(rowOfValve), 1);
     // ★ 联动那一行说明【点名的是触发它的报警,不是变量名】——
     //   变量名就是这一行的行首,再说一遍是废话;
     //   而"什么时候会动它"才是用户判断该不该先处理它所需要的。
     //   (对照:报警那行点的是报警名,因为变量就是行首。)
-    QVERIFY2(dlg.refDescriptionsAt(0).first().contains(QStringLiteral("压力高")),
+    QVERIFY2(dlg.refDescriptionsAt(rowOfValve).first().contains(QStringLiteral("压力高")),
              qPrintable(QStringLiteral("联动引用说明里没有点名触发它的报警:%1")
-                        .arg(dlg.refDescriptionsAt(0).join(QStringLiteral(" | ")))));
+                        .arg(dlg.refDescriptionsAt(rowOfValve).join(QStringLiteral(" | ")))));
 
     QString reason;
-    QVERIFY2(!dlg.removeRowChecked(0, &reason),
+    QVERIFY2(!dlg.removeRowChecked(rowOfValve, &reason),
              "★ 被联动引用的变量【不许】删掉。");
     QVERIFY(reason.contains(QStringLiteral("Valve")));
     QCOMPARE(dlg.rowCount(), 2);
@@ -365,10 +484,7 @@ void TestVariableConfigDialog::deleteVariable_unreferenced_actuallyDeletes() {
 
     VariableConfigDialog dlg(&vm, &am);
     // B 没人引用 → 删得掉
-    int rowOfB = -1;
-    for (int i = 0; i < dlg.rowCount(); ++i) {
-        if (dlg.nameAt(i) == QStringLiteral("B")) rowOfB = i;
-    }
+    const int rowOfB = rowIndexByName(dlg, QStringLiteral("B"));
     QVERIFY(rowOfB >= 0);
     QCOMPARE(dlg.refCountAt(rowOfB), 0);
     QVERIFY(dlg.removeRowChecked(rowOfB, nullptr));
@@ -650,15 +766,8 @@ void TestVariableConfigDialog::apply_invalidDraft_leavesManagerUntouched() {
     addVar(&vm, QStringLiteral("Press"), 101);
     VariableConfigDialog dlg(&vm);
 
-    // 把 Press 的地址改成 0(非法)
-    auto* t = dlg.findChild<QTableWidget*>(QStringLiteral("variableConfigTable"));
-    int rowOfPress = -1;
-    for (int i = 0; i < dlg.rowCount(); ++i) {
-        if (dlg.nameAt(i) == QStringLiteral("Press")) rowOfPress = i;
-    }
-    QVERIFY(rowOfPress >= 0);
-    // 地址列是锁死的,所以直接用校验器验证"有一条 0 地址就不许应用":
-    //   这里换一种做法 —— 新增一个默认地址 0 的行。
+    // 地址列是锁死的,所以不能靠"在界面上把 Press 改成 0"来构造非法草稿。
+    //   换一种做法 —— 新增一个默认地址 0 的行,那一行本身就是非法的。
     QVERIFY(dlg.addRowToDraft(QStringLiteral("NewOne")) >= 0);
 
     QString err;
@@ -745,11 +854,8 @@ void TestVariableConfigDialog::saveProject_afterApply_persistsNewPlcId() {
         VariableConfigDialog dlg(&vm, nullptr, nullptr, &plcMgr);
         auto* t = dlg.findChild<QTableWidget*>(QStringLiteral("variableConfigTable"));
         QVERIFY(t);
-        int rowOfPress = -1;
-        for (int i = 0; i < dlg.rowCount(); ++i) {
-            if (dlg.nameAt(i) == QStringLiteral("Press")) rowOfPress = i;
-        }
-        QVERIFY(rowOfPress >= 0);
+        const int rowOfPress = rowIndexByName(dlg, QStringLiteral("Press"));
+        QVERIFY2(rowOfPress >= 0, "表格里找不到 Press 这一行");
         auto* combo = qobject_cast<QComboBox*>(t->cellWidget(rowOfPress, kColPlcId));
         QVERIFY(combo);
         combo->addItem(QStringLiteral("plc9"));
