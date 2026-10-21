@@ -97,6 +97,33 @@
       · UTF-8 —— 日志本身是 UTF-8(前端看着乱码是 PowerShell 5.1
         的 Get-Content 默认按 GBK 读,那是读取端的锅,不是应用的锅)。
     这两条曾经让一次分析得出"日志编码坏了"的错误结论,写在这里防止重犯。
+
+    2026-10-21 变更(两处,都是被同一次失败逼出来的)
+    -------------------------------------------------
+    那次跑:950.9 分钟、950 个采样点,最后【什么都没留下】。
+    被测程序没崩(它一直活到第二天上午还在心跳),崩的是这个 harness。
+    两处改动都是从这一件事来的:
+
+    (1) verdict.txt 不再只在最后一行写。
+        原来唯一写它的地方是文件末尾,没有 finally、没有中间落盘。
+        harness 一死,16 小时的证据就变成一份没有结论的 CSV —— 和没跑一样。
+        现在:基线取完就写一次,每个采样 tick 刷新一次,采样循环包
+        try/catch/finally。verdict.txt 从此【不再可能不存在】,
+        并且里面带着崩溃基线时刻(SOAK-1 的时间原点),harness 死后仍可离线复判。
+        中途落盘的文件自己写着"这是运行中状态,不是结论",不会被误当成 PASS。
+
+    (2) idle 判据第三次改:心跳日志不再算"活体证据"。
+        原来判 idle 的第二条腿是"日志总量在不在长"。
+        而 "[HistoryRecorder] 心跳写了 3 行" 每 60 秒一条,那是本地 SQLite 写盘 ——
+        PLC 断着它在写,界面冻在模态框上它也在写。
+        那次跑 CPU 0.74%(低于阈值)、心跳一直在长 ⇒ isIdle=FALSE ⇒ 给了 PASS;
+        同一份日志里 hmi.comm 一条都没有,PLC 地址是 127.0.0.1:502(回环)。
+        那个 PASS 证明的是"程序会自己给自己记心跳",不是"程序跑得住"。
+        现在按【类别】看:静默期之后新产生的日志行,去掉本地定时器噪声还剩多少。
+        并新增 SOAK-6「业务活体」独立编号 —— 它判的不是资源曲线,是【这一轮的前提】。
+
+    所以那 950.9 分钟【不能用来关闭 F2】:它证明的是"挂机 16 小时不崩不泄漏",
+    不是"跑业务 16 小时不崩不泄漏"。判据修好后重跑才有意义。
 #>
 
 [CmdletBinding()]
@@ -235,6 +262,136 @@ function Get-LogTail($sinceMs, [int] $limit = 4000) {
     return $out
 }
 
+# ---- "本次运行期间新产生的日志" --------------------------------------
+#  为什么 Get-LogStats 不够用
+#  -------------------------
+#  Get-LogStats 只回答"日志目录一共多少字节",回答不了
+#  "从静默期到现在,是【哪几类】日志在长"。
+#  而 idle 判据要的恰恰是后者:
+#  总量在长,可能是本地定时器在写;业务类在长,才是程序真的在干活。
+#  这两件事必须能分开,否则判据看不见自己脚下那个洞。
+#
+#  ★★ 为什么按【时间戳】过滤,而不是按字节偏移(2026-10-21 改)★★
+#
+#  第一版是按字节偏移增量:记下静默期时文件长度 mark.Length,之后从那儿往后读。
+#  看着更省,实际踩了一个坑 —— 【Length / LastWriteTime 会读到过期值】。
+#
+#  2026-10-21 实测(同一个 PowerShell 进程内,Get-Item / [FileInfo] /
+#  [FileStream] / Get-ChildItem 四条读法彼此一致,但全都落后真实值好几分钟):
+#      09:55:09  读到 len=47520  mtime=09:53:41
+#      09:57:39  读到 len=47520  mtime=09:53:41   ← 与上一行一模一样
+#  而真相是心跳每 60 秒写 80 字节、603 次零断档;
+#  09:58:13 另一个新进程读到的就是 len=47840 mtime=09:57:41。
+#  也就是说按偏移取增量会拿到一个"看起来没长"的假象 ——
+#  而这个假象的方向正好是"进程没在干活",也就是判据最容易假绿的方向。
+#
+#  改成按日志行【自带的开头时间戳】过滤:
+#    · 只依赖行内容,不依赖任何文件系统元数据
+#    · 元数据过期多久都无所谓,最多多读进几条新行(再被时间戳滤掉)
+#    · 代价是遍历全部日志文件 —— 实测 154 个文件共 602 KB,读一次几毫秒。
+#      24h 长跑这点开销可以忽略;读错一次判据的代价不行。
+$reLineTs = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\s+\[(\w+)\s*\]\s+([\w.]+)\s+-\s+(.*)$'
+
+function Get-LogSince($sinceTime, [int] $limit = 50000) {
+    if ($null -eq $sinceTime) { return @() }
+    $out   = New-Object System.Collections.Generic.List[object]
+    $files = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue)
+    foreach ($f in $files) {
+        try {
+            $fs = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite')
+            $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
+            while (-not $sr.EndOfStream -and $out.Count -lt $limit) {
+                $line = $sr.ReadLine()
+                if ($line -match $reLineTs) {
+                    $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
+                    if ($ts -ge $sinceTime) {
+                        $out.Add([pscustomobject]@{
+                            Time = $ts; Level = $matches[2]; Cat = $matches[3]; Msg = $matches[4]
+                        })
+                    }
+                }
+            }
+            $sr.Close(); $fs.Close()
+        } catch {
+            Say ("读日志失败(" + $f.Name + "): " + $_.Exception.Message) 'Red'
+        }
+    }
+    return $out
+}
+
+# ★ 不算"活体证据"的本地定时器日志(2026-10-21 实测得出)
+#   这些日志在任何情况下都会长 —— PLC 断着、界面冻在模态框上、
+#   业务全停,它们照样每 60 秒写一行。
+#   2026-10-20 那次 950.9 分钟的实测:
+#       "[HistoryRecorder] 心跳写了 3 行"  ≈ 每分钟一条,写了几百条
+#       hmi.comm                          整个过程【一条都没有】
+#   而 PLC 地址是 127.0.0.1:502 —— 回环,那儿没有设备。
+#   旧判据 idle = CPU低 AND 日志不长,日志被心跳撑住了 ⇒ 判定资格成立 ⇒ 给了 PASS。
+#   那个 PASS 证明的是"程序会自己给自己记心跳",不是"程序跑得住"。
+#   ⚠ 这正是脚本 :530 自己写过的那句话,只是心跳日志让那条路没被走到。
+$noiseRe = '^\[(HistoryRecorder|TrendWidget)\]'
+
+# ---- 运行状态落盘(2026-10-21 新增)------------------------------------
+#  ★ 为什么加这个函数
+#  ------------------
+#  2026-10-20 那次长跑跑了 950.9 分钟、950 个采样点,最后什么都没留下:
+#  原因不在被测程序,是【这个 harness 自己】在 08:56~09:06 之间死了,
+#  而 verdict.txt 只在脚本最后一行写(原来的 :605),没有 finally、没有增量落盘。
+#  于是 16 小时的证据变成一份没有结论的 CSV —— 和没跑一样。
+#
+#  这类失效比程序崩溃更难发现:程序崩了日志里看得见;
+#  【测它的工具崩了,现场只剩下"它没报错"这个假象】。
+#  2026-10-20 那次的真实后果:hmi.exe PID 42428 一直活到第二天上午还在心跳,
+#  看起来"跑得很好",实际上从 08:56 起就没有任何人在记录了。
+#
+#  三个动作堵这个洞:
+#   1) 基线取完就写一次 —— 让"没有 verdict.txt"永远不再是可能状态
+#   2) 每个采样 tick 刷新一次 —— 被强杀也留得下"跑到哪了、跑了什么"
+#   3) 采样循环包 try/catch/finally —— 异常和 Ctrl-C 都落盘
+#
+#  【中途只写状态,不写判定】
+#  判定要等全程数据齐了才算。强行在中途算,就是又一次"用半截数据下结论"。
+#  所以 state=RUNNING 的文件【永远不能被当成 PASS】—— 它自己写着还没跑完。
+function Write-RunState {
+    param(
+        [Parameter(Mandatory = $true)][string] $State,
+        [string] $Detail = ''
+    )
+    $path = Join-Path $OutDir 'verdict.txt'
+    $sb = New-Object System.Collections.Generic.List[string]
+    $sb.Add('================ HMI 长跑 verdict ================')
+    $sb.Add("状态              : $State")
+    if ($State -eq 'DONE') {
+        $sb.Add("★ 本次是最终判定。中途落盘的文件只代表进度,不构成结论。" )
+    } else {
+        $sb.Add("★ 本文件是【运行中状态】,不是结论 —— 判定尚未完成。")
+    }
+    $sb.Add("本次落盘          : " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+    $sb.Add("计划时长          : $Hours 小时")
+    if ($null -ne $owned -and $null -ne $owned.StartTime) {
+        $sb.Add("被测进程          : PID=" + $owned.Id + " 启动于 " + $owned.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))
+    } else {
+        $sb.Add("被测进程          : (尚未接管进程)")
+    }
+    $sb.Add("已跑分钟          : " + $(if ($samples.Count -gt 0) {
+        [math]::Round(((Get-Date) - $owned.StartTime).TotalMinutes, 1) } else { '-' }))
+    $sb.Add("采样点数          : " + $samples.Count)
+    if ($samples.Count -gt 0) {
+        $lastS = $samples[$samples.Count - 1]
+        $sb.Add(("最后采样          : {0}  RunMinutes={1}  PrivateMB={2}  Handles={3}  Threads={4}  CpuSeconds={5}" -f `
+                 $lastS.Time, $lastS.RunMinutes, $lastS.PrivateMB, $lastS.Handles, $lastS.Threads, $lastS.CpuSeconds))
+    }
+    # 崩溃基线时刻随状态一起落盘:SOAK-1 判的是"相对基线有没有新 dump",
+    # harness 死后这个时间原点丢了就再也补不回来。写进文件 = 可离线复判。
+    $sb.Add("崩溃基线时刻      : " + $baselineTime.ToString('yyyy-MM-dd HH:mm:ss'))
+    $sb.Add("基线崩溃标记      : " + $(if ($baselineMarker.Exists) { "存在(" + $baselineMarker.Mtime + ")" } else { "无" }))
+    if ($Detail -ne '') { $sb.Add("说明              : $Detail") }
+    if ($State -eq 'DONE') {
+        foreach ($rl in $report) { $sb.Add($rl) }
+    }
+    ($sb -join "`r`n") | Out-File -FilePath $path -Encoding UTF8
+}
+
 # ================================================================
 Say "========== HMI 长跑验收 ==========" 'Cyan'
 Say "数据目录: $dataDir"
@@ -291,6 +448,17 @@ if (-not $OutDir) { $OutDir = Join-Path $PSScriptRoot "..\soaks\$(Get-Date -Form
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 
+# ★ 2026-10-21:$samples / $csvPath / $report 提前到这里初始化。
+#   原来在静默期之后才建,可 Write-RunState 需要它们在任何时刻都存在 ——
+#   于是"开跑前就崩了"这种最需要留痕的场景,恰恰成了唯一写不出状态的场景。
+#   （StrictMode 2.0 下引用还没建的变量会直接抛异常,不是给个 null 就完事。）
+#
+#   ⚠ $deadline 仍然留在采样循环前面,它没跟着搬:它算的是"从采样开始起算",
+#     提前到这里会让实际采样时长比 -Hours 短一截。
+$samples = New-Object System.Collections.Generic.List[object]
+$csvPath = Join-Path $OutDir 'samples.csv'
+$report  = New-Object System.Collections.Generic.List[string]
+
 $baselineLog = Get-LogStats
 $baselineTime = Get-Date          # 一切"本次新增"的判定都以这一刻为界
 $baselineMarker = if (Test-Path $marker) {
@@ -311,6 +479,11 @@ if ($baselineMarker.Exists) {
 } else {
     Say "崩溃标记: 无"
 }
+
+# ★ 开跑前先落一次盘。从这一刻起,"没有 verdict.txt"就不再是可能状态 ——
+#   哪怕脚本在下面任何一行崩掉、被 Ctrl-C、被关掉终端,这个文件都在,
+#   而且里面带着崩溃基线时刻(SOAK-1 的时间原点)。
+Write-RunState 'BASELINE' '基线已取,尚未启动被测进程'
 
 # ---- 启动 ------------------------------------------------------------
 if (-not $AdoptExisting) {
@@ -389,40 +562,81 @@ if (-not $AdoptExisting) {
 Say ("静默期 {0} 秒(等启动日志写完,再取活体快照)..." -f $SettleSec) 'Cyan'
 Start-Sleep -Seconds $SettleSec
 $settledLog = Get-LogStats
+# ★ 活体判据的时间原点:静默期结束的那一刻。
+#   之后按日志行开头的时间戳过滤,取"这一时刻之后"的行。
+#   不用字节偏移 —— 文件元数据会读到过期值,详见 Get-LogSince 上面的实测。
+$settleTime = Get-Date
 if ($null -eq $settledLog) {
     Say "静默期快照:没有日志目录 —— 拿不到活体证据,按'没在干活'处理" 'Yellow'
 } else {
     Say ("静默期快照:日志 {0} 个文件 / 合计 {1} KB" -f `
          $settledLog.Count, [math]::Round($settledLog.Bytes/1KB,1)) 'Cyan'
 }
+Write-RunState 'SETTLED' '静默期结束,即将开始采样'
 
-$samples   = New-Object System.Collections.Generic.List[object]
-$csvPath   = Join-Path $OutDir 'samples.csv'
 $deadline  = (Get-Date).AddHours($Hours)
 $tick      = 0
 
 # ---- 采样循环 --------------------------------------------------------
+#  ★ 包 try/catch/finally(2026-10-21)
+#    原来这个 while 是裸的:采样过程中任何一次抛异常
+#    (Get-Sample 碰到已退出的进程、Export-Csv 撞上文件锁……)
+#    都会直接冲出脚本,后面 200 行判定一行都不执行,verdict.txt 永远不写。
+#    这是"什么都没有"的另一条可能路径 —— 而且它连崩溃现场都不留。
+#    现在:循环怎么结束都先落一次盘,再决定要不要继续判定。
+$loopState  = 'COMPLETED'
+$loopDetail = ''
 Say "---- 开始采样(Ctrl-C 可提前结束)----" 'Cyan'
-while ($true) {
-    if ($Hours -gt 0 -and (Get-Date) -gt $deadline) { Say "到时间了。" 'Green'; break }
-    $null = $owned.Refresh()
-    if ($owned.HasExited) {
-        Say ("★ hmi.exe 自己在第 {0} 分钟退出了,exit code={1}" -f `
-             [math]::Round(((Get-Date) - $owned.StartTime).TotalMinutes,1), $owned.ExitCode) 'Red'
-        break
-    }
-    $samples.Add((Get-Sample $owned))
-    $tick++
-    # 每 10 次把 CSV 落一次盘 —— 机器半夜被谁强制重启也不至于全丢
-    if ($tick % 10 -eq 0) {
+try {
+    while ($true) {
+        if ($Hours -gt 0 -and (Get-Date) -gt $deadline) { Say "到时间了。" 'Green'; break }
+        $null = $owned.Refresh()
+        if ($owned.HasExited) {
+            Say ("★ hmi.exe 自己在第 {0} 分钟退出了,exit code={1}" -f `
+                 [math]::Round(((Get-Date) - $owned.StartTime).TotalMinutes,1), $owned.ExitCode) 'Red'
+            $loopState = 'APP_EXITED'
+            break
+        }
+        $samples.Add((Get-Sample $owned))
+        $tick++
+        # ★ 每个 tick 都落盘(原来每 10 次)。
+        #   10 个 tick 就是 10 分钟,机器半夜被谁强制重启就丢 10 行;
+        #   verdict.txt 更是一个字节都舍不得丢 —— 它是"跑了没有、跑成什么样"的唯一凭据。
         $samples | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
-        $last = $samples[$samples.Count - 1]
-        Say ("  {0} 内存 {1} MB / 句柄 {2} / 线程 {3} / CPU {4}s" -f `
-             $last.Time, $last.WorkingSetMB, $last.Handles, $last.Threads, $last.CpuSeconds) 'DarkGray'
+        Write-RunState 'RUNNING'
+        if ($tick % 10 -eq 0) {
+            $last = $samples[$samples.Count - 1]
+            Say ("  {0} 内存 {1} MB / 句柄 {2} / 线程 {3} / CPU {4}s" -f `
+                 $last.Time, $last.WorkingSetMB, $last.Handles, $last.Threads, $last.CpuSeconds) 'DarkGray'
+        }
+        Start-Sleep -Seconds $IntervalSec
     }
-    Start-Sleep -Seconds $IntervalSec
+} catch {
+    $loopState  = 'THREW'
+    $loopDetail = $_.Exception.Message
+    Say ("★ 采样循环异常终止: " + $loopDetail) 'Red'
+    Say "  已采到 $($samples.Count) 个点,下面照常出判定 —— 这次不是白跑。" 'Yellow'
+} finally {
+    $samples | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+    if ($loopState -ne 'COMPLETED') {
+        Write-RunState $loopState ("采样循环非正常结束($loopState)。已采 $($samples.Count) 点,判定仍会继续并覆盖本文件。")
+    }
 }
-$samples | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+
+# ★ 样本不足 2 个就没法算首尾差 —— 而原来的写法会在这里直接抛异常:
+#   $samples[0] 在空 List 上越界,StrictMode 2.0 下整个脚本带崩。
+#   也就是说"程序启动就死"这种最需要结论的场景,最容易白跑(连崩溃记录都没有)。
+#   现在提前收尾,并把"为什么判不了"写进文件。
+if ($samples.Count -lt 2) {
+    Say ("★ 只采到 {0} 个样本(至少要 2 个才能算首尾差),不出判定。" -f $samples.Count) 'Red'
+    if ($null -eq $owned -or $owned.HasExited) {
+        Say "  本次确实是被测进程提前退出 —— 去看 $logDir 里最新那个日志文件。" 'Yellow'
+    } else {
+        Say "  多半是 -Hours 设得太小(采样循环一次都没转完)。" 'Yellow'
+    }
+    Write-RunState 'NO_SAMPLES' ("只采到 {0} 个样本,无法计算首尾差,不构成判定。" -f $samples.Count)
+    exit 3
+}
 
 # ---- 收尾:停掉我们启动的进程 ----------------------------------------
 if (-not $AdoptExisting -and -not $owned.HasExited) {
@@ -443,7 +657,7 @@ $finalMarker = if (Test-Path $marker) { (Get-Item $marker) } else { $null }
 
 $newLogBytes = [math]::Max(0, $finalLog.Bytes - $baselineLog.Bytes)
 
-$report = New-Object System.Collections.Generic.List[string]
+# ($samples / $csvPath / $report 已在前面提前初始化 —— 见 OutDir 之后那段注释)
 function Verdict($id, $name, $state, $evidence) {
     $script:report.Add(("[{0}] {1,-22} {2}" -f $state, $id, $name))
     $script:report.Add(("        证据: " + $evidence))
@@ -497,25 +711,61 @@ $memRatio = if ($first.PrivateMB -gt 0) { $lastN.PrivateMB / $first.PrivateMB } 
 $memPerHr = ($lastN.PrivateMB - $first.PrivateMB) / ($spanMin / 60.0)
 $wsPerHr = ($lastN.WorkingSetMB - $first.WorkingSetMB) / ($spanMin / 60.0)
 
-# ★ idle 检测:由相邻采样点的 CPU 增量算平均占用率。
-#   取【全程平均】而不是峰值 —— 峰值会被一次性的启动/加载尖峰顶高,
-#   让一个实际在闲置的进程蒙混过关。
+# ★ idle 检测(2026-10-21 第三次改:把"活着"和"在干活"分开)
+#
+#   三代判据,连同各自被什么证伪,一起留在这里 ——
+#   因为第三代也会被第四次实测证伪,而那时候需要知道前面三代错在哪:
+#
+#     第一代:只看 CPU < 5% 就判 idle
+#       被 2026-10-20 实测证伪:真在跑 0.86% / 卡在登录框 0.5%。
+#       1.7 倍的差距,还会随日志量和机器负载漂 —— 这个量没有分辨力。
+#
+#     第二代:CPU 低 AND 日志不长(commit 7588a36)
+#       解决了"冻在模态框 vs 真在跑",但漏了第三种状态。
+#
+#     第三代(本次):按日志【类别】看,本地定时器心跳不算活体证据
+#
+#   第二代为什么还漏:它只看日志【总量】在不在长。
+#   而 "[HistoryRecorder] 心跳写了 3 行" 每 60 秒写一行,那是本地 SQLite 写盘 ——
+#   PLC 断着它在写,界面冻在模态框上它也在写,业务全停它照样在写。
+#
+#   2026-10-20 那次 950.9 分钟的实测(就是 harness 自己死掉的那次):
+#       CPU 0.74%(低于 5% 阈值)      ⇒ 第一条腿说 idle
+#       心跳日志一直在长              ⇒ 第二条腿说不是 idle
+#       ⇒ isIdle = FALSE ⇒ 给了 PASS
+#   而同一份日志里 hmi.comm【一条都没有】,PLC 地址 127.0.0.1:502(回环,那儿没有设备)。
+#   那个 PASS 证明的是"程序会自己给自己记心跳",不是"程序跑得住"。
+#   —— 这是假绿的第三种形态:量没算错,被量的东西不对。
 $cpuSpan = $lastN.CpuSeconds - $first.CpuSeconds
 $cpuPct  = if ($spanMin -gt 0) { ($cpuSpan / ($spanMin * 60.0)) * 100.0 } else { 0 }
 
-# ★ 活体证据:静默期快照之后,日志还在不在长。
-#   长 = 进程还在做它该做的事(轮询/历史/报警心跳)→ 不是 idle。
-#   不长 = 进程可能冻在某个模态框上,事件循环停了 → idle。
-#   两条证据一起用:idle = CPU 低 AND 日志不长。
-#   CPU 高而日志不长 → 进程在忙(只是不记日志),不算 idle。
 $logGrewBytes = if ($null -ne $finalLog -and $null -ne $settledLog) { $finalLog.Bytes - $settledLog.Bytes } else { 0 }
-$logGrew      = ($logGrewBytes -gt 0)
-$isIdle       = ($cpuPct -lt $MinCpuPercent) -and (-not $logGrew)
+# ⚠ $logGrewBytes 只作报告里的参考数,不参与判定 ——
+#   它来自 Length,而 Length 会读到过期值(见 Get-LogSince 上面的实测)。
+#   下面的 $logGrew / $bizGrew 一律由日志行本身算出来。
+$sinceLines = @(Get-LogSince $settleTime)
+$logGrew    = ($sinceLines.Count -gt 0)
+$noiseLines = @($sinceLines | Where-Object { $_.Msg -match $noiseRe })
+$bizLines   = @($sinceLines | Where-Object { $_.Msg -notmatch $noiseRe })
+$bizGrew    = ($bizLines.Count -gt 0)
 
-# idle 时降级为 UNKNOWN:不是"通过",是"这一轮没有资格下结论"。
-# 一个没登录、没连 PLC、没跑报警引擎的进程,内存当然不涨 ——
+# 三种"没在干活",分开报 —— 它们指向的排查方向不一样,混成一句"idle"就废了
+$isFrozen    = ((-not $logGrew) -and ($cpuPct -lt $MinCpuPercent))  # 不记日志且不吃 CPU:冻住了
+$isBusyQuiet = ((-not $logGrew) -and ($cpuPct -ge $MinCpuPercent))  # 不记日志但在忙
+$isDormant   = ($logGrew -and (-not $bizGrew))                       # 在长,但只有本地心跳
+$notQualified = $isFrozen -or $isDormant                            # 本轮【不构成】稳定性验收
+# 兼容旧变量名:下面 SOAK-3 还在用它
+$isIdle = $notQualified
+
+$sinceByCat = @($bizLines | Group-Object Cat | Sort-Object Count -Descending |
+                Select-Object -First 8 @{n='cat';e={$_.Name}}, @{n='n';e={$_.Count}})
+$sinceCatTxt = ($sinceByCat | ForEach-Object { "$($_.cat)=$($_.n)" }) -join '  '
+if ($sinceCatTxt -eq '') { $sinceCatTxt = '(无)' }
+
+# 没资格下结论时降级为 UNKNOWN:不是"通过",是"这一轮没有资格"。
+# 一个没连上 PLC、没跑报警引擎的进程,内存当然不涨 ——
 # 拿它的平稳去证明"程序不泄漏"是偷换前提。
-if ($isIdle) {
+if ($notQualified) {
     $memState = 'UNKNOWN'
 } elseif ($memRatio -gt $MaxMemRatio -and $memPerHr -gt $MaxMemPerHour) { $memState = 'FAIL' }
 elseif ($memRatio -gt $WarnMemRatio) { $memState = 'WARN' }
@@ -524,17 +774,30 @@ else { $memState = 'PASS' }
 $memTxt = ("私有内存 {0} -> {1} MB ({2:N3}x),斜率 {3:N2} MB/小时;线程 {4}->{5};阈值 {6}x & {7}MB/h" -f `
     $first.PrivateMB, $lastN.PrivateMB, $memRatio, $memPerHr, $first.Threads, $lastN.Threads,
     $MaxMemRatio, $MaxMemPerHour)
-if ($isIdle) {
-    $memTxt += ("`n        ★ 本轮进程平均 CPU 仅 {0:N2}%,低于阈值 {1}%;且静默期之后日志【没有增长】" -f $cpuPct, $MinCpuPercent)
-    $memTxt += "`n          ({0} KB)—— 两条证据都指向 idle,判定为 idle。" -f [math]::Round($logGrewBytes/1KB,1)
-    $memTxt += "`n        idle 进程本来就不涨内存,这一轮【不构成对程序稳定性的验收】。"
-    $memTxt += "`n        要真验,先登录进主界面、连上 PLC,让报警引擎和轮询跑起来再重跑。"
+$memTxt += ("`n        静默期以来新增日志 {0} 行 = 业务类 {1} + 本地心跳 {2};业务类按类别:{3}" -f `
+    $sinceLines.Count, $bizLines.Count, $noiseLines.Count, $sinceCatTxt)
+if ($isFrozen) {
+    $memTxt += ("`n        ★ 冻住:平均 CPU {0:N2}%(低于阈值 {1}%),且静默期之后日志【一条都没长】。" -f $cpuPct, $MinCpuPercent)
+    $memTxt += "`n          —— 事件循环停了。冻住的进程本来就不涨内存,这一轮【不构成验收】。"
+    $memTxt += "`n          查:是不是卡在某个模态框上(登录框?配置对话框?),或被谁挡住了。"
+} elseif ($isDormant) {
+    # ★ 这一支就是 2026-10-21 加的。第二代判据在这里会漏判成 PASS。
+    $memTxt += ("`n        ★ 只在自转:日志在长(净增 {0} KB),但【业务类日志一条都没有】。" -f [math]::Round($logGrewBytes/1KB,1))
+    $memTxt += ("`n          全是本地定时器心跳({0} 行 HistoryRecorder/TrendWidget),平均 CPU {1:N2}%。" -f $noiseLines.Count, $cpuPct)
+    $memTxt += "`n          进程活着,但它没在做业务 —— PLC 大概率没连上,轮询和报警引擎都是停的。"
+    $memTxt += "`n          这种状态内存当然不涨,所以本轮【不构成对程序稳定性的验收】,判 UNKNOWN。"
+    $memTxt += "`n          ★ 2026-10-20 那 950.9 分钟就是在这一支上骗过去的:旧判据只看日志总量,"
+    $memTxt += "`n            心跳把'总量在长'撑住了,于是给了 PASS。本次实测已复现。"
+    $memTxt += "`n          查:PLC 地址是不是回环(127.0.0.1)?启动有没有带 --soak-user/--soak-pass?"
+    $memTxt += "`n              登录账号的角色是不是 viewer(只读)?hmi.comm 一共几条?"
+} elseif ($isBusyQuiet) {
+    $memTxt += ("`n        进程在忙但不记业务日志(平均 CPU {0:N2}%) —— 本轮【无法判定活体】,不下结论。" -f $cpuPct)
 } elseif ($cpuPct -lt $MinCpuPercent) {
     # ★ 这条分支要写出来,不然读报告的人会以为脚本判错了:
-    #   CPU 明明低于 5% 阈值,怎么不是 idle?
-    $memTxt += ("`n        CPU {0:N2}%(低于阈值 {1}%),但静默期之后日志【增长了 {2} KB】" -f `
-        $cpuPct, $MinCpuPercent, [math]::Round($logGrewBytes/1KB,1))
-    $memTxt += "`n        —— 进程还在干活,只是这个活儿本身不吃 CPU,所以【不判 idle】。"
+    #   CPU 明明低于 5% 阈值,怎么不判成没在干活?
+    $memTxt += ("`n        CPU {0:N2}%(低于阈值 {1}%),但静默期之后【业务类日志在长】({2} 行) —— 判定资格成立。" -f `
+        $cpuPct, $MinCpuPercent, $bizLines.Count)
+    $memTxt += "`n        —— 进程确实在干业务,只是这个活儿本身不吃 CPU,所以【不判没在干活】。"
     $memTxt += "`n        (旧判据只看 CPU,这里会被误判成 idle,报出'进程没在跑业务'这句假话 —— 2026-10-20 已改)"
 }
 $memTxt += ("`n        参考(不参与判定):工作集 {0} -> {1} MB,斜率 {2:N1} MB/小时 —— 这个量会被 Windows 回收" -f `
@@ -564,8 +827,47 @@ $hdlTxt = ("句柄 首{0}/峰{1}/尾{2}(峰值净增 {3},首尾差 {4});线程 �
 if ($hdlPeak -gt 0 -and $hdlNet -eq 0) {
     $hdlTxt += "`n        ★ 中途涨过又落回去了 —— 首尾相等会把它掩盖成'没变',所以这里报峰值。"
 }
-if ($isIdle) { $hdlTxt += "`n        (同 SOAK-2:进程 idle,本轮不构成验收)" }
+if ($notQualified) { $hdlTxt += "`n        (同 SOAK-2:本轮没有资格下结论 —— 详见 SOAK-6 业务活体)" }
 Verdict 'SOAK-3' '句柄/线程' $hdlState $hdlTxt
+
+# --- 4. 业务活体(SOAK-6,2026-10-21 新增)--------------------------------
+#  为什么把它单列一条,而不是塞在 SOAK-2 的说明里
+#  --------------------------------------------------
+#  SOAK-2/3 判的是"没资格下结论",读报告的人会问"那到底有什么问题"。
+#  根因值得一条独立编号:它不是资源曲线的一部分,是【这一轮的前提】。
+#
+#  ★ 这条是本脚本目前唯一能回答"这轮到底跑没跑上业务"的判据。
+#    它明确不判定掉没掉线(文案还没摸清,见文件头),
+#    只判定"静默期之后有没有业务类日志在长" ——
+#    有 ⇒ 有资格继续看 SOAK-2/3 的数字;没有 ⇒ 那些数字【全部作废】。
+$liveTxt = ("静默期以来日志增量 {0} 行 = 业务类 {1} + 本地心跳 {2};平均 CPU {3:N2}%" -f `
+    $sinceLines.Count, $bizLines.Count, $noiseLines.Count, $cpuPct)
+if ($isFrozen) {
+    $liveState = 'FAIL'
+    $liveTxt += "`n        冻住:一条日志都没长,事件循环停了(可能是模态框)。这一轮什么都不用看了。"
+} elseif ($isDormant) {
+    $liveState = 'FAIL'
+    $liveTxt += "`n        ★ 只在自转:业务类日志 0 条,全是本地心跳。进程活着但没跑业务。"
+    $liveTxt += "`n        这一轮【不能用来证明程序稳定】—— 内存/句柄平坦是因为什么都没干。"
+} elseif ($isBusyQuiet) {
+    $liveState = 'UNKNOWN'
+    $liveTxt += "`n        不记业务日志但 CPU 有占用 —— 判不出活体,不下结论。"
+} elseif ($bizGrew) {
+    $liveState = 'PASS'
+    $liveTxt += "`n        业务类日志在长,判定资格成立;SOAK-2/3 的数字这一轮有效。"
+} else {
+    $liveState = 'UNKNOWN'
+    $liveTxt += "`n        分类结果为空,判不出活体。"
+}
+if ($sinceCatTxt -ne '(无)') {
+    $liveTxt += ("`n        业务类按类别:" + $sinceCatTxt)
+}
+if ($noiseLines.Count -gt 0) {
+    $noiseByCat = @($noiseLines | Group-Object Msg | Sort-Object Count -Descending |
+                    Select-Object -First 3 @{n='m';e={$_.Name}}, @{n='n';e={$_.Count}})
+    $liveTxt += "`n        噪声 Top3:" + (($noiseByCat | ForEach-Object { "$($_.m) x$($_.n)" }) -join ' | ')
+}
+Verdict 'SOAK-6' '业务活体' $liveState $liveTxt
 
 # --- 4. 日志 ---
 $lines = @(Get-LogTail 0)
@@ -602,23 +904,36 @@ if ($commLines.Count -eq 0) {
 }
 
 # ---- 落盘 ------------------------------------------------------------
-$reportPath = Join-Path $OutDir 'verdict.txt'
-$report | Out-File -FilePath $reportPath -Encoding UTF8
+# ★ 走 Write-RunState 而不是直接 Out-File(2026-10-21):
+#   现在 verdict.txt 从 BASELINE 起就存在,这行只是把它升级成"最终判定"。
+#   就算前面任何一步崩了,那个中途文件也还在 —— 状态写着崩在哪儿、采到第几点。
+Write-RunState 'DONE'
 
 Say "" ; Say "========== 汇总 ==========" 'Cyan'
 $report | ForEach-Object { Say $_ }
 Say ""
 Say "采样点 $tick 个,跨度 $([math]::Round($spanMin,1)) 分钟" 'Gray'
 Say "样本: $csvPath" 'Gray'
-Say "判定: $reportPath" 'Gray'
+Say "判定: $(Join-Path $OutDir 'verdict.txt')" 'Gray'
 
-# ★ idle 横幅:放最显眼的位置。这轮如果 idle,上面所有 UNKNOWN 都是同一个原因,
+# ★ 横幅:放最显眼的位置。这轮如果没资格下结论,上面所有 UNKNOWN 都是同一个原因,
 #   不单独说一句的话,读报告的人容易只扫到别的 PASS 就以为验过了。
-if ($isIdle) {
+#   ★ 三种情况分三句话说(2026-10-21)—— 它们指向的排查方向完全不一样,
+#     混成一句"进程 idle"的话,拿到的人只能从头猜。
+if ($notQualified) {
     Say "" ; Say "════════════════════════════════════════════════════" 'Red'
-    Say ("★ 本轮没有结论(进程 idle:平均 CPU {0:N2}%,且静默期之后日志 0 增长)" -f $cpuPct) 'Red'
-    Say "  进程没在跑业务 —— 资源曲线平坦是必然的,不是'稳定'的证据。" 'Red'
-    Say "  先登录进主界面并连上 PLC,再重跑。退出码 4 表示'没验成'。" 'Red'
+    if ($isFrozen) {
+        Say ("★ 本轮没有结论:进程冻住了(CPU {0:N2}%,静默期之后日志一条都没长)" -f $cpuPct) 'Red'
+        Say "  事件循环停了 —— 查是不是卡在某个模态框上(登录框?某个配置对话框?)。" 'Red'
+    } elseif ($isDormant) {
+        Say ("★ 本轮没有结论:进程只在自转(CPU {0:N2}%,日志在长但业务类 0 条)" -f $cpuPct) 'Red'
+        Say ("  新增日志 {0} 行全是本地心跳 —— 进程活着,业务没跑起来。" -f $noiseLines.Count) 'Red'
+        Say "  查:PLC 连上没有(地址是不是 127.0.0.1 回环?)、登录角色是不是 viewer、" 'Red'
+        Say "      轮询变量有没有启用。资源曲线平坦是'什么都没干'的必然,不是'稳定'的证据。" 'Red'
+    } else {
+        Say ("★ 本轮没有结论(平均 CPU {0:N2}%,静默期之后无业务日志)" -f $cpuPct) 'Red'
+    }
+    Say "  退出码 4 表示'没验成' —— 和 1(验出问题)、3(有告警)是两回事,别混。" 'Red'
     Say "════════════════════════════════════════════════════" 'Red'
 }
 Say "" ; Say "⚠ 外推警告:上面 24h 的数字是拿 $spanMin 分钟的线性斜率乘出来的。" 'Yellow'
@@ -636,11 +951,18 @@ Say "  想真知道 24 小时什么样,就得真跑 24 小时。" 'Yellow'
 #   调用方无法区分"验过没问题"和"根本没能力验"。
 #   给它一个专属码,想把它当门禁的人必须显式决定怎么办(通常是不该算通过)。
 #   4 不与 1/3 冲突,调用方可以分别对待"验出问题"和"没验成"。
-$failCount = @($report | Where-Object { $_ -match '^\[FAIL\]' }).Count
-$warnCount = @($report | Where-Object { $_ -match '^\[WARN\]' }).Count
+$failCount = @($report | Where-Object { $_ -match '^\[FAIL\]' -and $_ -notmatch 'SOAK-6' }).Count
+$warnCount = @($report | Where-Object { $_ -match '^\[WARN\]' -and $_ -notmatch 'SOAK-6' }).Count
 $unkCount  = @($report | Where-Object { $_ -match '^\[UNKNOWN\]' }).Count
 
 if ($failCount -gt 0) { exit 1 }
 if ($warnCount -gt 0) { exit 3 }
-if ($unkCount  -gt 0) { exit 4 }
+# SOAK-6 FAIL = 没验成(进程没在跑业务),和 UNKNOWN 归为一类
+if ($liveState -eq 'FAIL' -or $unkCount -gt 0) { exit 4 }
 exit 0
+
+# ★ 2026-10-21:SOAK-6「业务活体」判 FAIL 走 exit 4,不进 exit 1。
+#   它的含义是"这一轮没有资格下结论",不是"验出了故障"。
+#   混进 failCount 的话,调用方会把"没验成"当成"验出问题",
+#   两条完全不同的结论共用一个退出码,门禁就没法做了。
+#   (上面的 $failCount 统计只认 SOAK-1/2/3,SOAK-6 在这里单独处理。)
