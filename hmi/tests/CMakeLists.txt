@@ -13,6 +13,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Test Widgets Network SerialBus Sql PrintSupport UiTools)
+# ★ 2026-10-24:找 Python 解释器(给 Q_OBJECT 判据检查用)。
+#   硬编码 "python" 会在 CI 上炸:windows-2022 runner 上命令名可能是
+#   python / py / python3,不一定叫 python。让 CMake 自己找。
+#   找不到也不致命 —— 那两条测试标成 DISABLED,而不是让整个 ctest 失败。
+find_package(Python3 COMPONENTS Interpreter QUIET)
 enable_testing()
 
 # 主程序源码目录(用来 include 头文件)
@@ -498,6 +503,72 @@ target_link_libraries(tst_ActionWrite PRIVATE hmi_core Qt6::Test)
 target_compile_options(tst_ActionWrite PRIVATE /utf-8)
 target_compile_definitions(tst_ActionWrite PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_ActionWrite COMMAND tst_ActionWrite)
+# ★ 2026-10-21:PowerShell 脚本里的【格式化占位符漏替换】静态检查。
+#   这不是 C++ 测试,是一条跑脚本的 ctest 目标 —— 因为它要检的东西
+#   本来就不在 C++ 里(在 .ps1 里)。
+#   2026-10-21 实测踩到三处,全在 scripts/long_run.ps1 的 Get-LivenessVerdict:
+#     · "★ 成功读 +{0} 次"          压根没写 -f
+#     · "★ 发出 +{0} 次" + "在途变量 = {1}" -f …   ← -f 的优先级比 + 高,
+#       于是只有最后一段被格式化,前面两段的 {0}/{1} 原样留着。
+#   后果【不报错】:判据状态判对了,但给人看的那句话里的数字全缺。
+#   而且后两处走的正是"真出问题时才走的那一支" —— 平时跑得再顺也发现不了。
+#   ⇒ 静态扫一遍(几秒),比在报告里读到一个空数字便宜得多。
+add_test(NAME tst_PsFormatLeak
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File ${HMI_SRC_DIR}/../scripts/check_ps_format_leak.ps1)
+# ★ 2026-10-21:长跑看门狗(self_test)。
+#   上一轮 24 小时验收批在 00:40 死了,58 个采样点之后没人知道,
+#   README 还"跑批中"挂了两天 —— 那条记录自己写下的结论是
+#   "跑批是 session-only,崩了无人发现"。
+#   这一轮把 harness 改成了 detached 进程,还剩最后一层:
+#   harness 中途死了要等到第二天才有人知道。
+#   看门狗补的就是这一层,而且它盯的不只是"进程还在不在":
+#   上一轮真正的死法是【进程活着但一次都没跟 PLC 说过话】,
+#   光看进程存活抓不到它 —— 所以看门狗盯的是"成功读次数还在不在涨"。
+#   它的自测造假现场,验的是"该报的报、不该报的不报":
+#   健康/harness 死/verdict 停更/被测退/从站死/业务不涨/没统计行/
+#   跑完了不报/状态异常/刚启动不误报/旧格式/连日志都没有。
+add_test(NAME tst_SoakWatchdog
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File ${HMI_SRC_DIR}/../scripts/watch_soak.ps1 -SelfTest)
+# ★ 2026-10-24:sync_vcxproj.py 的 Q_OBJECT 自动判据 + 负向对照
+#   这不是 C++ 测试,是两条跑脚本的 ctest 目标 —— 因为它要检的东西
+#   本来就不在 C++ 里(在 scripts/sync_vcxproj.py 里)。
+#
+#   【为什么必须有】
+#     G-12 查出:Paths.cpp / Paths.h / IPlcDriverProvider.h 三个新文件
+#     三个星期没进 hmi.vcxproj,MSBuild 链接期 LNK2001 × 5。
+#     之所以没人发现,是因为 CMake 有 GLOB 兜底(CI 只跑 CMake),
+#     而 sync_vcxproj.py 以前【判断不了 Q_OBJECT】,每次 dry-run 都刷
+#     "可能缺 QtMoc,请 Wqian 手动确认" + 21 条噪声。
+#     噪声的害处不是烦,是让人习惯性跳过这一段 —— 真缺的时候也跟着被跳过。
+#     现在判据自动了(2026-10-24),那就得【被守】。
+#
+#   【这两条各守什么】
+#     tst_QObjectDetection — 正向:判据在真仓库上是否正确
+#       (探针覆盖假阳性/假阴性两个方向 + 全仓 vcxproj↔filters 对齐)
+#     tst_QObjectNegCtl   — 反向:把守卫拆掉,断言测试【变红】
+#       ★ 绿的测试不一定是有效的测试 ★
+#         判据和仓库"同时错"的时候,正向测试也是绿的。
+#         必须让它咬自己一次:拆守卫 → 期望红 → 装回去 → 期望绿。
+if(Python3_Interpreter_FOUND)
+    add_test(NAME tst_QObjectDetection
+        COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/check_qobject_detection.py)
+    add_test(NAME tst_QObjectNegCtl
+        COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/negctl_qobject.py)
+else()
+    # 找不到 Python 就把这两条【标掉】,而不是让 ctest 报失败 ——
+    # 判据检查是守门,不是被测对象;守门缺席不该让整条流水线红。
+    message(WARNING
+        "没找到 Python3 解释器 —— tst_QObjectDetection / tst_QObjectNegCtl "
+        "被禁用(它们守的是 sync_vcxproj.py 的 Q_OBJECT 判据)")
+    add_test(NAME tst_QObjectDetection
+        COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
+    set_tests_properties(tst_QObjectDetection PROPERTIES DISABLED TRUE)
+    add_test(NAME tst_QObjectNegCtl
+        COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
+    set_tests_properties(tst_QObjectNegCtl PROPERTIES DISABLED TRUE)
+endif()
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
 add_hmi_test(tst_TcpClient)

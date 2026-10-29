@@ -118,3 +118,22 @@ __pycache__/
 # 这些是【一次运行的测量结果】,不是源码 —— 混进版本库只会让 git log 里
 # 塞满每次跑的数字,却看不出代码改了什么。真要留证据,连同时间戳一起 commit。
 soaks/
+
+# ===== 内存/轮询对照实验产物(2026-10-23)=====
+# scripts/mem_probe.ps1 与 scripts/repro_noncontiguous_stall.ps1 每次跑在
+# memprobe/<时间戳>/ 下落 samples_*.csv + 每个实例一份数据目录副本 + 从站日志。
+# 理由跟 soaks/ 完全一样:这些是【一次运行的测量结果】,不是源码。
+# 复现配方本身在 scripts/ 里,进版本库;跑出来的东西不进。
+memprobe/
+
+# ===== 排查期间的临时文件(不进 git)=====
+# _dbg*.py —— 逐次排查用的临时脚本(读 blob、抠 hunk 行),一次性。
+# hmi/_liblist.txt —— lib /list 的输出留档。
+# hmi/tests/_build*.bat —— 本机专用的构建快捷方式(绝对路径写死在本机)。
+# .claude/ —— AI 助手的本地状态(Claude Code 自己生成的),不是源码。
+#   注意:settings.local.json 是【本地】设置,按约定不提交。
+_dbg*.py
+hmi/_liblist.txt
+hmi/tests/_build_all.bat
+hmi/tests/_build_tests.bat
+.claude/

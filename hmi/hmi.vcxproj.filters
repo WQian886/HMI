@@ -4,6 +4,33 @@
     <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
          症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
          所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
+    <ClCompile Include="src\alarm\ActionWiring.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\alarm\ActionWiring.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
+         症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
+         所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
+    <ClCompile Include="src\util\ValueCoercion.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\util\ValueCoercion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
+         症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
+         所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
+    <ClCompile Include="src\alarm\AlarmTablePresenter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\alarm\AlarmTablePresenter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
+         症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
+         所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
     <ClCompile Include="src\alarm\AlarmRowPalette.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -31,6 +58,9 @@
     <ClCompile Include="src\alarm\AlarmSoundDialog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClInclude Include="JsonSerializer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClCompile Include="JsonSerializer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -76,9 +106,6 @@
     <QtMoc Include="src\alarm\AlarmSoundDialog.h">
       <Filter>Header Files</Filter>
     </QtMoc>
-    <QtMoc Include="JsonSerializer.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
     <QtMoc Include="Project.h">
       <Filter>Header Files</Filter>
     </QtMoc>
@@ -89,9 +116,6 @@
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="src\editor\PropertySheet.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
-    <QtMoc Include="src\editor\PropertyChangeCommand.h">
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="src\editor\EditorMainWindow.h">
@@ -739,9 +763,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <!-- ★ E.4b:ResizeHandleItem 8 handle -->
-    <QtMoc Include="src\editor\ResizeHandleItem.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
     <ClInclude Include="src\editor\ResizeHandleItem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -749,9 +770,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <!-- ★ E.4d 续-3:多选组 handle 容器 -->
-    <QtMoc Include="src\editor\GroupHandleItem.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
     <ClInclude Include="src\editor\GroupHandleItem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -759,9 +777,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <!-- ★ E.4d 续:选中态视觉统一(蓝色虚线边框) -->
-    <QtMoc Include="src\editor\SelectionFrameItem.h">
-      <Filter>Header Files</Filter>
-    </QtMoc>
     <ClInclude Include="src\editor\SelectionFrameItem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -831,6 +846,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClInclude Include="src\util\Paths.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\drivers\IPlcDriverProvider.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

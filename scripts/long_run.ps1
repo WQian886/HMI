@@ -124,6 +124,25 @@
 
     所以那 950.9 分钟【不能用来关闭 F2】:它证明的是"挂机 16 小时不崩不泄漏",
     不是"跑业务 16 小时不崩不泄漏"。判据修好后重跑才有意义。
+
+    (3) 2026-10-21:活体判据【第四版】—— 改用程序自己打的【轮询统计行】。
+        上面第 (2) 条的"按类别看"有两个方向都会错:
+          · 假绿:本地心跳也被算成日志在长(2026-10-20 那次就是这么骗过去的);
+          · 假红:健康的轮询【根本不产生业务类日志】——
+            协议层的收发全是 qCDebug,默认 INFO 级别下一行都不落。
+            于是"真跑着业务的 24 小时"会被判成"只在自转" → FAIL。
+        现在的判据读的是 PollScheduler 每 60 秒打的一行:
+            [PollScheduler] 轮询统计:发出=123 成功=120 失败=3 在途=0 PLC=1
+        判【计数器在不在涨】,不判【有没有日志】:
+            成功数在涨          → PASS(业务在跑)
+            发出在涨、成功不涨   → 从站没回包 → 没验成(exit 4)
+            发出不涨 + 在途不为 0 → 应用卡在在途态 → 验出问题(exit 1)
+            一条统计行都没有     → 跑的是旧二进制 → UNKNOWN(exit 4)
+        顺带:同一批调查还查出并修掉了应用的根因 ——
+        ModbusMaster 在协议级失败(异常响应/超时)时【不发 readFinished(false)】,
+        而 PollScheduler 只在 readFinished 里清 inFlight_ ⇒ 一次失败之后,
+        那台 PLC 的变量就永久卡在在途态,再也不会被轮询到,而且日志里一声不吭。
+        详见 PollScheduler::onStatsTick 与 ModbusMaster::finalizeErrorReply 的注释。
 #>
 
 [CmdletBinding()]
@@ -219,7 +238,13 @@ param(
                                        # ★ 2026-10-20:单看 CPU 在当前负载下没有分辨力
                                        #   (实测:真在跑 0.86% / 卡在登录框 0.5%),所以 idle
                                        #   现在要求两条证据同时成立。见下面 静默期快照。
-    [int]    $SettleSec     = 90      # 启动后静默多久再取"活体快照"(等启动日志写完)
+    [int]    $SettleSec     = 90,     # 启动后静默多久再取"活体快照"(等启动日志写完)
+
+    # ---- 2026-10-21:启动自检窗口 ---------------------------------------
+    #  程序每 60 秒打一行轮询统计(PollScheduler::onStatsTick),
+    #  所以第一行最早出现在启动后 60 秒左右 —— 窗口小于这个数就永远等不到。
+    #  给 120 秒:一行统计行之外,还留了点余量给工程加载和连接建立。
+    [int]    $SelfCheckSec  = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -347,9 +372,23 @@ function Get-Sample($proc) {
 
 # 统计日志文件(UTF-8 + 共享读,两个都必须)
 function Get-LogStats {
-    if (-not (Test-Path $logDir)) { return $null }
-    $files = Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue
-    if (-not $files) { return $null }
+    # ★ 2026-10-21:【永远】返回一个对象 —— 没有日志文件时返回"空统计",不返回 $null。
+    #   为什么:调用方直接写 $baselineLog.Count / $baselineLog.MaxFile.Length,
+    #   而 Set-StrictMode -Version 2.0 下对 $null 取 .Count 会抛
+    #   PropertyNotFoundStrict,脚本【当场崩】。
+    #   以前踩不到,是因为大家跑长跑时日志目录里已经有上一轮留下的文件;
+    #   一旦给长跑实例一份【干净的私有数据目录】(这正是"不动正在跑的那一轮"的前提),
+    #   基线那一刻目录就是空的 —— 这条隐藏的坑立刻现形。
+    #   契约要稳:有文件没文件,返回的东西形状必须一样。
+    $empty = [pscustomobject]@{
+        Count   = 0
+        Bytes   = 0
+        MaxFile = $null
+        Newest  = $null
+    }
+    if (-not (Test-Path $logDir)) { return $empty }
+    $files = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { return $empty }
     $bytes = ($files | Measure-Object Length -Sum).Sum
     [pscustomobject]@{
         Count   = $files.Count
@@ -419,10 +458,24 @@ function Get-LogTail($sinceMs, [int] $limit = 4000) {
 #      24h 长跑这点开销可以忽略;读错一次判据的代价不行。
 $reLineTs = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d{3}\s+\[(\w+)\s*\]\s+([\w.]+)\s+-\s+(.*)$'
 
-function Get-LogSince($sinceTime, [int] $limit = 50000) {
+# ★★★ 2026-10-27:上限从 50000 提到 200000,并加【截断检测】★★★
+#   【原来那个 50000 是个雷,而且踩过一次】
+#     到顶就【整个停止读】——不是"读到最近的",是"后面的一律不看"。
+#     ⇒ 触顶之后,日志里【新发生的事】一行都读不到。
+#     ⇒ 所有【靠日志行判定】的判据(SOAK-6、SOAK-W)都会读到一个【残缺的窗口】,
+#       而【报告上看不出任何异常】—— 它只是安静地判了个 UNKNOWN 或者更糟:判个 PASS。
+#   【实测依据(为什么 200000 够用)】
+#     默认日志级别下实测:1440 行/24 小时(hmi_20261025_000045.log:1440 行 / 1439 分钟);
+#     加上写侧统计行(60 秒一条)≈ 1440 行/24 小时 ⇒ 合计 ≈ 2880 行。
+#     最悲观估计(按 [Action] 18.4 次/分算 24 小时)也才 ≈ 31000 行。
+#     ⇒ 200000 有 6 倍余量;真到顶了,那就是日志级别被打开了(见下面 hmi.json 那段)。
+function Get-LogSince($sinceTime, [int] $limit = 200000) {
     if ($null -eq $sinceTime) { return @() }
     $out   = New-Object System.Collections.Generic.List[object]
-    $files = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue)
+    # ★ 按文件名排序:日志文件名带时间戳(hmi_yyyyMMdd_HHmmss.log),
+    #   字典序 ≈ 时间序 ⇒ 截断时截掉的是【最早】的那部分,不是随机的。
+    #   不排序的话,文件顺序由文件系统决定 ⇒ 截断可能正好把【最新的】那个文件吃掉。
+    $files = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue | Sort-Object Name)
     foreach ($f in $files) {
         try {
             $fs = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite')
@@ -434,9 +487,18 @@ function Get-LogSince($sinceTime, [int] $limit = 50000) {
                     if ($ts -ge $sinceTime) {
                         $out.Add([pscustomobject]@{
                             Time = $ts; Level = $matches[2]; Cat = $matches[3]; Msg = $matches[4]
+                            # ★ File 字段:写侧判据要按【日志文件 + 实例】分组,
+                            #   用来把不同进程的统计行分开(进程重启 ⇒ 计数器归零)。
+                            File = $f.Name
                         })
                     }
                 }
+            }
+            # ★ 截断检测:因为文件【没读完】而停了 ⇒ 后面还有内容没被看到。
+            #   这个标志必须留着 —— 不然就是"用半截数据下结论",本项目的核心教训。
+            if (-not $sr.EndOfStream -and $out.Count -ge $limit) {
+                $script:logTruncated = $true
+                Say ("★ 日志超过 $limit 行,已停止读取(" + $f.Name + ")—— 后面还有内容没被看到。") 'Red'
             }
             $sr.Close(); $fs.Close()
         } catch {
@@ -479,6 +541,33 @@ $noiseRe = '^\[(HistoryRecorder|TrendWidget)\]'
 #  【中途只写状态,不写判定】
 #  判定要等全程数据齐了才算。强行在中途算,就是又一次"用半截数据下结论"。
 #  所以 state=RUNNING 的文件【永远不能被当成 PASS】—— 它自己写着还没跑完。
+
+# ---- 占位符漏检(2026-10-21 新增)------------------------------------------
+#  ★ 为什么要有这个
+#  ------------------
+#  2026-10-21 冒烟跑完,verdict.txt 里 SOAK-6 那一行是这么写的:
+#
+#      ★ 成功读 +{0} 次 —— 业务真的在跑,判定资格成立。
+#
+#  {0} 没被替换 —— 因为写那一行的人少写了一个 -f。
+#  它没有报错、没有红、没有中断,判据照常判了 PASS。
+#  而这行字的全部作用就是把"业务真的在跑"这件事【量化】给读报告的人看。
+#  数字没了,这句话就退化成一句自我声明 —— 恰好是它本该避免的东西。
+#
+#  ★ 这和"轮询统计行格式对不上"是同一类病,同一个教训:
+#      判据坏掉的样子,和被测物坏掉的样子,一模一样。
+#      所以【坏了要响】,不能只在报告里留个记号等人发现。
+#
+#  这里扫的是 {0} {1} 这种【格式占位符的形状】,不是任意花括号 ——
+#  免得路径里有个 { 也被当成漏检。
+function Get-UnformattedPlaceholders {
+    param([string] $Text)
+    if ([string]::IsNullOrEmpty($Text)) { return @() }
+    $m = [regex]::Matches($Text, '\{\d+\}')
+    if ($m.Count -eq 0) { return @() }
+    return @($m | ForEach-Object { $_.Value } | Select-Object -Unique)
+}
+
 function Write-RunState {
     param(
         [Parameter(Mandatory = $true)][string] $State,
@@ -523,6 +612,18 @@ function Write-RunState {
     if ($Detail -ne '') { $sb.Add("说明              : $Detail") }
     if ($State -eq 'DONE') {
         foreach ($rl in $report) { $sb.Add($rl) }
+        # ★ 落盘前扫一遍:报告里还有没替换的占位符 ⇒ 这份报告的【数字】是缺的。
+        #   缺数字的报告【不能被当成验收结论】—— 判定的意义就是那些数字。
+        #   写明 + 让退出码变成 4(没验成),而不是在文件里悄悄留一句。
+        $leaked = @(Get-UnformattedPlaceholders -Text ($report -join "`n"))
+        if ($leaked.Count -gt 0) {
+            $script:reportHasPlaceholder = $true
+            $script:reportLeaked = ($leaked -join ', ')
+            $sb.Add("")
+            $sb.Add("★★ 本报告里有【未替换的占位符】: " + ($leaked -join ', '))
+            $sb.Add("★★ 上面这些位置本该是数字,现在缺了 —— 这份报告的数字不可信,")
+            $sb.Add("★★ 【不能当验收结论用】。(harness 的问题,不是被测程序的问题)")
+        }
     }
     ($sb -join "`r`n") | Out-File -FilePath $path -Encoding UTF8
 }
@@ -634,6 +735,14 @@ $OutDir = (Resolve-Path $OutDir).Path
 $samples = New-Object System.Collections.Generic.List[object]
 $csvPath = Join-Path $OutDir 'samples.csv'
 $report  = New-Object System.Collections.Generic.List[string]
+# ★ 报告里有没有漏掉的占位符。默认 false,落盘时(Write-RunState 'DONE')改判。
+#   显式初始化 —— 这个脚本开了 Set-StrictMode 2.0,没初始化的变量读一下就炸。
+$script:reportHasPlaceholder = $false
+$script:reportLeaked = ''
+# ★ 2026-10-27:日志被截断了吗?(Get-LogSince 撞上限时置位)
+#   截断了就意味着"后面还有内容没被看到" ⇒ 任何靠日志行的判据都只看到了半截
+#   ⇒ 整体降级为 exit 4(没验成),不许拿半截数据下结论。
+$script:logTruncated = $false
 
 $baselineLog = Get-LogStats
 $baselineTime = Get-Date          # 一切"本次新增"的判定都以这一刻为界
@@ -734,8 +843,40 @@ if (-not $AdoptExisting) {
         Say "★ 未给 -SoakUser/-SoakPass —— 进程会停在登录框,本轮必然判 UNKNOWN。" 'Yellow'
         Say "  长跑要用:.\scripts\long_run.ps1 -Hours 24 -SoakUser <用户名> -SoakPass <密码>" 'Yellow'
     }
+    # ★ 2026-10-21:-Project → --project(现在这个开关是真能打开工程的)
+    #   【为什么长跑必须用它】默认工程指向 127.0.0.1:502 —— 那是 mbslave 占的端口,
+    #   而 mbslave 现在对每个 FC3 都回 ExCode=0x03(读必失败)。
+    #   不换工程,这一轮验到的只有"重试正常",验不到"读得到数据"。
+    if ($Project) {
+        if (-not (Test-Path $Project)) {
+            Say ("-Project 指定的工程文件不存在: {0}" -f $Project) 'Red'; exit 1
+        }
+        $Project = (Resolve-Path $Project).Path
+        $launchArgs += @('--project', $Project)
+        Say ("工程文件: {0}" -f $Project) 'Cyan'
+    }
 
-    $owned = Start-Process -FilePath $exe -ArgumentList $launchArgs -PassThru
+    # ★ 2026-10-21:把实例键交给被测进程。
+    #   机制:环境变量 HMI_INSTANCE_KEY —— 由 SingleInstance::keyFromEnvironment() 读取。
+    #   【为什么不是命令行选项】
+    #     单实例检测发生在 main() 的最前面,那时 QApplication 还不存在,
+    #     命令行解析器也就还没建好 —— 键【拿不到】。
+    #     (把解析器整体前移就得改公共启动路径,风险比收益大。)
+    #     环境变量没有这个次序问题:任何时候都能读。
+    #   【显式设置,不留隐式状态】
+    #     不给 -InstanceKey 时也显式置空 —— 让被测进程用默认键,
+    #     和报告里写的对得上。
+    #     (环境里要是残留着一个 HMI_INSTANCE_KEY,而报告说"用默认键",
+    #      那报告和现场就对不上了 —— 对不上就查不了。)
+    if ($InstanceKey) {
+        $env:HMI_INSTANCE_KEY = $InstanceKey
+        Say ("单实例键          : {0}(经环境变量 HMI_INSTANCE_KEY 传给被测进程)" -f $InstanceKey) 'Cyan'
+    } else {
+        $env:HMI_INSTANCE_KEY = ''
+        Say "单实例键          : 默认(hmi-single-instance-v1)" 'DarkGray'
+    }
+
+    $owned = Start-Process -FilePath $exePath -ArgumentList $launchArgs -PassThru
     Start-Sleep -Seconds 5
     if ($owned.HasExited) {
         # ★ ExitCode 有可能是空的 —— 实测踩过:Start-Process -PassThru 拿到的
@@ -756,6 +897,70 @@ if (-not $AdoptExisting) {
         exit 1
     }
     Say ("已启动 PID={0}" -f $owned.Id) 'Green'
+
+    # ---- 启动自检:程序到底有没有在跟 PLC 说话 --------------------------
+    #  ★ 为什么要有这道门(2026-10-21)
+    #  -----------------------------------
+    #  上一轮长跑(950.9 分钟)的教训:程序从启动后【第一秒】起就没跟 PLC 说过话
+    #  (第一批读请求失败 → 变量卡在在途态 → 那台 PLC 再也收不到任何读请求),
+    #  而"日志还在长"(本地心跳每 60 秒一行)把 harness 骗了过去 ——
+    #  结果是 16 小时采到空气,连判据都没写出来。
+    #  那种失败要到【最后】判 SOAK-6 才暴露,代价是一整夜。
+    #  这里在开跑后 $SelfCheckSec 秒内就问一次:"你到底发出请求没有?"
+    #  没有 → 这一轮没资格跑,当场停 —— 而不是"跑满 24 小时再说不合格"。
+    #
+    #  【判据来源】和 SOAK-6 同一个正则($rePollStats)、同一个来源
+    #    (程序自己打的轮询统计行,PollScheduler::onStatsTick,每 60 秒一条)。
+    #    发出 > 0 → 在通信(哪怕全失败,那也是从站的问题,不是应用的)
+    #    发出 = 0,或根本没有统计行 → 没资格跑
+    Say ("启动自检:等程序打出第一行轮询统计(最多 {0} 秒)..." -f $SelfCheckSec) 'Cyan'
+    $selfCheckOk    = $false
+    $selfCheckNote  = ''
+    $selfCheckUntil = (Get-Date).AddSeconds($SelfCheckSec)
+    while ((Get-Date) -lt $selfCheckUntil) {
+        Start-Sleep -Seconds 10
+        $null = $owned.Refresh()
+        if ($owned.HasExited) {
+            $code = try { $owned.ExitCode } catch { $null }
+            $selfCheckNote = "被测进程在启动自检期间退出了(exit=" +
+                             $(if ($null -eq $code -or "$code" -eq '') { "取不到" } else { $code }) + ")"
+            break
+        }
+        $selfLines = @(Get-LogSince $baselineTime 5000)
+        $selfStat  = @($selfLines | Where-Object { $_.Msg -match $rePollStats })
+        if ($selfStat.Count -gt 0) {
+            $m     = [regex]::Match($selfStat[-1].Msg, $rePollStats)
+            $sent  = [int]$m.Groups[1].Value
+            $ok    = [int]$m.Groups[2].Value
+            $fail  = [int]$m.Groups[3].Value
+            $infl  = [int]$m.Groups[4].Value
+            if ($sent -gt 0) {
+                $selfCheckOk = $true
+                Say ("  ✓ 发出={0} 成功={1} 失败={2} 在途={3} —— 程序确实在跟 PLC 通信,这一轮有资格跑。" -f `
+                     $sent, $ok, $fail, $infl) 'Green'
+                break
+            }
+            $selfCheckNote = ("程序打出了统计行,但发出=0(成功=0 失败=0 在途={0}) —— 一个请求都没发出去" -f $infl)
+            break
+        }
+    }
+    if (-not $selfCheckOk) {
+        if ($selfCheckNote -eq '') {
+            $selfCheckNote = "等了 $SelfCheckSec 秒,一条轮询统计行都没有"
+        }
+        Say "★ 启动自检没过 —— 这一轮没资格跑,当场停:" 'Red'
+        Say ("  " + $selfCheckNote) 'Red'
+        Say "  查:① -Exe 指的是不是【修好的那个二进制】(2026-10-21 之前的那版没有轮询统计行);" 'Red'
+        Say "      ② 从站在不在(现在 502 端口上那个 mbslave 对每个 FC3 都回 ExCode=0x03);" 'Red'
+        Say "      ③ 工程文件的 host/port 对不对(长跑要指向自建从站 127.0.0.1:1502);" 'Red'
+        Say "      ④ ★ 日志里那一行的【格式】还对不对得上 \$rePollStats —— 2026-10-21 踩过这个:" 'Red'
+        Say "         程序打的是 '发出= 271'(QDebug 插的空格),正则要的是 '发出=271',于是永远匹配不上。" 'Red'
+        Say "         症状和'程序没在跑'一模一样:【判据坏了,不是程序坏了】。" 'Red'
+        # 把我们启动的进程收掉 —— 留一个不会干活的进程在机器上,是最难查的现场
+        try { if (-not $owned.HasExited) { Stop-Process -Id $owned.Id -Force } } catch { }
+        Write-RunState 'PREFLIGHT_FAILED' ("启动自检没过:" + $selfCheckNote)
+        exit 4
+    }
 }
 
 # ---- 静默期快照:判断"进程还在干活"的分界点 -------------------------
@@ -792,8 +997,12 @@ $settledLog = Get-LogStats
 #   之后按日志行开头的时间戳过滤,取"这一时刻之后"的行。
 #   不用字节偏移 —— 文件元数据会读到过期值,详见 Get-LogSince 上面的实测。
 $settleTime = Get-Date
-if ($null -eq $settledLog) {
-    Say "静默期快照:没有日志目录 —— 拿不到活体证据,按'没在干活'处理" 'Yellow'
+if ($settledLog.Count -eq 0) {
+    # ★ 2026-10-21:一个日志文件都没有,是【异常信号】,不是"正常但没日志"。
+    #   启动 90 秒了还一个文件没落 ⇒ 日志压根没建起来。
+    #   以前这条分支说的是"没有日志目录" —— 而现在 Get-LogStats 永远返回对象,
+    #   "目录不存在"和"目录里没有文件"都归到这儿,措辞得跟着改对。
+    Say "静默期快照:一个日志文件都没有(启动 90 秒了还没落日志)—— 拿不到活体证据" 'Yellow'
 } else {
     Say ("静默期快照:日志 {0} 个文件 / 合计 {1} KB" -f `
          $settledLog.Count, [math]::Round($settledLog.Bytes/1KB,1)) 'Cyan'
@@ -973,12 +1182,661 @@ $sinceLines = @(Get-LogSince $settleTime)
 $logGrew    = ($sinceLines.Count -gt 0)
 $noiseLines = @($sinceLines | Where-Object { $_.Msg -match $noiseRe })
 $bizLines   = @($sinceLines | Where-Object { $_.Msg -notmatch $noiseRe })
-$bizGrew    = ($bizLines.Count -gt 0)
+
+# ============================================================
+# ★★ 活体判据【第二版】(2026-10-21)★★
+# ============================================================
+#  第一版判据:业务类日志行数 > 0。
+#  它【两个方向都会错】,而且错得都很贵:
+#
+#    · 假绿:本地心跳(HistoryRecorder/TrendWidget)也写日志。
+#      2026-10-20 那次 950.9 分钟就是被这个骗过去的 ——
+#      进程自己在给自己记心跳,看着像"在干活"。
+#
+#    · 假红:健康的轮询【根本不产生业务类日志】!
+#      协议层的收发全是 qCDebug,默认 INFO 级别下一行都不落。
+#      于是"真跑着业务的 24 小时"会被判成"只在自转" → FAIL。
+#      —— 这是第一版判据最要命的地方:它会否掉唯一有意义的跑法。
+#      (2026-10-21 查完根因才发现:协议层失败确实一行日志都不打。)
+#
+#  第二版判据:读程序自己打的【轮询统计行】
+#      "[PollScheduler] 轮询统计:发出=123 成功=120 失败=3 在途=0 PLC=1"
+#    (PollScheduler 每 60 秒一条,INFO 级,见 PollScheduler::onStatsTick)
+#  判的是【计数器在不在涨】,不是【有没有日志】:
+#      · 成功数在涨          → 业务真的在跑(唯一能判 PASS 的情形)
+#      · 发出在涨、成功不涨   → 发出去了没人回 ⇒ 从站不响应 / 在途态卡死
+#      · 发出不涨            → 一个请求都没发出去 ⇒ 没连上 / 没有到期变量
+#      · 一条统计行都没有     → 跑的是旧二进制(没这行),判不出来 → UNKNOWN
+#
+#  为什么"计数器"骗不了人:它记的是真实发生过的收发次数,
+#  而"这一行日志本身还在打"又证明程序还活着。
+#  日志行数则两头都能骗 —— 多了是心跳,少了是协议层静默。
+#
+#  ★★ 为什么把判据抽成【函数】★★
+#  判据是这次长跑唯一能信的东西,它必须能被单独拿去喂数据、验它会不会红。
+#  写在脚本主干里就没法做对照实验(主干一跑就是 24 小时)。
+#  scripts/verify_soak6_liveness.ps1 从【本文件里原样抠出】这两个函数来跑,
+#  不复制粘贴一份 —— 复制的那份迟早跟本体对不上,而对不上的时候没人会发现。
+
+function Get-PollStats {
+    <#
+      从日志行里抠出轮询统计行,算出"这一轮里涨了多少"。
+      返回的对象字段:
+        N          统计行条数
+        SentDelta  发出计数增量
+        OkDelta    成功计数增量   ← 判"业务在不在跑"就看它
+        FailDelta  失败计数增量
+        Inflight   最后一条的"在途变量"数
+        SentTotal  最后一条的累计发出
+        OkTotal    最后一条的累计成功
+    #>
+    param([array] $Lines)
+    # ★ 2026-10-21:正则改成用脚本级的 $rePollStats(全脚本唯一出处)。
+    #   原来这里是函数内的一份副本 —— 启动自检也用同一套格式,
+    #   两份副本迟早有一份跟程序那边对不上,而对不上的表现是"判不出"。
+    $re = $rePollStats
+    $statLines = @($Lines | Where-Object { $_.Msg -match $re })
+    $r = [pscustomobject]@{
+        N = $statLines.Count; SentDelta = 0; OkDelta = 0; FailDelta = 0
+        Inflight = 0; SentTotal = 0; OkTotal = 0
+    }
+    if ($r.N -eq 0) { return $r }
+    $mFirst = [regex]::Match($statLines[0].Msg,  $re)
+    $mLast  = [regex]::Match($statLines[-1].Msg, $re)
+    if (-not ($mFirst.Success -and $mLast.Success)) { return $r }
+    $r.SentTotal = [int]$mLast.Groups[1].Value
+    $r.OkTotal   = [int]$mLast.Groups[2].Value
+    $r.SentDelta = $r.SentTotal - [int]$mFirst.Groups[1].Value
+    $r.OkDelta   = $r.OkTotal   - [int]$mFirst.Groups[2].Value
+    $r.FailDelta = [int]$mLast.Groups[3].Value - [int]$mFirst.Groups[3].Value
+    $r.Inflight  = [int]$mLast.Groups[4].Value
+    return $r
+}
+
+function Get-LivenessVerdict {
+    <#
+      活体判据本体。返回:
+        State     'PASS' / 'FAIL' / 'UNKNOWN'
+        AppDefect $true = 这一轮查出的是【应用自己的故障】(退出码 1),
+                  $false = 没验成 / 环境问题(退出码 4)
+        Reason    判据说明(直接进报告)
+    #>
+    param($Stats, [bool] $IsFrozen)
+    $s = $Stats
+    if ($IsFrozen) {
+        return [pscustomobject]@{ State='FAIL'; AppDefect=$false
+            Reason='冻住:一条日志都没长,事件循环停了(可能是模态框)。这一轮什么都不用看了。' }
+    }
+    if ($s.N -eq 0) {
+        return [pscustomobject]@{ State='UNKNOWN'; AppDefect=$false
+            Reason=("★ 一条【轮询统计行】都没有 —— 判不出活体,不下结论。`n" +
+                    "          三种可能:(a) 跑的是 2026-10-21 之前编译的旧二进制(那版没这行);`n" +
+                    "                    (b) 日志级别把 hmi.poll 类别滤掉了(默认 INFO,不该发生);`n" +
+                    "                    (c) 程序改了这一行的格式,正则没跟上 —— ★ 这一种最难查,`n" +
+                    "                        因为症状和'程序没在跑'一模一样。`n" +
+                    "                        查:日志里那一行长什么样,与 $rePollStats 对不对得上。`n" +
+                    "          ★ 旧判据在这里会判成'业务类日志 0 条 → 只在自转' —— 那是假红:`n" +
+                    "            健康的轮询本来就不产生业务类日志(协议层全是 Debug 级)。") }
+    }
+    if ($s.OkDelta -gt 0) {
+        $extra = ''
+        if ($s.FailDelta -gt 0) {
+            $extra = ("`n        (期间失败 {0} 次 —— 2026-10-21 修的 readFinished(false) 让它能自动重试,没有卡死在途态)" -f $s.FailDelta)
+        }
+        # ★ 2026-10-21:这里原本【少写了一个 -f】。
+        #   少写的后果不是"报错了",是"报了一句看起来像结论、其实没有数字的话":
+        #   verdict.txt 里落下来的是 "★ 成功读 +{0} 次 —— 业务真的在跑,判定资格成立。"
+        #   —— 判 PASS,数字却是空的。读报告的人扫一眼"判定资格成立"就翻过去了。
+        #   (和"轮询统计行格式对不上"是同一类病:坏了不响。)
+        #   ⇒ 下面这行必须带 -f;另外整个报告在落盘前会扫一遍有没有漏掉的占位符。
+        return [pscustomobject]@{ State='PASS'; AppDefect=$false
+            Reason=(("★ 成功读 +{0} 次 —— 业务真的在跑,判定资格成立。`n" +
+                     "          SOAK-2/3 的数字这一轮有效。") -f $s.OkDelta) + $extra }
+    }
+    if ($s.SentDelta -gt 0) {
+        # ★★ 2026-10-21:这两支原来都栽在同一个 PowerShell 陷阱上 ——
+        #   【-f 的优先级比 + 高】。
+        #   "a{0}" + "b{1}" -f $x  实际是  "a{0}" + ("b{1}" -f $x)
+        #   ⇒ 只有【最后一个】字面量被格式化,前面几段里的 {0}/{1} 原样留着!
+        #   于是"从站不回包"这一支落进报告的是:
+        #       ★ 发出 +{0} 次但成功 0 次:…在途变量 = {1} —— …
+        #   —— 两个数字全缺。而这一支恰恰是【真出问题时才走的那一支】。
+        #   (判据的状态还是对的,FAIL / 不算应用故障;坏掉的是给人看的那句话。)
+        #   ⇒ 修法:先【把整个拼接括起来】,再 -f。顺序反了就全错。
+        return [pscustomobject]@{ State='FAIL'; AppDefect=$false
+            Reason=(("★ 发出 +{0} 次但成功 0 次:请求发出去了,没人回。`n" +
+                     "          在途变量 = {1} —— 这正是 2026-10-21 查出的根因的现场形态:`n" +
+                     "          一次协议级失败之后,变量卡在在途态,再也发不出去。`n" +
+                     "          查:从站是不是不回包(服务没起?地址对不上?),或看日志里的 [ModbusMaster] 通讯错误。") -f `
+                    $s.SentDelta, $s.Inflight) }
+    }
+    if ($s.Inflight -gt 0) {
+        return [pscustomobject]@{ State='FAIL'; AppDefect=$true
+            Reason=(("★ 发出数一条没涨,而在途变量 = {0} —— 卡在在途态等一个永远不来的回包。`n" +
+                     "          这就是 2026-10-21 查出的根因:一次失败之后,inFlight_ 永不清。`n" +
+                     "          ★ 这是【应用侧的故障】(不是从站没回包),退出码按'验出问题'给。`n" +
+                     "          查:日志里的 [ModbusMaster] 通讯错误(异常响应/超时)。") -f $s.Inflight) }
+    }
+    return [pscustomobject]@{ State='FAIL'; AppDefect=$false
+        Reason=("★ 发出数一条没涨,在途变量 0 —— 压根没有请求要发。`n" +
+                "          查:PLC 连上了没?变量表是不是空的?是不是所有变量都 alwaysPoll=false?") }
+}
+
+$stats        = Get-PollStats -Lines $sinceLines
+$statsN       = $stats.N
+$pollSentDelta = $stats.SentDelta
+$pollOkDelta   = $stats.OkDelta
+$pollFailDelta = $stats.FailDelta
+$inflightLast  = $stats.Inflight
+$okTotalLast   = $stats.OkTotal
+$sentTotalLast = $stats.SentTotal
+
+# ================================================================
+# ★★ 写侧判据(2026-10-27 新增)★★
+# ================================================================
+#  ★ 为什么长跑需要这一条(而以前没有)★
+#    活体判据【只看读】:成功读计数在涨 ⇒ 判 PASS。
+#    ⇒ 而 BUGFIX-E1 那个洞(写被读饿死)【读完全正常】——
+#      修之前实测:读 547 次全部成功,写 604 次全部被拒,0 帧落地。
+#    ⇒ ★ 所以【长跑的活体判据对"写被饿死"是瞎的】★
+#      —— 24 小时一个字节都写不出去,活体判据照样绿。
+#    ⇒ 这跟 G-15/G-16 同一个形状:判据量错了东西。
+#
+#  ★ 为什么"写落地 0 条"也不够(重试机制会盖住)★
+#    2026-10-27 现场级负向对照实测:把排队拆回"直接拒收"之后,
+#    那一轮【拒收 12 次、发写 51 次、FC6 写帧 39 条、值全对】,
+#    短跑判据 J1~J10 【全绿】!
+#    ⇒ 因为"拒收 → dirty 保留 → 下一拍重发 → 这次发出去了"。
+#    ⇒ ★ 所以判据必须盯【拒收次数】,而不是只盯"最后有没有落地"。★
+#
+#  ★ 这条判据【不参与】活体 PASS/FAIL 的判定(那是读的事)★
+#    —— 它是【独立的一道闸】:写侧出问题,活体该绿还是绿,
+#       但这轮【不算验收通过】。
+#    ⇒ 为什么不并进活体判据:活体判据被 verify_soak6_liveness.ps1
+#      原样抠出去单独喂数据(见上面 Get-LivenessVerdict 的注释),
+#      动它会连带那个对照脚本一起坏。
+#    ⇒ 而且它们回答的是【不同的问题】:
+#      活体:程序还活着、还在跟 PLC 通信吗?
+#      写侧:写有没有【真的、按该走的那条路】出去?
+function Get-WriteSideStats {
+    <#
+      从日志行里抠出【写侧统计行】,算窗口增量,并检查两条【会计恒等式】。
+
+      ★★ 为什么判据整个搬到了程序里(这是 2026-10-27 的重做)★★
+        原来这一块是 harness 刮日志 + 用"3 秒内有没有 errorOccurred"猜环境 vs 缺陷。
+        ★ 那条路已经被【实测】推翻了:
+          · 真断线【不产生】"Modbus 错误" —— 那串字在 hmi/hmi.cpp:400/416(UI 层),
+            而 TcpClient::onSocketError 故意【不发】 errorOccurred(免得界面闪红框);
+          · 断线会 failQueuedWrites() 把排队写作废 ⇒ 老的"排队 > 排队发出"
+            会【误报】"排队写丢了" —— 一条天天误报的判据,跑一个月就没人信了。
+        ⇒ 现在:【原因】由程序在它【知道原因】的地方算好(ModbusMaster 里),
+          harness 只负责取数 + 判恒等式。
+
+      返回对象:
+        StatLines / Groups / Resets   统计行条数 / 分组数 / 计数器归零次数
+        尝试 接受 拒收 拒收未连 拒收非法 拒收队列满 拒收发送 拒收缺陷
+        排队 排队发出 排队作废 已发出 成功 失败      ← 都是【窗口增量】
+        Identity1Bad / Identity1Residual            恒等式①残差(组数 / 绝对值和)
+        Identity2Bad / Identity2Residual            恒等式②残差
+    #>
+    param([array] $Lines)
+
+    # ★ 捕获组顺序(= 字段顺序)。程序侧见 ModbusMaster::formatWriteStatsLine。
+    #   2..15 = 【累计计数器】(只增)⇒ 首末行做差 = 窗口增量;
+    #   16/17 = 【仪表】(瞬时值)⇒ 只取最后一次的值,不做差;
+    #   1     = 实例号(进程内自增)。
+    $names = @('实例','尝试','接受','拒收','拒收未连','拒收非法','拒收队列满','拒收发送','拒收缺陷',
+               '排队','排队发出','排队作废','已发出','成功','失败','在队','在途写')
+
+    $r = [pscustomobject]@{
+        StatLines = 0; Groups = 0; Resets = 0
+        # ★ DeltaAvailable:窗口增量【可不可信】。
+        #   增量 = 末行 - 首行 ⇒ 一组里【只有一条】统计行时增量【恒等于 0】,
+        #   而那【不是】"没发生过写",只是"算不出差"。
+        #   ⇒ 只要有一组不足两条,整个增量视图就【不可信】。
+        DeltaAvailable = $false
+        SingleLineGroups = 0
+        # 窗口跨度 / 统计行【覆盖率】—— 用来发现"统计定时器中途停了"
+        WindowSpanSec = 0; ExpectedLines = 0; Coverage = 0
+        Identity1Bad = 0; Identity1Residual = 0
+        Identity2Bad = 0; Identity2Residual = 0
+        Identity3Bad = 0; Identity3Residual = 0
+    }
+    foreach ($n in $names) {
+        if ($n -eq '实例' -or $n -eq '在队' -or $n -eq '在途写') { continue }
+        Add-Member -InputObject $r -MemberType NoteProperty -Name $n -Value ([int64]0)
+    }
+    # ★ 绝对值视图 —— 跟增量视图【平级】的一份,不是备胎。
+    #   为什么要它,见下面"绝对值视图"那一段的注释。
+    #   ★ 提前建好(不是用到了才建)—— 判据函数在所有分支上都会读它,
+    #     而 StrictMode 2.0 下读一个不存在的属性会直接抛错。
+    $abs = [pscustomobject]@{}
+    foreach ($n in $names) {
+        if ($n -eq '实例' -or $n -eq '在队' -or $n -eq '在途写') { continue }
+        Add-Member -InputObject $abs -MemberType NoteProperty -Name $n -Value ([int64]0)
+    }
+    Add-Member -InputObject $r -MemberType NoteProperty -Name 'Abs' -Value $abs
+    if (-not $Lines) { return $r }
+
+    $re = $reWriteStats
+    $parsed = New-Object System.Collections.Generic.List[object]
+    foreach ($l in $Lines) {
+        if ($l.Msg -notmatch $re) { continue }
+        $m = [regex]::Match($l.Msg, $re)
+        if (-not $m.Success) { continue }
+        # ★ 数组长度要 18,不是 17 ——
+        #   正则的捕获组是【1..17】(1 基),而 .NET 数组是【0 基】⇒ 下标 17 也要能放。
+        #   写成 17 的话下标 17 越界 ⇒ "Index was outside the bounds of the array"。
+        #   ★ 这条是【verify_soakw_write_side.ps1 跑出来的】——
+        #     真跑一次才发现的,光看代码看不出来(17 个字段 ↔ 数组长度 17,一眼像是对的)。
+        $v = New-Object 'System.Int64[]' 18
+        for ($i = 1; $i -le 17; $i++) { $v[$i] = [int64]$m.Groups[$i].Value }
+        $parsed.Add([pscustomobject]@{ File = $l.File; Time = $l.Time; V = $v })
+    }
+    $r.StatLines = $parsed.Count
+    if ($parsed.Count -eq 0) { return $r }
+
+    # ★ 按 (日志文件, 实例号) 分组。
+    #   进程内实例号自增 ⇒ 同一个日志文件里不同的实例是【不同的 PLC 通道】,
+    #   计数器各算各的,不能混。
+    #   日志文件分开 ⇒ 跨天滚动、进程重启天然分开。
+    #   ★ 用哈希表分组,不用 Group-Object -Property { ... } ——
+    #     后者在 PS 5.1 里对脚本块属性的求值时机不好把握,而这里算错一次
+    #     就是"两台 PLC 的计数混在一起"⇒ 恒等式必然残差 ⇒ 假 FAIL。
+    $groups = @{}
+    foreach ($it in $parsed) {
+        $key = "$($it.File)#$($it.V[1])"
+        if (-not $groups.ContainsKey($key)) {
+            $groups[$key] = New-Object System.Collections.Generic.List[object]
+        }
+        $groups[$key].Add($it)
+    }
+    $r.Groups = $groups.Count
+
+    # ★ 只有【一条】统计行的组:增量算不出来(末-首=0,但那不是"没发生过")。
+    #   这些组的绝对值照样有效 ⇒ 坏路径照样能判。
+    $singleLineGroups = 0
+
+    foreach ($key in @($groups.Keys)) {
+        $items = @($groups[$key] | Sort-Object Time)
+        if ($items.Count -lt 2) { $singleLineGroups++ }
+        # ★★ 绝对值视图:每段取【该段最后一行】的原始值,各段【相加】 ★★
+        #   —— 因为"归零"把一个【单调计数器】切成了几段,每段各自从 0 开始。
+        #   段内最后一行 = 该段的累计终值 ⇒ 各段相加 = 【进程一生】的累计值。
+        #
+        #   ★ 为什么需要这一份(增量视图不够用)
+        #     增量视图算的是"窗口内发生了什么",它【必须有两条以上的统计行】才能算。
+        #     而窗口里【只有一条】时,增量恒为 0 —— 那不是"没发生过",是"算不出差"。
+        #     ⇒ 2026-10-28 实测踩到了:恒拒收突变体的第一拍(只有一条统计行),
+        #       那一行明明白白写着"尝试=541 拒收缺陷=541",
+        #       判据却报"本轮窗口内写尝试 0 次(没写过)"——
+        #       【事实相反的话】,而且方向是"看不见缺陷" ⇒ 假绿。
+        #     ⇒ 坏路径(拒收缺陷/拒收队列满)是【二进制的属性】,不是窗口的属性:
+        #       那条路径坏了,它在窗口【之前】坏了也一样坏。
+        #       ⇒ 判它必须看【绝对值】,而不是看窗口内的差。
+        $segAbs = New-Object 'System.Int64[]' 18
+        # ★ 长度 18 —— 同上:捕获组下标最大是 17。
+        $segFirst = New-Object 'System.Int64[]' 18
+        $prev     = New-Object 'System.Int64[]' 18
+        $acc      = New-Object 'System.Int64[]' 18
+        $havePrev = $false
+        foreach ($it in $items) {
+            if ($havePrev) {
+                # ★ 段边界:【尝试】掉了 ⇒ 累计计数器归零 ⇒ 进程重启过。
+                #   用"尝试"当探针,是因为它【每次写尝试都 +1】,是所有计数器里
+                #   变化最密的 —— 归零时它最不可能"碰巧"没掉。
+                #   (用别的计数器就有可能:旧的拒收数是 0,新的也是 0 ⇒ 看不出来。)
+                if ($it.V[2] -lt $prev[2]) {
+                    $r.Resets++
+                    # 旧段结算:观测到的两行之间的增量
+                    for ($i = 2; $i -le 15; $i++) {
+                        $acc[$i] += ($prev[$i] - $segFirst[$i])
+                        # ★ 旧段的【绝对终值】= 旧段最后一行 $prev 的原始值。
+                        #   (计数器在进程启动时从 0 开始 ⇒ 段内最后一行就是该段的累计终值。)
+                        $segAbs[$i] += $prev[$i]
+                    }
+                    # ★★ 新段的基线 = 0,不是新段第一行的值 ★★
+                    #   为什么:重启发生在【两行之间】⇒ 重启点在观测窗口【之内】
+                    #   ⇒ 新进程【整个生命期】都在窗口里
+                    #   ⇒ 它那些计数【全部】是窗口内的量,不能减掉。
+                    #   ★ 写成 $it.V[$i] 的话,新进程做的 5 次尝试会被减成 0 ——
+                    #     而那 5 次里可能有【拒收缺陷】⇒ 缺陷被漏掉 ⇒ 假绿。
+                    #     ⇒ 宁可多算(⇒ 可能假红,能看见),不可少算(⇒ 假绿,看不见)。
+                    for ($i = 2; $i -le 15; $i++) { $segFirst[$i] = 0 }
+                }
+            } else {
+                for ($i = 2; $i -le 15; $i++) { $segFirst[$i] = $it.V[$i] }
+                $havePrev = $true
+            }
+            for ($i = 1; $i -le 17; $i++) { $prev[$i] = $it.V[$i] }
+        }
+        for ($i = 2; $i -le 15; $i++) { $acc[$i] += ($prev[$i] - $segFirst[$i]) }
+        # ★ 最后一段的绝对终值 = 本组最后一行 $prev。
+        for ($i = 2; $i -le 15; $i++) { $segAbs[$i] += $prev[$i] }
+
+        # ★ $names 是 0 基,$v 是 1 基 ⇒ 名字要用 $names[$i-1]。
+        #   写成 $names[$i] 会整体错位一格:【尝试】的增量会被记到【接受】头上,
+        #   【失败】会被记到【在队】头上 —— 而恒等式是分开算的,于是
+        #   判据会【看着绿、其实在量错东西】。这种错不会自己暴露。
+        for ($i = 2; $i -le 15; $i++) {
+            $nm = $names[$i - 1]
+            $r.$nm = [int64]$r.$nm + $acc[$i]
+            # ★ 绝对值视图:【各组的绝对终值相加】。
+            #   不同组 = 不同 PLC 通道 ⇒ 各自的坏路径【各算各的】,
+            #   但对"这条通路坏没坏"这个问题,【任一组坏了就是坏了】⇒ 相加是对的。
+            $r.Abs.$nm = [int64]$r.Abs.$nm + $segAbs[$i]
+        }
+
+        # ★★ 恒等式检查:用【本组最后一行】的原始值(快照),不是增量 ★★
+        #   ① 已发出 == 成功 + 失败 + 在途写
+        #      ⇒ 有【发出去却永远没回来】的写 ⇒ 泄漏(BUGFIX-E3 那种)⇒ FAIL
+        #   ② 排队 == 排队发出 + 排队作废 + 在队
+        #      ⇒ 有【排队写凭空消失】 ⇒ FAIL
+        #   ★ 为什么用快照而不是增量:
+        #     "在途写"是瞬时值,不是累计值 ⇒ 拿它做差没有意义。
+        #     而在【任何一个统计时刻】,sent == ok + fail + inflight 都必须成立 ——
+        #     这是一个【恒等式】,不是一段时间里的收支平衡。
+        #   ★ 为什么"排队作废"必须单列:
+        #     断线时 ModbusMaster 会 failQueuedWrites() 把排队写作废 ——
+        #     那是【正常的环境事件】,不是"排队写丢了"。
+        #     原来的判据把这两件事混成一件 ⇒ 必然误报。
+        $last = $items[-1]
+        $sent = $last.V[13]; $ok = $last.V[14]; $fail = $last.V[15]; $infl = $last.V[17]
+        $i1 = $sent - ($ok + $fail + $infl)
+        if ($i1 -ne 0) {
+            $r.Identity1Bad++
+            $r.Identity1Residual += [math]::Abs($i1)
+        }
+        $queued = $last.V[10]; $qsent = $last.V[11]; $qvoid = $last.V[12]; $inq = $last.V[16]
+        $i2 = $queued - ($qsent + $qvoid + $inq)
+        if ($i2 -ne 0) {
+            $r.Identity2Bad++
+            $r.Identity2Residual += [math]::Abs($i2)
+        }
+        # ★★★ 恒等式③:拒收 == 拒收未连 + 拒收非法 + 拒收队列满 + 拒收发送 + 拒收缺陷
+        #   为什么加这一条:上面两个恒等式查的是【发出去的写有没有回来】,
+        #   查不到【被拒收的写有没有被正确分类】。
+        #   而"拒收缺陷"这个桶的存在本身(有拒收没进任何已知桶)就是一条缺陷路径。
+        #   ⇒ 这条恒等式是【自洽性检查】:程序说"我拒了 N 次",
+        #     那这 N 次【必须】都能在五个桶里找到归宿。
+        #     差值不为零 ⇒ 有一次拒收【连自己属于哪一类都不知道】⇒ 缺陷。
+        #   ★ 用绝对值判(快照),跟①②一样 —— 它是"此刻的账",不是"一段时间的收支"。
+        $rej = $last.V[4]
+        $rejSum = $last.V[5] + $last.V[6] + $last.V[7] + $last.V[8] + $last.V[9]
+        $i3 = $rej - $rejSum
+        if ($i3 -ne 0) {
+            $r.Identity3Bad++
+            $r.Identity3Residual += [math]::Abs($i3)
+        }
+    }
+
+    # ★ 增量可不可信:只要有【一组】不足两条统计行,增量视图就【不能用来下结论】。
+    #   (那一组的增量恒为 0 —— 是"算不出差",不是"没发生"。)
+    $r.DeltaAvailable = ($singleLineGroups -eq 0)
+    $r.SingleLineGroups = $singleLineGroups
+
+    # ★ 窗口跨度 & 覆盖率 —— 用来发现"统计定时器中途停了"。
+    #   统计行是 60 秒一条 ⇒ 窗口里【本该】有多少行是可以算出来的。
+    #   覆盖率远低于 1 ⇒ 中间有洞 ⇒ 那一段的写侧是【看不见】的。
+    if ($parsed.Count -gt 0) {
+        $ts = @($parsed | Sort-Object Time)
+        $r.WindowSpanSec = [math]::Round(($ts[-1].Time - $ts[0].Time).TotalSeconds, 1)
+        $r.ExpectedLines = [int][math]::Floor($r.WindowSpanSec / 60) + 1
+        $r.Coverage = if ($r.ExpectedLines -gt 0) {
+            [math]::Round($r.StatLines / $r.ExpectedLines, 3)
+        } else { 1 }
+    }
+    return $r
+}
+
+function Get-SlaveWriteCount {
+    <#
+      数从站日志里【真的收到】的写帧 —— 这是【地面真相】,应用伪造不了。
+      从站日志格式(test_slave.py:157-162):
+        "2026-10-27 09:29:47 [slave] conn#2 FC6 写 addr=2 value=0"
+      ★ 只数 FC6 / FC16:
+        FC6  行打印 value(= 从站真收到的值);FC16 行【不打印 value】(只数条数)。
+      ★ 找不到从站日志 ⇒ Available=$false —— 【不装作通过】,报告里说"未执行"。
+    #>
+    param([string] $SlaveLog, $SinceTime)
+    $res = [pscustomobject]@{ Available = $false; Fc6 = 0; Fc16 = 0; Total = 0; Path = $SlaveLog }
+    if (-not $SlaveLog -or -not (Test-Path $SlaveLog)) { return $res }
+    $res.Available = $true
+    $reSlave = '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+\[slave\].*?(FC6|FC16)\s+写'
+    foreach ($ln in [System.IO.File]::ReadLines($SlaveLog)) {
+        if ($ln -notmatch $reSlave) { continue }
+        if ($null -ne $SinceTime) {
+            $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null)
+            # ★★ 边界修正:从站时间戳【秒级】,而 $SinceTime 是【亚秒级】 ★★
+            #   设 $SinceTime = 10:00:00.400,而从站把一帧 10:00:00 的写记成
+            #   "10:00:00"(秒级截断)⇒ 直接比会 $ts < $SinceTime ⇒ 这一帧被丢掉。
+            #   而这一帧【可能就是应用算作成功的那一帧】⇒ 从站数 < 应用成功数
+            #   ⇒ 判据判 FAIL ⇒ 【假红】。
+            #   ⇒ 这里【多留 1 秒】。方向是安全的:不变式是"从站收到的 >= 应用成功的",
+            #     多算几帧【不会】让判据误红,少算才会。
+            if ($ts.AddSeconds(1) -lt $SinceTime) { continue }
+        }
+        if ($matches[2] -eq 'FC6') { $res.Fc6++ } else { $res.Fc16++ }
+    }
+    $res.Total = $res.Fc6 + $res.Fc16
+    return $res
+}
+
+function Get-WriteSideVerdict {
+    <#
+      ★ 写侧这一道闸的【判决逻辑】 ★
+      单独抠成一个函数,是为了让 verify_soakw_write_side.ps1 能
+      【原样抠出来喂假数据】—— 判决逻辑跟跑长跑是同一份代码,
+      不是"测试里另写一遍"。
+
+      判据表(2026-10-27 重做;2026-10-28 加"绝对值/增量"分工):
+        窗口内一条统计行都没有     ⇒ UNKNOWN(看不见证据 ≠ 没问题)
+        拒收缺陷 > 0【绝对值】       ⇒ FAIL  ★ 新增的拒收路径忘了记账 / 突变体
+        拒收队列满 > 0【绝对值】     ⇒ FAIL  ★ 队列撑爆 = 有别的东西在灌请求
+        恒等式①残差 ≠ 0             ⇒ FAIL  ★ 有发出去没回来的写(泄漏)
+        恒等式②残差 ≠ 0             ⇒ FAIL  ★ 有排队写凭空消失
+        恒等式③残差 ≠ 0             ⇒ FAIL  ★ 有拒收【连自己属于哪类都不知道】
+        应用成功数 > 从站收到的写帧   ⇒ FAIL  ★ 应用在撒谎(用【增量】,窗口对齐)
+        窗口里只有一条统计行         ⇒ UNKNOWN(验不全 —— 【不是】"没写过")
+        窗口内【尝试】没涨(没写)   ⇒ UNKNOWN(本轮没发生写 ⇒ 验不到写侧通路)
+        拒收未连/非法/发送 > 0      ⇒ 环境事件(单独报出来,不判失败)
+        排队作废 > 0                ⇒ 环境事件(断线作废,正常)
+
+      ★★★ 为什么坏路径按【绝对值】判,流量按【增量】判 ★★★
+        坏路径(拒收缺陷/队列满)是【二进制的属性】:那条路坏了,
+        它在窗口【之前】坏了也一样坏 ⇒ 该看【累计值】。
+        流量(尝试/成功/已发出)量的是"这一轮里发生了什么" ⇒ 该看【增量】。
+        ★ 而【增量】在窗口只有一条统计行时【算不出来】(末-首=0)。
+          2026-10-28 实测踩到:恒拒收突变体第一拍只有一条行,
+          明明写着"尝试=541 拒收缺陷=541",判据却报"写尝试 0 次(没写过)"
+          —— 【事实相反的话】,而且方向是"看不见缺陷" ⇒ 假绿。
+          ⇒ 现在分开:坏路径看绝对值(单行也判得出),流量看增量,
+            算不出差时明说"验不全",【不再】说"没写过"。
+    #>
+    param($Stats, $SlaveWrites)
+
+    $writeState = 'PASS'
+    $writeReason = ''
+    $writeEnvEvents = 0
+    $writeEnvDetail = @()
+
+    # ★★★ 绝对值视图(判【坏路径】用)★★★ ★
+    #   为什么要绝对值:坏路径是【二进制的属性】,不是窗口的属性。
+    #   那条路径坏了,它在窗口【之前】坏了也一样坏。
+    #   ⇒ 而绝对值【在只有一条统计行时也成立】——
+    #     这正是 2026-10-28 实测踩到的坑:
+    #     恒拒收突变体的第一拍只有一条统计行(写着 尝试=541 拒收缺陷=541),
+    #     而判据只算增量 ⇒ 增量 0 ⇒ 报"写尝试 0 次(没写过)" ⇒ 【事实相反的话】,
+    #     而且方向是"看不见缺陷" ⇒ 假绿。
+    #   ⇒ 现在:坏路径看绝对值,流量看增量;两者分开,谁也不冒充谁。
+    $abs = $Stats.Abs
+    $absDefect   = $abs.'拒收缺陷'
+    $absQueueFull = $abs.'拒收队列满'
+    # ★ 窗口增量【流量】:只有在增量可信时才用。
+    #   ★ 交叉核对【必须】用增量,不能用绝对值 ——
+    #     从站计数是【按窗口过滤】的(只数 settleTime 之后的帧),
+    #     而绝对值成功数覆盖【进程一生】(包含静默期里写过的)。
+    #     拿"一生"去比"窗口" ⇒ 静默期写过的那些【必然】对不上
+    #     ⇒ 【必然假红】。2026-10-28 改绝对值时踩到,当场发现。
+    #   ⇒ 交叉核对只在【增量可信】时做 —— 而单行窗口本来就要判 UNKNOWN,
+    #     少做一次核对不会放过任何东西。
+    $dOk = $Stats.'成功'
+
+    if ($Stats.StatLines -eq 0) {
+        # ★ 判 UNKNOWN,不是 PASS。
+        #   "没看见统计行"和"没有写被拒"在日志上【长得一模一样】——
+        #   而判据坏掉的样子,和程序坏掉的样子,一模一样。
+        $writeState = 'UNKNOWN'
+        $writeReason = ("★ 【看不见证据】—— 本轮窗口内一条写侧统计行都没有。`n" +
+            "          ★ 写侧统计行是 INFO 级、默认就落地(ModbusMaster::onWriteStatsTick,60 秒一条)。`n" +
+            "          ★ 没有它,可能是:跑的是【旧二进制】(修之前没有这行)/ 日志被截断 / 程序没建 ModbusMaster。`n" +
+            "          ⇒ 『写被拒收 0 次』在这里【只说明没看见】,不说明没发生。这道闸本轮【不作数】。")
+    } elseif ($absDefect -gt 0) {
+        # ★★★ 坏路径:按【绝对值】判,而不是窗口增量 ★★★
+        $writeState = 'FAIL'
+        $writeReason = ("★ 写被【来源不明地】拒收 {0} 次 —— 有一条拒收路径【没记账】。`n" +
+            "          ★ 每一个合法的拒收点都必须在 ModbusMaster 里写明原因;`n" +
+            "            走到『缺陷』这一桶,说明有一条路径【漏了】—— 那可能是一条新的静默的洞。`n" +
+            "          ★ 【值最后落地了】也掩盖不了它:重试机制(dirty 保留→下一拍重发)`n" +
+            "            把缺陷盖住了,判据量的是【最终结果】,而 BUGFIX-E1 修的是【路径】。`n" +
+            "          ★ 这个数是【绝对值】不是窗口增量 —— 坏路径是二进制的属性,`n" +
+            "            它在窗口【之前】坏了也一样坏,所以不受窗口长度影响。`n" +
+            "          累计:尝试 {1} / 接受 {2} / 拒收 {3} / 成功 {4} / 失败 {5} / 排队 {6}。") -f `
+            $absDefect, $abs.'尝试', $abs.'接受', $abs.'拒收', `
+            $abs.'成功', $abs.'失败', $abs.'排队'
+    } elseif ($absQueueFull -gt 0) {
+        $writeState = 'FAIL'
+        $writeReason = ("★ 写队列被撑爆 {0} 次 —— 队列满了。`n" +
+            "          ★ 正常情况下队列里最多 1 条(WriteScheduler 每台 PLC 同时只发一个写),`n" +
+            "            走到 8 说明【有别的东西在往里灌请求】—— 这本身就是要查的事。`n" +
+            "          累计:尝试 {1} / 接受 {2} / 拒收 {3} / 成功 {4}。") -f `
+            $absQueueFull, $abs.'尝试', $abs.'接受', $abs.'拒收', $abs.'成功'
+    } elseif ($Stats.Identity1Bad -gt 0) {
+        $writeState = 'FAIL'
+        $writeReason = ("★ 恒等式①不成立:{0} 组残留 {1}(已发出 != 成功 + 失败 + 在途写)。`n" +
+            "          ★ 有【发出去却永远没回来】的写 ⇒ WriteScheduler 的 pending_ 泄漏`n" +
+            "            ⇒ 那台 PLC 从此【再也不写任何东西】,而且零日志。`n" +
+            "          ★ 形状跟 BUGFIX-E3 一模一样(异常响应路径不发 writeFinished)。") -f `
+            $Stats.Identity1Bad, $Stats.Identity1Residual
+    } elseif ($Stats.Identity2Bad -gt 0) {
+        $writeState = 'FAIL'
+        $writeReason = ("★ 恒等式②不成立:{0} 组残留 {1}(排队 != 排队发出 + 排队作废 + 在队)。`n" +
+            "          ★ 有【排队写凭空消失】 ⇒ 调用方永远等一个不来的 writeFinished。") -f `
+            $Stats.Identity2Bad, $Stats.Identity2Residual
+    } elseif ($Stats.Identity3Bad -gt 0) {
+        $writeState = 'FAIL'
+        $writeReason = ("★ 恒等式③不成立:{0} 组残留 {1}(拒收 != 未连+非法+队列满+发送+缺陷)。`n" +
+            "          ★ 程序说『我拒了 N 次』,那这 N 次必须都能在五个桶里找到归宿。`n" +
+            "          ★ 差值不为零 ⇒ 有一次拒收【连自己属于哪一类都不知道】⇒ 有拒收路径漏了记账。") -f `
+            $Stats.Identity3Bad, $Stats.Identity3Residual
+    } elseif ($Stats.DeltaAvailable -and $null -ne $SlaveWrites -and $SlaveWrites.Available -and ($dOk -gt $SlaveWrites.Total)) {
+        # ★ 交叉核对用【窗口增量】的成功数 —— 跟从站计数的窗口一致。
+        #   ★ 只在增量可信时做:单行窗口的增量是 0,拿 0 去比不会漏,
+        #     而下面那个分支本来就会判 UNKNOWN。
+        $writeState = 'FAIL'
+        $writeReason = ("★ 应用自称写成功 {0} 次,但从站只收到 {1} 个写帧(FC6 {2} / FC16 {3})。`n" +
+            "          ★ 应用在撒谎,或者它把没落地的写算成了成功 —— 这道闸就是为这件事准备的。") -f `
+            $dOk, $SlaveWrites.Total, $SlaveWrites.Fc6, $SlaveWrites.Fc16
+    } elseif (-not $Stats.DeltaAvailable) {
+        # ★★★ "算不出差" ≠ "没写过" ★★★
+        #   窗口里【只有一条】统计行时,增量 = 末-首 = 0,
+        #   而那【不是】"这一轮没发生写",只是"两条统计行之间没法做差"。
+        #   ⇒ 以前这里直接报"写尝试 0 次(没写过)"—— 那是【事实相反的话】。
+        #     2026-10-28 实测:恒拒收突变体第一拍明明写着"尝试=541",
+        #     判据却报"0 次(没写过)" ⇒ 而"没写过"会让人以为"这轮不用管写侧"。
+        #   ⇒ 现在分三种说:
+        #     (a) 绝对值说"确实没写过"    ⇒ UNKNOWN(验不到)
+        #     (b) 绝对值说"写过,但算不出差" ⇒ UNKNOWN(验不全),但把数报出来
+        #     (c) 两条都有                ⇒ 正常走增量
+        $absAttempts = $abs.'尝试'
+        if ($absAttempts -le 0) {
+            $writeState = 'UNKNOWN'
+            $writeReason = ("★ 【验不到写侧】—— 这一轮【确实没写过】(累计尝试 0 次)。`n" +
+                "          ★ 没发生写,就【没验到】写侧通路 —— 不等于写侧是好的。`n" +
+                "          ⇒ 这道闸本轮【不作数】。")
+        } else {
+            $writeState = 'UNKNOWN'
+            $writeReason = ("★ 【验不全写侧】—— 窗口里【只有一条】写侧统计行,增量算不出来。`n" +
+                "          ★ 累计:尝试 {0} / 接受 {1} / 拒收 {2} / 成功 {3} / 失败 {4}。`n" +
+                "          ★ 这些写【确实发生过】,但『这一轮里发生了什么』算不出来`n" +
+                "            (增量 = 末行 - 首行,只有一条行时恒等于 0 —— 那【不代表】没发生写)。`n" +
+                "          ★ 好消息:坏路径(拒收缺陷/队列满)按【绝对值】判,不受这条限制 ——`n" +
+                "            上面没判红就说明【没有】来源不明的拒收。`n" +
+                "          ⇒ 这道闸本轮【不作数】(验不全),但不是【看不见】。") -f `
+                $absAttempts, $abs.'接受', $abs.'拒收', $abs.'成功', $abs.'失败'
+        }
+    } elseif ($Stats.'尝试' -le 0) {
+        # ★ 这一轮压根没有写 ⇒ 写侧通路【没被走到过】⇒ 验不到。
+        #   "没验到"和"没问题"是两回事 —— 报 UNKNOWN,不报 PASS。
+        $writeState = 'UNKNOWN'
+        $writeReason = ("★ 【验不到写侧】—— 本轮窗口内写尝试 {0} 次(没写过)。`n" +
+            "          ★ 没发生写,就【没验到】写侧通路 —— 不等于写侧是好的。`n" +
+            "          ⇒ 这道闸本轮【不作数】。") -f $Stats.'尝试'
+    } else {
+        $writeReason = ("★ 写侧通路正常:尝试 {0} / 接受 {1} / 拒收 {2}(其中缺陷 {3}、队列满 {4}) / " +
+            "排队 {5}(排队发出 {6}、作废 {7}) / 已发出 {8} / 成功 {9} / 失败 {10};`n" +
+            "          恒等式①②③残差 0。") -f `
+            $Stats.'尝试', $Stats.'接受', $Stats.'拒收', $Stats.'拒收缺陷', `
+            $Stats.'拒收队列满', $Stats.'排队', $Stats.'排队发出', $Stats.'排队作废', `
+            $Stats.'已发出', $Stats.'成功', $Stats.'失败'
+    }
+
+    # ★ 环境事件:【不算缺陷】,但要【说出来】。
+    #   24 小时里断一次网是正常的 —— 把它算成缺陷,这条判据就变成"天天误报",
+    #   而天天误报的判据等于没有判据。
+    #   ★ 用【绝对值】,跟坏路径一个道理:断线是【运行期的事件】,
+    #     不是【窗口内的流量】—— 只有一条统计行时,增量算不出来,
+    #     但那次断线【确实发生过】,不能因为算不出差就不说。
+    if ($abs.'拒收未连' -gt 0) {
+        $writeEnvEvents += $abs.'拒收未连'
+        $writeEnvDetail += ("断线/未连接拒收 {0} 次" -f $abs.'拒收未连')
+    }
+    if ($abs.'拒收非法' -gt 0) {
+        $writeEnvEvents += $abs.'拒收非法'
+        $writeEnvDetail += ("参数/配置非法拒收 {0} 次" -f $abs.'拒收非法')
+    }
+    if ($abs.'拒收发送' -gt 0) {
+        $writeEnvEvents += $abs.'拒收发送'
+        $writeEnvDetail += ("发送失败拒收 {0} 次" -f $abs.'拒收发送')
+    }
+    if ($abs.'排队作废' -gt 0) {
+        $writeEnvEvents += $abs.'排队作废'
+        $writeEnvDetail += ("排队写作废 {0} 次(断线作废,正常事件)" -f $abs.'排队作废')
+    }
+
+    return [pscustomobject]@{
+        State      = $writeState
+        Reason     = $writeReason
+        EnvEvents  = $writeEnvEvents
+        EnvDetail  = $writeEnvDetail
+    }
+}
+
+$writeStats = Get-WriteSideStats -Lines $sinceLines
+# ★ 从站地面真相交叉核对 ★
+#   应用说"写成功 N 次",从站说"我收到 M 个写帧"。
+#   ★ 不变式:M >= N。
+#     应用每一次"成功"都意味着从站【处理过】那一次写(它先写日志再回包),
+#     而从站日志里的写帧还可能【多出】那些应用还没收到回包的、在途的、
+#     或者回包超时后重试的 ⇒ 多出来是正常的,少一个都没有。
+#   ★ 所以只有"M < N"(应用自称比从站收到的还多)才算 FAIL ——
+#     那说明应用在撒谎,或者它把没落地的写算成了成功。
+$slaveLogPath = Join-Path $OutDir 'slave.log'
+$slaveWrites  = Get-SlaveWriteCount -SlaveLog $slaveLogPath -SinceTime $settleTime
+
+$writeVerdict = Get-WriteSideVerdict -Stats $writeStats -SlaveWrites $slaveWrites
+$writeState    = $writeVerdict.State
+$writeReason   = $writeVerdict.Reason
+$writeEnvEvents = $writeVerdict.EnvEvents
+$writeEnvDetail = $writeVerdict.EnvDetail
+
+# ★ 业务在跑的【唯一】判据:成功读计数在涨
+$bizGrew = ($pollOkDelta -gt 0)
 
 # 三种"没在干活",分开报 —— 它们指向的排查方向不一样,混成一句"idle"就废了
 $isFrozen    = ((-not $logGrew) -and ($cpuPct -lt $MinCpuPercent))  # 不记日志且不吃 CPU:冻住了
 $isBusyQuiet = ((-not $logGrew) -and ($cpuPct -ge $MinCpuPercent))  # 不记日志但在忙
-$isDormant   = ($logGrew -and (-not $bizGrew))                       # 在长,但只有本地心跳
+$isDormant   = ($logGrew -and (-not $bizGrew))                       # 在长,但没有业务在跑
 $notQualified = $isFrozen -or $isDormant                            # 本轮【不构成】稳定性验收
 # 兼容旧变量名:下面 SOAK-3 还在用它
 $isIdle = $notQualified
@@ -1008,21 +1866,25 @@ if ($isFrozen) {
     $memTxt += "`n          查:是不是卡在某个模态框上(登录框?配置对话框?),或被谁挡住了。"
 } elseif ($isDormant) {
     # ★ 这一支就是 2026-10-21 加的。第二代判据在这里会漏判成 PASS。
-    $memTxt += ("`n        ★ 只在自转:日志在长(净增 {0} KB),但【业务类日志一条都没有】。" -f [math]::Round($logGrewBytes/1KB,1))
-    $memTxt += ("`n          全是本地定时器心跳({0} 行 HistoryRecorder/TrendWidget),平均 CPU {1:N2}%。" -f $noiseLines.Count, $cpuPct)
-    $memTxt += "`n          进程活着,但它没在做业务 —— PLC 大概率没连上,轮询和报警引擎都是停的。"
+    #   判据换到"成功读计数"之后,这一支的含义也变了:
+    #   不再是"业务类日志一条都没有"(那是旧口径,而且会假红),
+    #   而是"【成功读计数一条没涨】"—— 业务确实没在跑。
+    $memTxt += ("`n        ★ 只在自转:日志在长(净增 {0} KB),但【成功读计数一条没涨】。" -f [math]::Round($logGrewBytes/1KB,1))
+    $memTxt += ("`n          轮询统计:发出 +{0},成功 +{1},在途变量 {2};平均 CPU {3:N2}%。" -f `
+        $pollSentDelta, $pollOkDelta, $inflightLast, $cpuPct)
+    $memTxt += "`n          进程活着,但它没在做业务 —— PLC 大概率没连上,轮询是停的。"
     $memTxt += "`n          这种状态内存当然不涨,所以本轮【不构成对程序稳定性的验收】,判 UNKNOWN。"
     $memTxt += "`n          ★ 2026-10-20 那 950.9 分钟就是在这一支上骗过去的:旧判据只看日志总量,"
     $memTxt += "`n            心跳把'总量在长'撑住了,于是给了 PASS。本次实测已复现。"
     $memTxt += "`n          查:PLC 地址是不是回环(127.0.0.1)?启动有没有带 --soak-user/--soak-pass?"
-    $memTxt += "`n              登录账号的角色是不是 viewer(只读)?hmi.comm 一共几条?"
+    $memTxt += "`n              日志里有没有 [ModbusMaster] 通讯错误?在途变量是不是不为 0?"
 } elseif ($isBusyQuiet) {
     $memTxt += ("`n        进程在忙但不记业务日志(平均 CPU {0:N2}%) —— 本轮【无法判定活体】,不下结论。" -f $cpuPct)
 } elseif ($cpuPct -lt $MinCpuPercent) {
     # ★ 这条分支要写出来,不然读报告的人会以为脚本判错了:
     #   CPU 明明低于 5% 阈值,怎么不判成没在干活?
-    $memTxt += ("`n        CPU {0:N2}%(低于阈值 {1}%),但静默期之后【业务类日志在长】({2} 行) —— 判定资格成立。" -f `
-        $cpuPct, $MinCpuPercent, $bizLines.Count)
+    $memTxt += ("`n        CPU {0:N2}%(低于阈值 {1}%),但静默期之后【成功读 +{2} 次】 —— 判定资格成立。" -f `
+        $cpuPct, $MinCpuPercent, $pollOkDelta)
     $memTxt += "`n        —— 进程确实在干业务,只是这个活儿本身不吃 CPU,所以【不判没在干活】。"
     $memTxt += "`n        (旧判据只看 CPU,这里会被误判成 idle,报出'进程没在跑业务'这句假话 —— 2026-10-20 已改)"
 }
@@ -1068,23 +1930,16 @@ Verdict 'SOAK-3' '句柄/线程' $hdlState $hdlTxt
 #    有 ⇒ 有资格继续看 SOAK-2/3 的数字;没有 ⇒ 那些数字【全部作废】。
 $liveTxt = ("静默期以来日志增量 {0} 行 = 业务类 {1} + 本地心跳 {2};平均 CPU {3:N2}%" -f `
     $sinceLines.Count, $bizLines.Count, $noiseLines.Count, $cpuPct)
-if ($isFrozen) {
-    $liveState = 'FAIL'
-    $liveTxt += "`n        冻住:一条日志都没长,事件循环停了(可能是模态框)。这一轮什么都不用看了。"
-} elseif ($isDormant) {
-    $liveState = 'FAIL'
-    $liveTxt += "`n        ★ 只在自转:业务类日志 0 条,全是本地心跳。进程活着但没跑业务。"
-    $liveTxt += "`n        这一轮【不能用来证明程序稳定】—— 内存/句柄平坦是因为什么都没干。"
-} elseif ($isBusyQuiet) {
-    $liveState = 'UNKNOWN'
-    $liveTxt += "`n        不记业务日志但 CPU 有占用 —— 判不出活体,不下结论。"
-} elseif ($bizGrew) {
-    $liveState = 'PASS'
-    $liveTxt += "`n        业务类日志在长,判定资格成立;SOAK-2/3 的数字这一轮有效。"
-} else {
-    $liveState = 'UNKNOWN'
-    $liveTxt += "`n        分类结果为空,判不出活体。"
-}
+# ★ 这一轮是不是【应用侧卡死】(而不是"从站没回包")—— 两者退出码不同,见文件末尾。
+#   应用侧卡死的形态:发出数【不涨】而在途变量不为 0
+#   —— 变量卡在在途态等一个永远不来的回包(2026-10-21 查出的根因)。
+#   从站没回包的形态:发出数【在涨】、成功数不涨 —— 应用在正常重试,是环境问题。
+$live        = Get-LivenessVerdict -Stats $stats -IsFrozen $isFrozen
+$liveState   = $live.State
+$soak6AppDefect = $live.AppDefect
+$liveTxt += ("`n        轮询统计行 {0} 条;发出 +{1},成功 +{2},失败 +{3};在途变量 {4};累计 发出={5} 成功={6}" -f `
+    $statsN, $pollSentDelta, $pollOkDelta, $pollFailDelta, $inflightLast, $sentTotalLast, $okTotalLast)
+$liveTxt += "`n        " + $live.Reason
 if ($sinceCatTxt -ne '(无)') {
     $liveTxt += ("`n        业务类按类别:" + $sinceCatTxt)
 }
@@ -1094,6 +1949,118 @@ if ($noiseLines.Count -gt 0) {
     $liveTxt += "`n        噪声 Top3:" + (($noiseByCat | ForEach-Object { "$($_.m) x$($_.n)" }) -join ' | ')
 }
 Verdict 'SOAK-6' '业务活体' $liveState $liveTxt
+
+# --- 3b. 写侧通路(SOAK-W)---
+#  ★ 为什么它是【独立的一道闸】,不并进 SOAK-6 ★
+#    SOAK-6 问的是"程序还活着、还在跟 PLC 通信吗"(读的事)。
+#    SOAK-W 问的是"写有没有【真的、按该走的那条路】出去"(写的事)。
+#    两个都绿才算这一轮通过 —— 写侧不通而读侧正常,那正是 BUGFIX-E1 修之前的形状。
+#  ★ 退出码:SOAK-W 判 FAIL ⇒ exit 1(验出问题),跟 SOAK-2/3 一样。
+#    判 UNKNOWN ⇒ exit 4(没验成),跟 SOAK-6 一个待遇 ——
+#    "看不见证据"不能算通过,也不能算失败。
+$writeTxt = $writeReason
+# ★ 环境事件:【单独报出来】,不算缺陷。
+#   24 小时里断一次网是正常的。把它算成缺陷 ⇒ 这条判据天天误报 ⇒ 没人信它。
+#   但也不能默默吞掉 —— 那说明这一轮有环境问题,写侧的数字要在【这个前提下】读。
+if ($writeEnvEvents -gt 0) {
+    $writeTxt += ("`n        (环境事件,不算缺陷){0} —— 断线/参数非法/发送失败这类是【正常的环境抖动】," +
+                  "不是应用的洞。但它说明这一轮有环境问题,上面的写侧数字要在【这个前提下】读。") -f `
+                  (($writeEnvDetail) -join '、')
+}
+# ★ 排队通路有没有【真的被走到过】—— 这一条决定这道闸验的是什么。
+if ($writeStats.'排队' -gt 0) {
+    $writeTxt += ("`n        排队 {0} 次 —— 写被在途的读挡住过 {0} 次(排队发出 {1} / 作废 {2})。" +
+                  "★ 这证明 BUGFIX-E1 那条排队通路在 24 小时里【真的被走到过】,不是空跑。") -f `
+                  $writeStats.'排队', $writeStats.'排队发出', $writeStats.'排队作废'
+} elseif ($writeState -eq 'PASS') {
+    # ★ 2026-10-28:这段提示原来写的是"给从站加 --reply-delay-ms 120" ——
+    #   ★ 那是被实测【推翻】的说法,留着会把下一个人引到错的方向。
+    #     真实机制(见 docs/现状.md §六之六 9.7):
+    #       写【排队】的唯一条件 = "发写那一刻,在途槽被读占着"。
+    #       【下一读什么时候发】由 poll 决定;【写什么时候发】由报警 min_duration_ms 决定。
+    #       ⇒ 杠杆是这两者的【先后】,不是从站回包延迟的大小。
+    #       实测:poll=200 时,D=120 / D=250 连跑 6 轮约 360 次写,排队【全是 0】;
+    #             poll=200 + m=190 ⇒ 排队 7~11/56~58;m=250 ⇒ 31/57。
+    #   ⇒ 正确提示是"把 min_duration_ms 抬到逼近 poll",而不是"加延迟"。
+    $writeTxt += ("`n        ★ 排队 0 次 —— 这一轮【没撞上】车(写从没被在途的读挡住)。" +
+                  "⇒ 这一轮验的是『没撞车时写是好的』,【不是】『撞车时写也能落地』。" +
+                  "⇒ 想验后者:把工程副本里报警的 min_duration_ms 抬到【逼近 poll(200ms)】" +
+                  "(scripts\run_soak.ps1 -AlarmMinDurationMs 190,默认就是它)。" +
+                  "★ 【不是】加从站回包延迟 —— 实测那不是杠杆(D=120/250 排队照样 0)。")
+}
+# ★ 从站地面真相交叉核对:应用说成功几次,从站说收到几个写帧。
+if ($slaveWrites.Available) {
+    $writeTxt += ("`n        从站交叉核对:应用成功 {0} 次,从站真收到 {1} 个写帧(FC6 {2} / FC16 {3})—— " +
+                  "不变式『从站收到 >= 应用成功』成立。") -f `
+                  $writeStats.'成功', $slaveWrites.Total, $slaveWrites.Fc6, $slaveWrites.Fc16
+} else {
+    # ★ 不装作通过:没找到从站日志 ⇒ 这一项【没执行】,不是"通过"。
+    $writeTxt += ("`n        从站交叉核对【未执行】—— 本轮没找到从站日志({0})。" +
+                  "★ 没执行 ≠ 通过。") -f $slaveLogPath
+}
+# ★ 日志被截断 ⇒ 窗口是半截的 ⇒ 任何基于它的结论都不作数。
+if ($script:logTruncated) {
+    $writeTxt += ("`n        ★★ 日志被截断(撞到 Get-LogSince 的上限)—— 窗口只覆盖了一部分," +
+                  "上面的数字【只说明看得到的那一段】。")
+}
+# ★★ 2026-10-28:排队 0 时,光说"没撞上"不够 ——
+#   要说清楚【撞车这条路这轮到底走不走得通】。
+#   机制:写【排队】的唯一条件 = "发写那一刻,在途槽被读占着"。
+#         【下一读什么时候发】由 poll 决定;【写什么时候发】由报警 min_duration_ms 决定。
+#   ⇒ 判据用 r = m / poll 这个比值,分【三档】——
+#     ★ 档位是【实测出来的】,不是推算(docs/现状.md §六之六 9.7/9.8):
+#         r ≈ 0.48 (m=95, poll=200)  ⇒ 排队 0/360     ⇒ 撞车这条路【基本走不通】
+#         r ≈ 0.95 (m=190,poll=200)  ⇒ 排队 12~19%   ⇒ 【走得通,但不是常态】
+#         r ≈ 1.25 (m=250,poll=200)  ⇒ 排队 54%      ⇒ 【大概率撞上】
+#     ⇒ ★ 关键:【m < poll 不等于撞不上】—— m=190 < 200 却照样撞 12~19%。
+#       写滞后上一读回包与下一读发出滞后都有几十 ms 的抖动,两段区间会交叠。
+#       所以这里【不能】用"m<poll ⇒ 走不通"的二分法(那会把 m=190 误判成走不通,
+#       而 m=190 实测是撞得上的)。按比值分档才与实测一致。
+#   ⇒ 读【这一轮实际用的那份工程】(副本),把 m 和 poll 摆出来。
+$collideNote = ''
+try {
+    if ($Project -and (Test-Path $Project)) {
+        $pj = Get-Content -LiteralPath $Project -Raw -Encoding UTF8 | ConvertFrom-Json
+        $ms   = @($pj.alarms | ForEach-Object { [int]$_.min_duration_ms } | Sort-Object -Unique)
+        $polls = @($pj.variables | ForEach-Object { [int]$_.poll_interval_ms } | Sort-Object -Unique)
+        $commPoll = 0
+        try { $commPoll = [int]$pj.communications.modbus.poll_interval_ms } catch { }
+        if ($polls.Count -eq 0 -and $commPoll -gt 0) { $polls = @($commPoll) }
+        $minM = if ($ms.Count -gt 0) { ($ms | Measure-Object -Minimum).Minimum } else { 0 }
+        $minP = if ($polls.Count -eq 0 -and $commPoll -gt 0) { $commPoll }
+                 else { ($polls | Measure-Object -Minimum).Minimum }
+        $collideNote = ("工程实测节奏:报警 min_duration_ms = {0} ms,轮询 poll = {1} ms(r = {2:N2})。" -f `
+                        ($ms -join '/'), ($polls -join '/'), ($minM / [double]$minP))
+        if ($minM -gt 0 -and $minP -gt 0) {
+            $r = $minM / [double]$minP
+            # ★ 后半段的措辞【只在真的排队=0 时才成立】——
+            #   排队>0 时说"本轮排队 0 有两种可能"就是胡说。
+            $zeroTail = ($writeStats.'排队' -le 0)
+            if ($r -lt 0.6) {
+                $collideNote += ("`n        ★ r < 0.6 ⇒ 【撞车这条路基本走不通】(实测 r≈0.48 ⇒ 排队 0/360)。")
+                if ($zeroTail) {
+                    $collideNote += ("`n        ⇒ 本轮『排队 0』不是侥幸没撞上,是这条路压根没被走到 ⇒ " +
+                                     "这一轮验的仍是『没撞车时写是好的』。")
+                }
+            } elseif ($r -le 1.0) {
+                $collideNote += ("`n        ★ 0.6 <= r <= 1.0 ⇒ 【撞车这条路走得通,但不是常态】(实测 r≈0.95 ⇒ 排队 12~19%)。")
+                if ($zeroTail) {
+                    $collideNote += ("`n        ⇒ 本轮『排队 0』有两种可能:① 采样量不够(联动次数太少,期望撞上次数 < 1);" +
+                                     "② 撞上了但没留痕。若本轮联动次数 >> 预期撞上次数,那就是 ②,得查。")
+                }
+            } else {
+                $collideNote += ("`n        ★ r > 1.0 ⇒ 【大概率撞上】(实测 r≈1.25 ⇒ 排队 54%)。")
+                if ($zeroTail) {
+                    $collideNote += ("`n        ⇒ 本轮『排队 0』不正常 —— 写从来没有被在途的读挡住过,得查。")
+                }
+            }
+        }
+    }
+} catch {
+    $collideNote = "★ 读工程文件失败,没能核对本轮 m 与 poll 的关系(读不到就说明读不到,不做猜测)。"
+}
+if ($collideNote) { $writeTxt += ("`n        " + $collideNote) }
+Verdict 'SOAK-W' '写侧通路' $writeState $writeTxt
 
 # --- 4. 日志 ---
 $lines = @(Get-LogTail 0)
@@ -1142,6 +2109,19 @@ Say "采样点 $tick 个,跨度 $([math]::Round($spanMin,1)) 分钟" 'Gray'
 Say "样本: $csvPath" 'Gray'
 Say "判定: $(Join-Path $OutDir 'verdict.txt')" 'Gray'
 
+# ★★ 2026-10-27:日志被截断 —— 单独一条横幅 ★★
+#   这条【必须在最显眼的位置】:它影响的不是某一个判据,而是【所有】靠日志行的判据。
+#   而截断的表现是"安静"—— 报告上看不出任何异常,只是结论少了半截。
+#   ⇒ 退出码按 4 给(没验成),不许拿半截数据当结论。
+if ($script:logTruncated) {
+    Say "" ; Say "════════════════════════════════════════════════════" 'Red'
+    Say "★★ 日志被截断了(Get-LogSince 撞到了行数上限)。" 'Red'
+    Say "  后面还有内容【没被看到】—— 上面所有判据只覆盖了看得到的那一段。" 'Red'
+    Say "  退出码按 4 给(没验成):拿半截数据下结论,就是本项目最核心的那个教训。" 'Red'
+    Say "  查:是不是日志级别被打开了(hmi.json 里 default_level=debug?)。" 'Red'
+    Say "      —— 2026-10-27 实测:开 hmi.comm=debug 会到 893 行/分钟,24 小时 129 万行。" 'Red'
+    Say "════════════════════════════════════════════════════" 'Red'
+}
 # ★ 横幅:放最显眼的位置。这轮如果没资格下结论,上面所有 UNKNOWN 都是同一个原因,
 #   不单独说一句的话,读报告的人容易只扫到别的 PASS 就以为验过了。
 #   ★ 三种情况分三句话说(2026-10-21)—— 它们指向的排查方向完全不一样,
@@ -1160,6 +2140,17 @@ if ($notQualified) {
         Say ("★ 本轮没有结论(平均 CPU {0:N2}%,静默期之后无业务日志)" -f $cpuPct) 'Red'
     }
     Say "  退出码 4 表示'没验成' —— 和 1(验出问题)、3(有告警)是两回事,别混。" 'Red'
+    Say "════════════════════════════════════════════════════" 'Red'
+}
+# ★ 2026-10-21:报告里有没替换的占位符 —— 单独一条横幅,比 notQualified 更响。
+#   因为它【不影响任何一个判据的结论】,所以上面的横幅不会替它说话;
+#   而它影响的恰恰是"这些结论的数字对不对",那是最该被看见的一处。
+if ($script:reportHasPlaceholder) {
+    Say "" ; Say "════════════════════════════════════════════════════" 'Red'
+    Say ("★ 报告里有【未替换的占位符】: {0}" -f $script:reportLeaked) 'Red'
+    Say "  上面这些位置本该是数字,现在缺了 —— 判据的结论本身还在,但支撑它的数字没了。" 'Red'
+    Say "  这份报告【不能当验收结论用】。退出码按 4 给(没验成)。" 'Red'
+    Say "  这是 harness 自己的问题(多半是某个字符串少写了 -f),不是被测程序的故障。" 'Red'
     Say "════════════════════════════════════════════════════" 'Red'
 }
 Say "" ; Say "⚠ 外推警告:上面 24h 的数字是拿 $spanMin 分钟的线性斜率乘出来的。" 'Yellow'
@@ -1181,10 +2172,33 @@ $failCount = @($report | Where-Object { $_ -match '^\[FAIL\]' -and $_ -notmatch 
 $warnCount = @($report | Where-Object { $_ -match '^\[WARN\]' -and $_ -notmatch 'SOAK-6' }).Count
 $unkCount  = @($report | Where-Object { $_ -match '^\[UNKNOWN\]' }).Count
 
+# ★ 2026-10-27:SOAK-W(写侧通路)【不算】进 $failCount。
+#   它有自己的退出码待遇,理由跟 SOAK-6 一样:
+#     · 判 FAIL  ⇒ exit 1(验出问题)—— 写被拒收/泄漏是【应用缺陷】,不是环境。
+#     · 判 UNKNOWN ⇒ exit 4(没验成)—— 看不见证据 ≠ 没问题。
+#   ⇒ 混进 $failCount 的话,"没验成"会被当成"验出问题",两条结论共用一个码。
+if ($writeState -eq 'FAIL') { exit 1 }
 if ($failCount -gt 0) { exit 1 }
+# ★ 2026-10-21:SOAK-6 判出【应用侧卡死】时走 exit 1(验出问题),不是 exit 4。
+#   区别在于:发出数不涨 + 在途变量不为 0 ⇒ 变量卡在在途态,应用自己把自己锁死了;
+#   而"发出在涨、成功不涨"只是从站没回包,应用在正常重试 —— 那是环境问题,归 exit 4。
+if ($soak6AppDefect) { exit 1 }
+# ★★ 2026-10-27:日志被截断 ⇒ 整个窗口是【半截】的 ⇒ exit 4(没验成)★★
+#   这条比 exit 3(有告警)严重,但比 exit 1(验出故障)轻:
+#   截断意味着"后面还有内容没被看到" ⇒ 所有靠日志行的判据都只看了半截
+#   ⇒ 拿半截数据下结论,就是本项目最核心的那个教训。
+#   ⇒ 放在 exit 1 之后、exit 3 之前。
+if ($script:logTruncated) { exit 4 }
+# ★ 2026-10-21:报告里有没替换的占位符 ⇒ 数字缺失 ⇒ 没法算"验过了" ⇒ exit 4。
+#   放在这儿(而不是最后)的理由:exit 1(验出应用故障)比它严重,先给出去;
+#   但它比 exit 3(有告警)严重 —— 缺数字的报告连"有告警"都算不上,那是没结论。
+if ($script:reportHasPlaceholder) { exit 4 }
 if ($warnCount -gt 0) { exit 3 }
 # SOAK-6 FAIL = 没验成(进程没在跑业务),和 UNKNOWN 归为一类
 if ($liveState -eq 'FAIL' -or $unkCount -gt 0) { exit 4 }
+# ★ 2026-10-27:SOAK-W 判 UNKNOWN(窗口内没有写侧统计行 / 本轮没发生写 ⇒ 看不见证据)⇒ exit 4。
+#   放在最后:它比 exit 3(有告警)还轻 —— 一轮有告警但写侧没验成,仍然不是"验过了"。
+if ($writeState -eq 'UNKNOWN') { exit 4 }
 exit 0
 
 # ★ 2026-10-21:SOAK-6「业务活体」判 FAIL 走 exit 4,不进 exit 1。

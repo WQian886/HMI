@@ -145,9 +145,10 @@
     <ClCompile Include="src\alarm\AlarmSoundDialog.cpp" />
     <!-- ★ F4(2026-10-08):报警历史查询视图 -->
     <QtMoc Include="src\history\AlarmHistoryView.h" />
+    <ClInclude Include="src\history\AlarmHistoryView.h" />
     <ClCompile Include="src\history\AlarmHistoryView.cpp" />
     <!-- 阶段 6.2(2026-08-07):JSON 序列化 helper -->
-    <QtMoc Include="JsonSerializer.h" />
+    <ClInclude Include="JsonSerializer.h" />
     <ClCompile Include="JsonSerializer.cpp" />
     <!-- 阶段 6.2(2026-08-07):Project 类 saveToFile -->
     <QtMoc Include="Project.h" />
@@ -342,7 +343,6 @@
     <QtMoc Include="src\editor\PropertySheet.h" />
     <ClInclude Include="src\editor\PropertySheet.h" />
     <ClCompile Include="src\editor\PropertySheet.cpp" />
-    <QtMoc Include="src\editor\PropertyChangeCommand.h" />
     <ClInclude Include="src\editor\PropertyChangeCommand.h" />
     <ClCompile Include="src\editor\PropertyChangeCommand.cpp" />
     <!-- ★ E.4d-follow-8(2026-09-29):多控件几何 Undo。
@@ -372,15 +372,12 @@
     <ClInclude Include="src\editor\PaletteWidget.h" />
     <ClCompile Include="src\editor\PaletteWidget.cpp" />
     <!-- ★ E.4b:ResizeHandleItem 8 handle -->
-    <QtMoc Include="src\editor\ResizeHandleItem.h" />
     <ClInclude Include="src\editor\ResizeHandleItem.h" />
     <ClCompile Include="src\editor\ResizeHandleItem.cpp" />
     <!-- ★ E.4d 续-3:多选组 handle 容器 -->
-    <QtMoc Include="src\editor\GroupHandleItem.h" />
     <ClInclude Include="src\editor\GroupHandleItem.h" />
     <ClCompile Include="src\editor\GroupHandleItem.cpp" />
     <!-- ★ E.4d 续:选中态视觉统一(蓝色虚线边框) -->
-    <QtMoc Include="src\editor\SelectionFrameItem.h" />
     <ClInclude Include="src\editor\SelectionFrameItem.h" />
     <ClCompile Include="src\editor\SelectionFrameItem.cpp" />
     <!-- ★ E.5(2026-09-29):运行时画布(主窗口显示编辑器存的画面) -->
@@ -442,7 +439,7 @@
     <ClInclude Include="src\comm\CommTraceModel.h" />
     <ClInclude Include="src\comm\CommFrame.h" />
   </ItemGroup>
-  <!-- 2026-10-24: data dir isolation (util/Paths) -->
+  <!-- 2026-10-24: data dir isolation (util/Paths) + multi-PLC driver provider -->
   <!--   Paths.cpp has real code and is referenced by 6 .cpp files: -->
   <!--     main.cpp, src/auth/AuditLog.cpp, src/auth/UserStore.cpp, -->
   <!--     src/crash/CrashHandler.cpp, src/history/HistoryRecorder.cpp, src/logging/Logging.cpp -->
@@ -453,5 +450,21 @@
   <ItemGroup>
     <ClCompile Include="src\util\Paths.cpp" />
     <ClInclude Include="src\util\Paths.h" />
+    <ClInclude Include="src\drivers\IPlcDriverProvider.h" />
+  </ItemGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\alarm\AlarmTablePresenter.cpp" />
+    <ClInclude Include="src\alarm\AlarmTablePresenter.h" />
+  </ItemGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\util\ValueCoercion.cpp" />
+    <ClInclude Include="src\util\ValueCoercion.h" />
+  </ItemGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\alarm\ActionWiring.cpp" />
+    <ClInclude Include="src\alarm\ActionWiring.h" />
   </ItemGroup>
 </Project>
