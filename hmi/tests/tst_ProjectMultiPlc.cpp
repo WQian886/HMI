@@ -62,6 +62,47 @@
 //     它就是专门为这个方向写的那一条。3 条用例各自盯一个不同方向,
 //     不是"3 条一起防 1 个 bug",所以"只红 1"说明分层是对的。
 //
+// 【★ 2026-10-21 修"存坏工程"那一刀的负向对照 —— 实测两轮】
+//
+//   病:删掉一个还被报警/联动引用的变量,再存盘 →
+//       悬空引用被写进文件 → 下次打开这个工程【整个打不开】
+//       (加载端 Project.cpp:556 / :579 findVariable 拿不到 → failWith)。
+//   修法:存盘时【跳过】悬空的那条(报警侧空串 / 联动侧悬空名字)。
+//
+//   轮次一:把修法换成【最粗暴的版本】——"所有报警和联动统统跳过"
+//     (Project.cpp 两处守卫改成 `if (true)` / `if (varMgr_)`)
+//     → 红 1:danglingReference_isSkipped_butValidOnesSurvive
+//       绿 23
+//     ★ 这是本轮最要紧的一条观察:老的三条用例
+//       (deleteReferencedVariable_savedProjectStillLoads /
+//        deleteVariableReferencedByAction_savedProjectStillLoads /
+//        deleteReferencedVariable_savingDoesNotCrash)【照样绿】。
+//       它们只断言"存出来的工程能打开",而"什么都不写"【也】满足这个断言 ——
+//       空的 alarms 数组在加载时循环体一次都不进,工程照样打得开。
+//       所以这三条【结构上就抓不住】"好的被一起砍掉"这种实现。
+//       → 新用例不是重复覆盖,是补上了一个老用例根本够不到的洞。
+//
+//   轮次二:把 bug 【原样装回去】
+//     (alarmObj["variable"] 退回 `tc->variable() ? … : QString()`,
+//      联动侧去掉 findVariable 守卫)
+//     → 红 3:上面那两条老用例 + 新用例
+//       (新用例报的是更直白的"存出来的工程打不开了(悬空引用没被跳过)")
+//       绿 21
+//
+//   ★ 两轮合起来才说明修法是对的:
+//     轮次一证明"新用例补的是老用例抓不到的洞";
+//     轮次二证明"红是真的因为 bug 在,不是因为别的"。
+//     只做一轮的话,很容易把"新用例也绿了"当成"修好了"——
+//     而那恰恰是轮次一演示的那个假象。
+//
+// 【★ 踩过的坑:回滚源码忘了改时间戳 → 跑的是旧二进制】
+//   负向对照做完要把源码装回去。Copy-Item 会把【源文件的旧 mtime】
+//   一起带过去,而 ninja 只看 mtime —— 于是它判定"这个文件没变过",
+//   【不重编】,ctest 跑的还是刚才那个装了 bug 的二进制。
+//   现象:源码明明已经修好,测试却还是红的。差点被误读成"修法没用"。
+//   → 回滚之后必须戳一下:(Get-Item f).LastWriteTime = Get-Date
+//   这条比看起来重要 —— 它是【假红】的来源,而假红会让人去改本来正确的代码。
+//
 // 关联:Project::loadPlcsFromJson / setPlcs / plcs() / setPlcApplier,
 //      Project.cpp 第 8 步 + saveToFile
 // ============================================================================
@@ -155,6 +196,14 @@ private slots:
     //   上面两条只是重新变成崩溃,而不是干净的断言失败 —— 那时候
     //   测试进程直接死掉,后面所有用例都不跑,一次失败看不到全貌。
     void deleteReferencedVariable_savingDoesNotCrash();
+
+    // ★★★ 修"存坏文件"的那一刀,不能顺手把好的也砍了。
+    //   修法是"存盘时跳过悬空的引用" —— 这句话有两面:
+    //     · 悬空的【必须】跳过(上面两条管)
+    //     · 没悬空的【必须】留下(这条管)
+    //   少了后半句,一个"把所有报警和联动都跳过"的实现能让上面两条全绿,
+    //   而工程里的报警和联动被清光了,用户要等到现场不报警了才发现。
+    void danglingReference_isSkipped_butValidOnesSurvive();
 
     // ---- 引用扫描本身(阶段 1 的正题)----
 
@@ -804,6 +853,114 @@ void tst_ProjectMultiPlc::deleteReferencedVariable_savingDoesNotCrash() {
     // 走到这里就说明没崩。留一句日志让"这条为什么通过"在 CI 输出里看得见,
     // 免得将来有人看到一条不做断言的用例,以为是没写完。
     qInfo() << "[nocrash] 删掉被引用变量后存盘未崩溃,saved =" << saved;
+}
+
+// ============================================================================
+// ★★★ 修"存坏文件"的那一刀,不能顺手把好的也砍了
+//
+// 【这条在防什么】
+//   修法是"存盘时跳过悬空的引用"。这句话有两面,上面两条用例只钉了第一面:
+//     · 悬空的那条【必须】跳过 —— 否则整个工程打不开
+//     · 没悬空的那条【必须】留下 —— 否则就成了"存盘清空报警和联动"
+//
+// 【为什么必须专门钉第二面】
+//   上面两条只断言"存出来的工程能打开"。
+//   而"什么都不写"【也】满足这个断言 —— 空的 alarms 数组在加载时
+//   循环体一次都不进,工程照样打得开。
+//   ⇒ 一个"把所有报警和联动统统跳过"的实现,能让上面两条全绿,
+//     而用户的报警和联动被清光了 —— 他要等到现场不报警了才发现。
+//
+//   这跟本文件开头写的"读回来数量对不对"是同一类假绿:
+//   只断言"能打开"就漏掉了"东西还在不在"。
+//
+// 【钉的是什么】
+//   两个变量、两条报警、两条联动,删掉其中一个变量:
+//     · 挂在它身上的那条报警和那条联动 → 必须被跳过
+//     · 挂在另一个(还活着)变量上的那两条 → 必须一条不少地留下
+//   而且留下的必须【就是】活的那条(不是"随便哪条都行")
+// ============================================================================
+void tst_ProjectMultiPlc::danglingReference_isSkipped_butValidOnesSurvive() {
+    QJsonArray plcs;
+    plcs.append(makePlc("plc1", "192.168.1.10", 502));
+
+    QJsonObject root;
+    root["schema_version"] = 3;
+
+    QJsonObject vA;
+    vA["name"]      = QStringLiteral("Alpha");
+    vA["address"]   = 100;
+    vA["data_type"] = QStringLiteral("Int16");
+    vA["access"]    = QStringLiteral("ReadOnly");
+    vA["plc_id"]    = QStringLiteral("plc1");
+    QJsonObject vB;
+    vB["name"]      = QStringLiteral("Beta");
+    vB["address"]   = 101;
+    vB["data_type"] = QStringLiteral("Int16");
+    vB["access"]    = QStringLiteral("ReadOnly");
+    vB["plc_id"]    = QStringLiteral("plc1");
+    root["variables"] = QJsonArray{vA, vB};
+
+    QJsonObject aA;
+    aA["name"]      = QStringLiteral("AlphaHigh");
+    aA["variable"]  = QStringLiteral("Alpha");
+    aA["level"]     = QStringLiteral("Warning");
+    aA["direction"] = QStringLiteral("Above");
+    aA["threshold"] = 80.0;
+    QJsonObject aB;
+    aB["name"]      = QStringLiteral("BetaHigh");
+    aB["variable"]  = QStringLiteral("Beta");
+    aB["level"]     = QStringLiteral("Warning");
+    aB["direction"] = QStringLiteral("Above");
+    aB["threshold"] = 80.0;
+    root["alarms"] = QJsonArray{aA, aB};
+
+    QJsonObject acA;
+    acA["alarm_name"]   = QStringLiteral("AlphaHigh");
+    acA["variable"]    = QStringLiteral("Alpha");
+    acA["write_value"] = 1;
+    QJsonObject acB;
+    acB["alarm_name"]   = QStringLiteral("BetaHigh");
+    acB["variable"]    = QStringLiteral("Beta");
+    acB["write_value"] = 2;
+    root["actions"] = QJsonArray{acA, acB};
+
+    root["plcs"] = plcs;
+
+    const QString src = writeRoot(root, "mixed.hmi.json");
+    QVERIFY2(!src.isEmpty(), "写源工程失败");
+
+    VariableManager vm;  AlarmManager am;  ActionManager ag;
+    PollScheduler poll(&vm, nullptr);
+    Project p(&vm, &am, &ag, &poll, nullptr);
+    QVERIFY(p.loadFromFile(src));
+    QCOMPARE(am.checkers().size(), 2);
+    QCOMPARE(ag.mappings().size(), 2);
+
+    // 删掉 Beta —— 挂它身上的那条报警和那条联动会悬空
+    QVERIFY(vm.removeVariable(QStringLiteral("Beta")));
+
+    const QString dst = m_dir.filePath("mixed-saved.hmi.json");
+    QVERIFY(p.saveToFile(dst));
+
+    VariableManager vm2;  AlarmManager am2;  ActionManager ag2;
+    PollScheduler poll2(&vm2, nullptr);
+    Project p2(&vm2, &am2, &ag2, &poll2, nullptr);
+    QVERIFY2(p2.loadFromFile(dst), "★ 存出来的工程打不开了(悬空引用没被跳过)");
+
+    // ★ 活的那些必须一条不少
+    QCOMPARE(am2.checkers().size(), 1);
+    QCOMPARE(ag2.mappings().size(), 1);
+
+    // 而且留下的必须【就是】活的那条 —— 不是"随便哪条都行"
+    AlarmChecker* kept = am2.checkers().first();
+    QCOMPARE(kept->name(), QStringLiteral("AlphaHigh"));
+    auto* ktc = dynamic_cast<ThresholdAlarmChecker*>(kept);
+    QVERIFY(ktc != nullptr);
+    QVERIFY(ktc->variable() != nullptr);
+    QCOMPARE(ktc->variable()->name(), QStringLiteral("Alpha"));
+
+    QCOMPARE(ag2.mappings().first().alarmName, QStringLiteral("AlphaHigh"));
+    QCOMPARE(ag2.mappings().first().variableName, QStringLiteral("Alpha"));
 }
 
 // ============================================================================

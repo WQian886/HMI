@@ -681,9 +681,39 @@ bool Project::saveToFile(const QString& path, const QList<qwhmi::widgets::Contro
             for (AlarmChecker* c : alarmMgr_->checkers()) {
                 auto* tc = dynamic_cast<ThresholdAlarmChecker*>(c);
                 if (!tc) continue;
+
+                // ★★ 2026-10-21:悬空的报警【不写出去】—— 写出去就是把工程写坏。
+                //
+                //   事情是这样的:变量被删掉之后,ThresholdAlarmChecker 里的
+                //   QPointer<Variable> 变空(见 ThresholdAlarmChecker.h:121-125
+                //   那段注释 —— 它明说"QPointer 解决的是【不该崩的地方不崩】,
+                //   不是【不该写坏的文件不写坏】")。这一段就是补那后半句。
+                //
+                //   原来这里写的是 `tc->variable() ? ...->name() : QString()`,
+                //   也就是"变量没了就写个空串"。而加载端(Project.cpp:556)
+                //   拿到空串 → findVariable 拿不到 → failWith → 【整个工程打不开】。
+                //   用户看到的是"我明明存成功了,怎么打不开了",而且无从推断。
+                //
+                //   为什么是"跳过"而不是"报错不让存":
+                //     · 报错不让存 = 用户被卡死在"我删了一个变量,现在存不了了",
+                //       而他删那个变量时【界面根本没提示过】(见 VariableConfigDialog:
+                //       界面那侧是拒删的,这条路只有数据层能走)。
+                //     · 写出去 = 整个工程(不只是那一条报警)全丢。
+                //   两条路里,丢一条已经没用的报警,比丢整个工程轻得多。
+                //   而且报警引用的变量已经没了,它本来就不可能再触发。
+                //
+                //   ★ 变量名在变量被删的那一刻就没了(QPointer 变空,没人记得它叫什么),
+                //     所以没法"保留报警配置只清掉引用" —— 只能整条跳过。
+                if (!tc->variable()) {
+                    qCWarning(hmiApp) << "[Project] 报警 \"" << c->name()
+                                      << "\"引用的变量已被删除,存盘时跳过这条 —— "
+                                         "写出去会让整个工程下次打不开";
+                    continue;
+                }
+
                 QJsonObject alarmObj = JsonSerializer::toJson(tc->config());
                 alarmObj["name"]     = c->name();
-                alarmObj["variable"] = tc->variable() ? tc->variable()->name() : QString();
+                alarmObj["variable"] = tc->variable()->name();
                 alarmsArr.append(alarmObj);
             }
         }
@@ -695,6 +725,23 @@ bool Project::saveToFile(const QString& path, const QList<qwhmi::widgets::Contro
         QJsonArray actionsArr;
         if (actionMgr_) {
             for (const ActionManager::Mapping& m : actionMgr_->mappings()) {
+                // ★★ 2026-10-21:跟上面同一个病,【机制不同】。
+                //
+                //   ActionManager 存的是【变量名字符串】(ActionManager.h:66,
+                //   故意不存裸指针),所以变量被删掉之后,这个字符串【原样留着】——
+                //   文件里看上去"Temp" / "Valve" 挺正常,肉眼看 JSON 找不出哪里坏了。
+                //   但加载端(Project.cpp:579)一样 findVariable 拿不到 → failWith
+                //   → 整个工程打不开。
+                //
+                //   只查 alarms 是不够的:两个引用源坏的方式不一样
+                //   (alarms 是空串,actions 是悬空名字),修一边另一边照样坏着。
+                if (varMgr_ && !varMgr_->findVariable(m.variableName)) {
+                    qCWarning(hmiApp) << "[Project] 联动 \"" << m.alarmName
+                                      << "\"引用的变量 \"" << m.variableName
+                                      << "\"已被删除,存盘时跳过这条 —— "
+                                         "写出去会让整个工程下次打不开";
+                    continue;
+                }
                 actionsArr.append(JsonSerializer::toActionMappingJson(m.alarmName, m.variableName, m.value));
             }
         }
