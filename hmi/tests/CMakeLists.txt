@@ -148,6 +148,11 @@ set(HMI_CORE_SOURCES
     # ★ 2026-10-14:报警行配色。AlarmListControl 和 hmi.cpp 都调它,
     #   漏了这里会 LNK2019(三个未解析符号)—— 而 hmi/CMakeLists.txt 那份是另一份列表。
     ${HMI_SRC_DIR}/src/alarm/AlarmRowPalette.cpp
+    # ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改状态/怎么上色/留多少行)。
+    #   主画面 hmi.cpp 与运行时画布 AlarmListControl 现在都调它 ——
+    #   原来两边各写一份,主画面那份【少写了状态列】,于是主画面报警表整张废了
+    #   (状态列空白/确认无效/无配色/不闪烁/"确认"菜单恒灰)。
+    ${HMI_SRC_DIR}/src/alarm/AlarmTablePresenter.cpp
     # ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
     #   逐个加:写完一个接线一个,避免文件还不存在就编不过
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
@@ -532,6 +537,12 @@ add_hmi_test(tst_TableControl)
 add_hmi_test(tst_AlarmListControl)
 # ★ 2026-10-14:报警行配色的唯一权威。纯函数测试,跑得极快,可以写密。
 add_hmi_test(tst_AlarmRowPalette)
+# ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改状态/怎么上色/留多少行)。
+#   【为什么必须有】主画面 hmi.cpp 的报警表 2026-10-14 之后【整张是废的】:
+#   状态列从来没被创建过 → 状态列空白 / 确认无效 / 无配色 / 不闪烁 /
+#   "确认"菜单项恒灰。而当时 68 个测试全绿 —— 因为主画面那套【零测试覆盖】。
+#   现在"行怎么造出来"本身成了可测的纯逻辑,两套 UI 共用。
+add_hmi_test(tst_AlarmTablePresenter)
 # ★ E.1c(2026-09-28):UI → PLC 反向写通道(ControlBase::writeToPlc)
 #   修复前 ToggleControl 点一下只翻本地值,全仓库无人接 toggled 信号,
 #   17 个控件全是只读显示器。详见 tst_ControlBaseWrite.cpp 头注释。

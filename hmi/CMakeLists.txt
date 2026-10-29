@@ -109,6 +109,7 @@ set(SOURCES
     src/alarm/AlarmConfigDialog.cpp
     src/alarm/AlarmSoundDialog.cpp     # ★ F5:报警声音设置对话框
     src/alarm/AlarmRowPalette.cpp       # ★ 2026-10-14:报警行配色唯一权威(两套报警 UI 共用)
+    src/alarm/AlarmTablePresenter.cpp   # ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改/留多少行)
     # ★ 2026-10-19:变量配置对话框 —— 让变量 plcId 有 UI 入口(多 PLC 2b 的收尾缺口)
     src/plc/VariableConfigDialog.cpp
     # ★ 2026-10-10:协议下拉框"未实现"标注(置灰 + tooltip)
@@ -204,6 +205,7 @@ set(HEADERS
     src/alarm/AlarmConfigDialog.h
     src/alarm/AlarmSoundDialog.h      # ★ F5:报警声音设置对话框
     src/alarm/AlarmRowPalette.h        # ★ 2026-10-14:报警行配色唯一权威(纯函数,无 Q_OBJECT)
+    src/alarm/AlarmTablePresenter.h   # ★ 2026-10-24:报警【行】的呈现(两套报警 UI 共用)
     # ★ 2026-10-10:协议下拉框"未实现"标注
     src/drivers/ProtocolAvailabilityUi.h
     src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图

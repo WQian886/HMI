@@ -170,6 +170,11 @@ private slots:
     void setAlarmRowState(int row, AlarmState st);
     // ★ 有该闪的行才亮表,一个都没有就停,【并且把相位复位】。
     void updateAlarmBlinkTimer();
+    // ★ 2026-10-24:报警表裁剪 —— 只丢【已恢复】的旧行,
+    //   还没确认/还没恢复的报警一条都不丢(漏报比多报危险得多)。
+    //   24 小时实测长到 12028 行 ≈ 24.3 MB,只有"全部清除"会清表,
+    //   而它 24 小时里一次都没触发过 —— 见 src/alarm/AlarmTablePresenter.h。
+    void trimAlarmTable();
 
     // 阶段 5.5:右键菜单 + 确认 + 全清
     void onAlarmContextMenu(const QPoint& pos);

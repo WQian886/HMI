@@ -167,6 +167,40 @@ void ThresholdAlarmChecker::onRawRead(Variable* v, quint16 rawValue) {
     //   overThreshold  = 触发沿,仍严格看 threshold(滞回不该让报警变迟钝)
     //   pastRecovery   = 恢复沿,看 threshold ∓ hysteresis
     //   hysteresis=0 时两者恒等 → 行为与 5.3 逐位相同。
+    //
+    // ★★ BUGFIX-C2(2026-10-24):Below 的恢复沿【比较方向反了】★★
+    //
+    //   【现场】24 小时长跑实测(soaks/20261021_164804 的 alarm_history 表):
+    //     「温度高」(Above 50) →    460 次,间隔 188 秒(三角波半周期),正常
+    //     「温度低」(Below 10) → 11568 次,间隔  0.44 秒 ★ 抖了 24 小时
+    //     后者的触发值实测【始终在 0~9】,从没回到 10 以上 ——
+    //     它【从来没真的恢复过】,却每 0.44 秒报一次。
+    //
+    //   【根因】两个沿在 Below 方向【重叠】了:
+    //     触发沿 overThreshold = (val <  threshold)  → 区间 (-∞, T)
+    //     恢复沿 pastRecovery  = !(val > recoveryLimit)
+    //                          hysteresis=0 时 = (val <= T) → 区间 (-∞, T]
+    //     值 = 9 时【两个都成立】→ 报一次 → 立刻判恢复 → 下个周期再报。
+    //
+    //   而 Above 方向天然不重叠:
+    //     触发沿 (val >  T) → (T, +∞)   恢复沿 (val <= T) → (-∞, T]  【互斥】✓
+    //
+    //   【为什么 hysteresis 以前治不了它】
+    //     Below 的 recoveryLimit = threshold + hysteresis,恢复线在【上】,
+    //     触发线在【下】—— 恢复区间必然【包含】触发区间,
+    //     所以 hysteresis>0 只会让重叠区【变大】,永远消除不了。
+    //
+    //   【改法】Below 的恢复沿要问的是"值是否已经【不】低于阈值",
+    //     即 val >= recoveryLimit,而不是 val <= recoveryLimit。
+    //     改完:
+    //       hysteresis=0 → 触发 (-∞,T) / 恢复 [T,+∞)  【互斥】✓
+    //       hysteresis>0 → 触发 (-∞,T) / 恢复 [T+h,+∞) 【互斥】✓
+    //                       且 [T, T+h) 是死区:不超限、也不算恢复 ✓
+    //     —— 滞回终于在 Below 方向真正有用了(以前是反的)。
+    //
+    //   ★ 两边的死区方向【本来就相反】,别把它们写成同一个公式 ★
+    //     Above:死区 (T-h, T],要跌到 T-h 以下才恢复
+    //     Below:死区 [T, T+h),要升到 T+h 以上才恢复
     bool overThreshold = false;
     double recoveryLimit = config_.threshold;
     switch (config_.direction) {
@@ -181,9 +215,16 @@ void ThresholdAlarmChecker::onRawRead(Variable* v, quint16 rawValue) {
     }
     // 已触发过之后,恢复要用带滞回的沿;还在"待触发"时退回触发沿(否则
     // 一个本来就没报出去的报警,会因为滞回永远挂着 pending —— 那是另一种静默漏报)。
+    //
+    // ★ BUGFIX-C2:两个方向的恢复沿【写法不同,这是对的】★
+    //   Above:!(val > recoveryLimit) = val <= T-h  → 值【跌】到 T-h 以下才算恢复
+    //   Below:!(val < recoveryLimit) = val >= T+h  → 值【升】到 T+h 以上才算恢复
+    //   写成同一个公式就是原来那个 bug:Below 会把"还低于阈值"当成"已经恢复"。
     const bool pastRecovery = (state_ == State::Fired)
-                           ? !(val > recoveryLimit)   // Above:跌到 threshold-hyst 以下才算恢复
-                           : !overThreshold;           // 待触发阶段:回到 threshold 内即撤销
+                           ? (config_.direction == Direction::Above
+                                  ? !(val > recoveryLimit)   // Above:跌到 threshold-hyst 以下才算恢复
+                                  : !(val < recoveryLimit))  // Below:升到 threshold+hyst 以上才算恢复
+                           : !overThreshold;              // 待触发阶段:回到 threshold 内即撤销
 
     switch (state_) {
     case State::Idle:

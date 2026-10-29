@@ -13,6 +13,7 @@
 #include "history/AlarmRecorder.h"  // ★ D.3(2026-09-20):报警持久化(alarm_history 表)
 #include "history/AlarmHistoryView.h" // ★ F4(2026-10-08):报警历史查询视图(填 D.3 占位 tab)
 #include "alarm/AlarmRowPalette.h"   // ★ 2026-10-14:报警表配色的唯一权威(与运行时画布共用)
+#include "alarm/AlarmTablePresenter.h" // ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改/留多少行)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
 #include "widgets/NumberDisplay.h"
@@ -693,6 +694,9 @@ hmi::hmi(QWidget *parent)
                     //   原来只改文字 —— 状态 UserRole 没跟着变,配色按"未确认"算,
                     //   于是"确认"这一下文字变了、颜色没变,而闪烁定时器照旧在跑。
                     //   操作员看到的是:点了确认,状态列变了,那一行却还在闪。
+                    // ★ 2026-10-24:状态列【本来就没被创建过】(BUGFIX-C3),
+                    //   所以这一整套在主画面上从来没生效过 —— 现在由
+                    //   AlarmTablePresenter 保证状态列存在。
                     setAlarmRowState(row, AlarmState::Acknowledged);
                     repaintAlarmRow(row);
                     updateAlarmBlinkTimer();
@@ -2098,26 +2102,22 @@ void hmi::onAlarmTriggered(const Alarm& a) {
              << "value=" << a.triggerValue << "threshold=" << a.threshold;
     tryTransition(Trigger::AlarmCritical);   // 推状态机进 Fault
 
-    int row = ui.alarmTable->rowCount();
-    ui.alarmTable->insertRow(row);
-    ui.alarmTable->setItem(row, 0, new QTableWidgetItem(a.triggeredAt.toString("HH:mm:ss")));
-    auto* nameItem = new QTableWidgetItem(a.name);
-    nameItem->setData(Qt::UserRole, a.id_);  // ★ 存 ID 给 ack lambda 匹配(5.5 BUGFIX)
-    ui.alarmTable->setItem(row, 1, nameItem);
+    // ★★ 2026-10-24:整行的创建改调 AlarmTablePresenter(BUGFIX-C3)。
+    //   原来这一段在这里自己写 4 个 setItem —— 【少写第 5 列(状态列)】,
+    //   而 2026-10-14 的 G-1 重构又把"读状态列"的代码留下了,
+    //   于是那一列从来没被创建过:状态列空白、确认无效、无配色、不闪烁、
+    //   "确认"菜单恒灰。详见 src/alarm/AlarmTablePresenter.h 头部。
+    //   现在"行怎么造"由一个可单测的模块负责,两套 UI 共用同一份。
+    qwhmi::alarm::appendAlarmRow(ui.alarmTable, a, alarmLevelName(a.level));
 
-    // ★ 2026-10-14:等级列带 enum,不再让配色去解析中文文字。
-    //   原来闪烁判据是 levelItem->text()=="严重"||=="危急" —— 而运行时画布那边
-    //   判的是 "Critical"/"Emergency"。两边一个认中文一个认英文,判据天生可能对不上,
-    //   而"两套 UI 判据必须一致"恰恰是对齐 500ms 时强调的硬要求。
-    auto* levelItem = new QTableWidgetItem(alarmLevelName(a.level));
-    levelItem->setData(qwhmi::alarm::kLevelRole, static_cast<int>(a.level));
-    ui.alarmTable->setItem(row, 2, levelItem);
+    // ★ 2026-10-24:表【不能无界长】(SOAK-2 的根因之一)。
+    //   24 小时实测长到 12028 行、约 24.3 MB,只有"全部清除"会清表,
+    //   而它 24 小时里一次都没触发过。
+    //   裁剪只丢【已经不在活动列表里】的旧行 —— 还没确认、还没恢复的报警
+    //   一条都不丢:把它从操作员眼前拿走,比多显示一条危险得多。
+    trimAlarmTable();
 
-    ui.alarmTable->setItem(row, 3, new QTableWidgetItem(a.triggerValue));
-
-    // ★ 状态列同样带 enum,文字与配色都由它派生。
-    setAlarmRowState(row, a.state);
-    repaintAlarmRow(row);
+    repaintAlarmRow(ui.alarmTable->rowCount() - 1);
     ui.alarmTable->scrollToBottom();
 
     updateAlarmBlinkTimer();
@@ -2130,17 +2130,11 @@ void hmi::onAlarmTriggered(const Alarm& a) {
 //   只改 UserRole 不动文字 → 屏幕写着"未确认"却不再闪,操作员无从判断。
 //   两个都是"看起来能点,点了没反应"那一类静默失败。
 void hmi::setAlarmRowState(int row, AlarmState st) {
-    auto* statusItem = ui.alarmTable->item(row, 4);
-    if (!statusItem) return;
-    QString text;
-    switch (st) {
-        case AlarmState::Active:       text = QStringLiteral("未确认"); break;
-        case AlarmState::Acknowledged: text = QStringLiteral("已确认"); break;
-        case AlarmState::Cleared:      text = QStringLiteral("已恢复"); break;
-    }
-    statusItem->setText(text);
-    statusItem->setData(qwhmi::alarm::kStateRole,
-                        static_cast<int>(qwhmi::alarm::visualStateFor(st)));
+    // ★ 2026-10-24:改调 AlarmTablePresenter(BUGFIX-C3)。
+    //   原来这里自己 switch 出状态文字 + 写 kStateRole —— 而它读的那一格
+    //   【从来没被创建过】(G-1 重构把创建那行删了,读的那行留着)。
+    //   于是"确认"改的是空气:操作员点完确认,那一行纹丝不动。
+    qwhmi::alarm::setRowState(ui.alarmTable, row, st);
 }
 
 // ★ 2026-10-14:主画面报警表的配色入口 —— 决策全在 AlarmRowPalette。
@@ -2148,31 +2142,14 @@ void hmi::setAlarmRowState(int row, AlarmState st) {
 //   而且是最弱的一个:静止态非闪烁行直接 setData(BackgroundRole, QVariant())
 //   清成白底,于是 Info / Warning 两档跟"这一行没有报警"长得一模一样。
 void hmi::repaintAlarmRow(int row) {
-    auto* levelItem  = ui.alarmTable->item(row, 2);
-    auto* statusItem = ui.alarmTable->item(row, 4);
-    if (!levelItem || !statusItem) return;
-
-    const QVariant lv = levelItem->data(qwhmi::alarm::kLevelRole);
-    const QVariant sv = statusItem->data(qwhmi::alarm::kStateRole);
-    if (!lv.isValid() || !sv.isValid()) {
-        // 兜底方向:偏向"更像未处理的报警"。理由与 AlarmListControl::levelAt 相同 ——
-        // 漏报比多报危险得多(见 docs/现状.md F2:"压错了报警,比多报一条危险得多")。
-        qCWarning(hmiAlarm) << "[hmi] 报警表第" << row
-                            << "行缺 UserRole(等级/状态),写这一行的代码漏了 setData";
-    }
-    const auto level = lv.isValid() ? static_cast<AlarmLevel>(lv.toInt())
-                                    : AlarmLevel::Warning;
-    const auto state = sv.isValid()
-        ? static_cast<qwhmi::alarm::RowVisualState>(sv.toInt())
-        : qwhmi::alarm::RowVisualState::Unacknowledged;
-
-    const qwhmi::alarm::RowColors c = qwhmi::alarm::colorsFor(level, state, alarmBlinkOn_);
-    for (int col = 0; col < ui.alarmTable->columnCount(); ++col) {
-        if (auto* it = ui.alarmTable->item(row, col)) {
-            it->setBackground(c.bg);
-            it->setForeground(c.fg);
-        }
-    }
+    // ★ 2026-10-24:改调 AlarmTablePresenter(BUGFIX-C3)。
+    //   原来这里【自己】读等级列 + 状态列,任一取不到就 return ——
+    //   而状态列从来没被创建过(见头文件),所以这个 return 【每次都命中】:
+    //   主画面报警表一格颜色都没有。而 G-1 那天的验收记录写着
+    //   "现在两套 UI 都有四档静止色" —— 记录与事实不符。
+    //   兜底方向(读不到 UserRole 时偏向"更像未处理的报警")现在在
+    //   AlarmTablePresenter::rowLevel / rowVisualState 里,两套 UI 共用。
+    qwhmi::alarm::repaintRow(ui.alarmTable, row, alarmBlinkOn_);
 }
 
 // ★ 2026-10-14:该闪的行一个都没有就停表,并【把相位复位】。
@@ -2181,18 +2158,12 @@ void hmi::repaintAlarmRow(int row) {
 //   于是清空之后再来第一条,第一帧可能停在亮相的浅色上(见 hmi.h 里那个成员变量
 //   的注释)。AlarmListControl 在 F3-b 修好了这件事,主画面一直没跟上。
 void hmi::updateAlarmBlinkTimer() {
-    bool anyShouldBlink = false;
-    for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
-        auto* levelItem  = ui.alarmTable->item(row, 2);
-        auto* statusItem = ui.alarmTable->item(row, 4);
-        if (!levelItem || !statusItem) continue;
-        const auto level = static_cast<AlarmLevel>(levelItem->data(qwhmi::alarm::kLevelRole).toInt());
-        const auto state = static_cast<qwhmi::alarm::RowVisualState>(
-                               statusItem->data(qwhmi::alarm::kStateRole).toInt());
-        if (qwhmi::alarm::shouldBlink(level, state)) { anyShouldBlink = true; break; }
-    }
-
-    if (anyShouldBlink) {
+    // ★ 2026-10-24:改调 AlarmTablePresenter(BUGFIX-C3)。
+    //   原来这里自己扫全表读等级列 + 状态列,任一取不到就 continue ——
+    //   而状态列从来没被创建过(见头文件),所以每一行都被 continue 掉,
+    //   anyShouldBlink 恒为 false → 【严重级警报从来不闪】。
+    //   闪烁是本产品最核心的报警表现,这一条已经死了 10 天。
+    if (qwhmi::alarm::anyRowShouldBlink(ui.alarmTable)) {
         if (!alarmBlinkTimer_->isActive()) alarmBlinkTimer_->start();
         return;
     }
@@ -2244,14 +2215,11 @@ void hmi::onAlarmBlinkTick() {
     alarmBlinkOn_ = !alarmBlinkOn_;
     // 只重画"该闪的那些行",不是全表 —— 闪烁本来就是个局部信号。
     // ★ 不闪的行不用动:它们的颜色由 colorsFor 决定,与相位无关。
+    // ★ 2026-10-24:判据改调 AlarmTablePresenter(BUGFIX-C3)——
+    //   原来这里读状态列,而它从来没被创建过 → 每一行都被跳过,
+    //   即使定时器在跑也一格都不会变。
     for (int row = 0; row < ui.alarmTable->rowCount(); ++row) {
-        auto* levelItem  = ui.alarmTable->item(row, 2);
-        auto* statusItem = ui.alarmTable->item(row, 4);
-        if (!levelItem || !statusItem) continue;
-        const auto level = static_cast<AlarmLevel>(levelItem->data(qwhmi::alarm::kLevelRole).toInt());
-        const auto state = static_cast<qwhmi::alarm::RowVisualState>(
-                               statusItem->data(qwhmi::alarm::kStateRole).toInt());
-        if (qwhmi::alarm::shouldBlink(level, state)) repaintAlarmRow(row);
+        if (qwhmi::alarm::rowShouldBlink(ui.alarmTable, row)) repaintAlarmRow(row);
     }
 }
 
@@ -2266,11 +2234,12 @@ void hmi::onAlarmContextMenu(const QPoint& pos) {
     int row = item->row();
     // ★ 2026-10-14:判据从"状态列文字 == 未确认"改成读 UserRole 里的 enum。
     //   拿显示文字当 API 用,翻译一改就错位 —— 而且不会报错,只是安静地置错灰。
-    auto* statusItem = ui.alarmTable->item(row, 4);
-    const bool canAck = statusItem
-        && static_cast<qwhmi::alarm::RowVisualState>(
-               statusItem->data(qwhmi::alarm::kStateRole).toInt())
-           == qwhmi::alarm::RowVisualState::Unacknowledged;
+    // ★ 2026-10-24:改调 AlarmTablePresenter(BUGFIX-C3)。
+    //   原来这里读的是状态列的 UserRole,而那一列【从来没被创建过】
+    //   → statusItem 恒为 nullptr → canAck 恒为 false
+    //   → 【"确认"菜单项恒灰】,操作员根本没法单条确认一条报警。
+    const bool canAck = qwhmi::alarm::rowVisualState(ui.alarmTable, row)
+                        == qwhmi::alarm::RowVisualState::Unacknowledged;
     if (alarmAckAction_) alarmAckAction_->setEnabled(canAck);
 
     // "全部确认"看的是全局有没有未确认的,与当前点在哪一行无关。
@@ -2370,12 +2339,45 @@ void hmi::onAlarmAcknowledge() {
         return;
     }
     // 有权限却没确认成 → 只可能是 ②③,都是"不用管",给个轻提示即可
-    // ★ 必须判空:第 4 列理论上总有内容,但 acknowledge 失败也可能是因为
+    // ★ 必须判空:状态列理论上总有内容,但 acknowledge 失败也可能是因为
     //   这一行是 clearAll 之后残留的半截行。真崩在这里就是"给个提示把程序搞挂"。
-    auto* statusItem = ui.alarmTable->item(row, 4);
+    auto* statusItem = ui.alarmTable->item(row, qwhmi::alarm::kColStatus);
     if (!statusItem) return;   // 拿不到状态列就什么都不说,总比崩了好
     QMessageBox::information(this, "无需确认",
         QString("这条报警已经是「%1」状态。").arg(statusItem->text()));
+}
+
+// ★ 2026-10-24:报警表裁剪(SOAK-2 机制②的修复)。
+//
+//   【为什么必须有】这是台 7×24 不关机的机器,而报警表【只涨不消】:
+//   每条报警加一行,只有"全部清除"会清表 —— 而它 24 小时里一次都没触发过。
+//   2026-10-24 实测:长跑 24 小时后表里 12028 行,每行约 2034 字节 ≈ 24.3 MB,
+//   这就是 SOAK-2 内存线性增长的【一半】。
+//
+//   【丢哪一行】只丢【已经不在活动列表里】的旧行(已恢复的)。
+//   还没确认、还没恢复的报警【一条都不丢】——
+//   把它从操作员眼前拿走,比多显示一条危险得多
+//   (本项目原则:漏报比多报危险得多,见 AlarmRowPalette.h)。
+//
+//   【活动列表从哪来】AlarmManager::activeAlarms() ——
+//   注意它【只含还没恢复的】,已确认但未恢复的【也在里面】
+//   (acknowledge 只改 state 不删记录,5.5 有意为之)。
+void hmi::trimAlarmTable() {
+    if (!ui.alarmTable) return;
+    QSet<qint64> live;
+    if (alarmMgr_) {
+        const auto actives = alarmMgr_->activeAlarms();
+        live.reserve(actives.size());
+        for (const Alarm& a : actives) live.insert(a.id_);
+    }
+    const int dropped = qwhmi::alarm::trimToLimit(ui.alarmTable, live,
+                                                  qwhmi::alarm::kMaxAlarmRows);
+    if (dropped > 0) {
+        // ★ 只在真的丢了行时才记日志 —— 24 小时长跑里每条报警都打一行
+        //   会把日志本身撑成第二个泄漏源(而且会盖掉别的信息)。
+        qCDebug(hmiAlarm) << "[hmi] 报警表超过" << qwhmi::alarm::kMaxAlarmRows
+                          << "行,丢掉最旧的" << dropped << "行(已恢复的)";
+    }
 }
 
 // ★ IMPROVE-5.5(2026-08-04):全部清除 → 清空表格 + 停闪烁

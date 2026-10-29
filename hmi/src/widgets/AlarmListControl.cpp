@@ -6,6 +6,7 @@
 #include "../../Alarm.h"
 #include "../../AlarmManager.h"
 #include "alarm/AlarmRowPalette.h"
+#include "alarm/AlarmTablePresenter.h"
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
 #include "logging/Logging.h"   // hmiAlarm(qCWarning 用)
@@ -64,12 +65,8 @@ QString levelText(AlarmLevel level) {
 //     所以表里本来不该再有 Cleared —— 但万一有一行(clearAll 后的残留半截行),
 //     显示"未确认"就是在一本正经地撒谎。
 QString stateTextFor(AlarmState st) {
-    switch (st) {
-        case AlarmState::Active:       return QStringLiteral("未确认");
-        case AlarmState::Acknowledged: return QStringLiteral("已确认");
-        case AlarmState::Cleared:      return QStringLiteral("已恢复");
-    }
-    return QStringLiteral("?");   // 不该到这
+    // ★ 2026-10-24:改调 AlarmTablePresenter —— 状态文字两套 UI 共用一份。
+    return qwhmi::alarm::stateText(st);
 }
 
 } // namespace
@@ -262,35 +259,26 @@ void AlarmListControl::refreshNow() {
 
 void AlarmListControl::addAlarmRow(const Alarm& alarm) {
     if (!table_) return;
-    const int row = table_->rowCount();
-    table_->insertRow(row);
+    // ★ 2026-10-24:整行的创建改调 AlarmTablePresenter(与主画面 hmi.cpp 共用)。
+    //   原来这一段在这里自己写 5 个 setItem —— 而主画面那份当时【少写了状态列】,
+    //   两套各写一份就漂出了"主画面报警表整张废了"那个事故(见
+    //   src/alarm/AlarmTablePresenter.h 头部)。现在只有一份。
+    //   等级文字两套 UI 故意不同(主画面中文、画布英文),所以由这里传进去。
+    //
+    //   ★ 状态文字【按 Alarm 自带的 state 填,不是无脑写"未确认"】。
+    //     原来这里写死"未确认"。refreshNow() 在重画时会走这里 ——
+    //     而 activeAlarms_ 里【确实存在已经确认过但还没恢复的报警】
+    //     (acknowledge 只改 state,不删记录,是 5.5 有意为之:"复位不该清历史")。
+    //     写死"未确认"的后果:操作员确认完之后,任何一次 refreshNow()
+    //     都会把那行变回"未确认",看着像没确认过,于是再点一次。
+    //     而 acknowledge 第二次会返回 false(状态已不是 Active),
+    //     界面"点了没反应" —— 又是静默失败。
+    const int row = table_->rowCount();   // appendAlarmRow 会往这个下标插
     idToRow_[alarm.id_] = row;
     rowToId_[row] = alarm.id_;
 
-    table_->setItem(row, 0, new QTableWidgetItem(alarm.triggeredAt.toString("HH:mm:ss")));
-    table_->setItem(row, 1, new QTableWidgetItem(alarm.name));
+    qwhmi::alarm::appendAlarmRow(table_, alarm, levelText(alarm.level));
 
-    // ★ 2026-10-14:等级列除了文字,还要带 enum(UserRole)。
-    //   配色不再从文字反查档位 —— 见 AlarmRowPalette.h 里"为什么必须存"三条。
-    auto* levelItem = new QTableWidgetItem(levelText(alarm.level));
-    levelItem->setData(qwhmi::alarm::kLevelRole, static_cast<int>(alarm.level));
-    table_->setItem(row, kColLevel, levelItem);
-
-    table_->setItem(row, 3, new QTableWidgetItem(alarm.triggerValue));
-
-    // ★ F3:状态文字【按 Alarm 自带的 state 填,不是无脑写"未确认"】。
-    //   原来这里写死"未确认"。refreshNow() 在重画时会走这里 ——
-    //   而 activeAlarms_ 里【确实存在已经确认过但还没恢复的报警】
-    //   (acknowledge 只改 state,不删记录,是 5.5 有意为之:"复位不该清历史")。
-    //   写死"未确认"的后果:操作员确认完之后,任何一次 refreshNow()
-    //   都会把那行变回"未确认",看着像没确认过,于是又点一次。
-    //   而 acknowledge 第二次会返回 false(状态已不是 Active),
-    //   界面"点了没反应" —— 又是静默失败。
-    //   等级列的颜色同理,由 repaintRow 统一按当前状态重刷。
-    auto* statusItem = new QTableWidgetItem(stateTextFor(alarm.state));
-    statusItem->setData(qwhmi::alarm::kStateRole,
-                        static_cast<int>(qwhmi::alarm::visualStateFor(alarm.state)));
-    table_->setItem(row, kColStatus, statusItem);
     repaintRow(row);
     refreshCount();
     // ★ F3-b:新来一条可能"该闪",也可能来的是已确认的。
@@ -311,15 +299,11 @@ void AlarmListControl::repaintRow(int row) {
     // ★ 2026-10-14:配色决策整段搬进 AlarmRowPalette,这里只剩"取到结果、刷上去"。
     //   原来这一整个函数(F3 + F3-b 两次加料)就是配色的第二个权威,
     //   而 hmi.cpp 那套是第三个 —— 三个权威必然漂,详见 AlarmRowPalette.h 开头。
-    const qwhmi::alarm::RowColors c =
-        qwhmi::alarm::colorsFor(levelAt(row), visualStateAt(row), blinkOn_);
-
-    for (int col = 0; col < table_->columnCount(); ++col) {
-        if (auto* it = table_->item(row, col)) {
-            it->setBackground(c.bg);
-            it->setForeground(c.fg);
-        }
-    }
+    // ★ 2026-10-24:改调 AlarmTablePresenter —— 配色的【行】这一层也收到一处。
+    //   原来主画面和这里各写一份"读等级列 + 读状态列 → 上色",
+    //   而主画面那份读的状态列【从来没被创建过】(BUGFIX-C3)——
+    //   两套各写一份就漂成了"主画面报警表一格颜色都没有"。
+    qwhmi::alarm::repaintRow(table_, row, blinkOn_);
 }
 
 // ★ 从行里读回等级 —— UserRole 缺失时【向"更像报警"的方向兜底】
@@ -331,27 +315,13 @@ void AlarmListControl::repaintRow(int row) {
 //   显示成 Info + 已处理,后果是"一条真报警看着像已经处理过了",那危险得多。
 //   ★ 但光兜底不够 —— 静默兜底正是本项目反复吃亏的那一类,所以配 qCWarning。
 AlarmLevel AlarmListControl::levelAt(int row) const {
-    auto* it = table_ ? table_->item(row, kColLevel) : nullptr;
-    if (!it) return AlarmLevel::Warning;
-    const QVariant v = it->data(qwhmi::alarm::kLevelRole);
-    if (!v.isValid()) {
-        qCWarning(hmiAlarm) << "[AlarmListControl] 第" << row
-                            << "行等级列没有 UserRole —— 写这一行的代码漏了 setData";
-        return AlarmLevel::Warning;
-    }
-    return static_cast<AlarmLevel>(v.toInt());
+    // ★ 2026-10-24:改调 AlarmTablePresenter(两套 UI 共用同一份读法与兜底)。
+    return qwhmi::alarm::rowLevel(table_, row);
 }
 
 qwhmi::alarm::RowVisualState AlarmListControl::visualStateAt(int row) const {
-    auto* it = table_ ? table_->item(row, kColStatus) : nullptr;
-    if (!it) return qwhmi::alarm::RowVisualState::Unacknowledged;
-    const QVariant v = it->data(qwhmi::alarm::kStateRole);
-    if (!v.isValid()) {
-        qCWarning(hmiAlarm) << "[AlarmListControl] 第" << row
-                            << "行状态列没有 UserRole —— 写这一行的代码漏了 setData";
-        return qwhmi::alarm::RowVisualState::Unacknowledged;
-    }
-    return static_cast<qwhmi::alarm::RowVisualState>(v.toInt());
+    // ★ 2026-10-24:改调 AlarmTablePresenter(两套 UI 共用同一份读法与兜底)。
+    return qwhmi::alarm::rowVisualState(table_, row);
 }
 
 // ★ F3-b:这一行此刻该不该闪
@@ -364,7 +334,7 @@ qwhmi::alarm::RowVisualState AlarmListControl::visualStateAt(int row) const {
 bool AlarmListControl::rowShouldBlink(int row) const {
     if (!table_) return false;
     if (row < 0 || row >= table_->rowCount()) return false;
-    return qwhmi::alarm::shouldBlink(levelAt(row), visualStateAt(row));
+    return qwhmi::alarm::rowShouldBlink(table_, row);
 }
 
 int AlarmListControl::blinkingRowCount() const {
@@ -545,12 +515,9 @@ void AlarmListControl::onAlarmAcknowledged(qint64 id) {
 void AlarmListControl::updateAlarmRow(qint64 id, AlarmState st) {
     const int row = findRowByAlarmId(id);
     if (row < 0 || !table_) return;
-    auto* item = table_->item(row, kColStatus);
-    if (item) {
-        item->setText(stateTextFor(st));
-        item->setData(qwhmi::alarm::kStateRole,
-                      static_cast<int>(qwhmi::alarm::visualStateFor(st)));
-    }
+    // ★ 2026-10-24:改调 AlarmTablePresenter —— 文字与 UserRole 必须一起改,
+    //   这个不变量现在由一处保证(原来两边各写一份,主画面那份漏了整列)。
+    qwhmi::alarm::setRowState(table_, row, st);
     // ★ F3:状态变了 → 配色跟着变(已确认/已恢复要淡化成灰底),
     //   计数也要重算(确认一条,未确认数就该减一)。
     //   以前只改文字不改颜色,所以确认过的行还留着红底,

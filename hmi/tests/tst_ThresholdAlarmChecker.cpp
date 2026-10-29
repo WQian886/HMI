@@ -37,6 +37,14 @@ private slots:
     void hysteresis_zero_behavesLikeBefore();
     void hysteresis_configRoundTripsThroughJson();
 
+    // ===== ★ BUGFIX-C2(2026-10-24):Below 方向的判据重叠 =====
+    //
+    //   全套 F2 滞回用例【清一色 Direction::Above】—— Below 方向一条都没有。
+    //   于是 Below 的判据重叠【从来没被任何测试执行过】,长跑里它以
+    //   「每 0.44 秒报一次」的形式活了 24 小时(见下面注释)。
+    void belowSustainedUnderThreshold_doesNotRetrigger();
+    void belowWithHysteresis_sameShapeAsAbove();
+
 private:
     // 造一个可控的 checker 环境
     struct Fx {
@@ -281,6 +289,120 @@ void TestThresholdAlarmChecker::hysteresis_configRoundTripsThroughJson() {
     CheckerConfig legacy = JsonSerializer::checkerConfigFromJson(
         QJsonObject{{"level", "Warning"}, {"direction", "Above"}, {"threshold", 10}});
     QCOMPARE(legacy.hysteresis, 0.0);
+}
+
+// ============================================================
+// ★ BUGFIX-C2(2026-10-24):Below 方向的判据重叠
+//
+// 【现场:24 小时长跑实测出来的】
+//   长跑的 alarm_history 表里 12028 次报警触发,分布是:
+//       「温度高」(Above 50)  →   460 次,间隔 188 秒(三角波半周期)
+//       「温度低」(Below 10)  → 11568 次,间隔  0.44 秒  ★
+//   96% 的报警来自那一条 Below 的。
+//
+// 【Below 那条 0.44 秒一次的到底是什么】
+//   把它的触发序列拉出来看(长跑实测数据):
+//       时刻(s)  触发值      时刻(s)  触发值
+//          0.000     8        5.253     0
+//          0.464     8        5.691     0
+//          0.884     6        6.128     1
+//          ...
+//   触发值【始终在 0~9】,从没回到 10 以上。
+//   ——也就是说它【从来没有真的恢复过】,却每 0.44 秒报一次。
+//   这是【重复触发】,不是"高→正常→再高"那种两次独立工况(后者是正确的)。
+//
+// 【根因:触发沿和恢复沿在 Below 方向重叠了】
+//   ThresholdAlarmChecker.cpp:184-186
+//       const bool pastRecovery = (state_ == State::Fired)
+//                              ? !(val > recoveryLimit)   // Below: !(val > 10)
+//                              : !overThreshold;
+//   Below + hysteresis=0 时:
+//       触发沿   overThreshold  = (val <  threshold) = (val <  10)
+//       恢复沿   pastRecovery   = !(val > threshold) = (val <= 10)
+//   值 = 9 时:两条【同时成立】—— "还在超限" 和 "已经恢复"。
+//   于是:报一次 → 立刻判恢复 → 下一个轮询周期(200ms)又报一次。
+//
+//   Above 方向则不重叠:
+//       触发沿   overThreshold  = (val >  threshold) = (val >  50)
+//       恢复沿   pastRecovery   = !(val > threshold) = (val <= 50)
+//   值 = 49 时:只满足恢复沿,不会同时触发。→ 所以 Above 不抖。
+//
+// 【为什么 hysteresis 治不了它】
+//   hysteresis=0 时 Above/Below 恢复沿的公式一模一样地写在那儿,
+//   但【公式一样 ≠ 语义一样】:Above 的两个沿差一个不等号(> vs <=),
+//   Below 的两个沿【完全相同】(< 和 <=,在整数上等价)。
+//   加了 hysteresis 之后 recoveryLimit = threshold + hysteresis,
+//   恢复沿变成 !(val > threshold + hyst) = (val <= threshold + hyst),
+//   这时 Below 的两条沿【才】分开(触发要 val < threshold,恢复要 val > threshold+hyst)。
+//   —— 也就是说:【hysteresis 恰好把 Below 也治好了】,只是必须 > 0 才生效。
+//   而 hysteresis 默认是 0(见 Alarm.h:87),长跑工程也没配它 → 一直抖。
+//
+// 【本用例要钉住什么】
+//   钉住"Below 持续超限【不得】重复触发"这条不变量 ——
+//   它跟 hysteresis 无关,hysteresis=0 时也必须成立。
+//   ★ 负向对照:把恢复沿改成 Above 那样的写法(即让 Below 也用 !overThreshold)
+//     之后,本用例必须【变红】。见文件末尾的注释。
+// ============================================================
+
+// Below 持续低于阈值 → 报【恰好一次】,之后再喂多少个读数都不许再报。
+void TestThresholdAlarmChecker::belowSustainedUnderThreshold_doesNotRetrigger() {
+    // ★ hysteresis=0 —— 就是长跑工程里的配置,就是默认值。
+    Fx f(AlarmLevel::Critical, Direction::Below, /*threshold=*/10.0,
+         /*minMs=*/50, /*hyst=*/0.0);
+    QSignalSpy trig(f.ck, &AlarmChecker::triggered);
+    QSignalSpy rec(f.ck,  &AlarmChecker::recovered);
+
+    // 越限,持续够久 → 应当触发一次
+    f.feed(8);
+    QTest::qWait(200);
+    QCOMPARE(trig.count(), 1);
+
+    // ★ 值【一直】在阈值以下(8 → 5 → 2),始终没回到 10 以上。
+    //   现场就是这个形态:值在死区里一路下坡,报警却每 0.44 秒报一次。
+    //   【没有恢复过】,所以【不许】再报第二条。
+    for (int i = 0; i < 10; ++i) {
+        f.feed(8 - (i % 5));
+        QTest::qWait(50);   // 10 × 50ms = 500ms > 长跑里的 440ms 间隔
+    }
+
+    QVERIFY2(trig.count() == 1,
+             qPrintable(QStringLiteral(
+                 "Below 持续超限却报了 %1 次(应恰好 1 次)。"
+                 "触发沿与恢复沿在 Below 方向重叠了 —— 参见本文件上方 BUGFIX-C2 说明。")
+                 .arg(trig.count())));
+
+    // 恢复次数:值一直没回到 10 以上,所以【一次都不该恢复】
+    QCOMPARE(rec.count(), 0);
+}
+
+// Below 方向加滞回后,行为必须跟 Above 对称:
+//   值在死区里来回 → 只报一次;真正跌出死区 → 才恢复。
+//
+// ★ 死区方向跟 Above 是【相反】的,别照抄 Above 的用例 ★
+//   Above:阈值 50,滞回 5 → 死区 (45, 50],值要【跌到 45 以下】才恢复。
+//   Below:阈值 10,滞回 5 → 死区 [10, 15),值要【升到 15 以上】才恢复。
+//   (Below 的异常是"太低",要解除异常就得让值【升】回去。)
+void TestThresholdAlarmChecker::belowWithHysteresis_sameShapeAsAbove() {
+    Fx f(AlarmLevel::Critical, Direction::Below, /*threshold=*/10.0,
+         /*minMs=*/50, /*hyst=*/5.0);
+    QSignalSpy trig(f.ck, &AlarmChecker::triggered);
+    QSignalSpy rec(f.ck,  &AlarmChecker::recovered);
+
+    f.feed(8);                 // 越限(8 < 10)→ 触发
+    QTest::qWait(200);
+    QCOMPARE(trig.count(), 1);
+
+    // 值升到 12:仍在死区 [10, 15) 内 → 【不算恢复】,也不该再报
+    f.feed(12);
+    QTest::qWait(50);
+    QCOMPARE(rec.count(), 0);
+    QCOMPARE(trig.count(), 1);
+
+    // 升到 16:越过死区上沿 → 必须恢复
+    f.feed(16);
+    QTest::qWait(50);
+    QCOMPARE(rec.count(), 1);
+    QCOMPARE(trig.count(), 1);   // 恢复不该引发第二次触发
 }
 
 QTEST_MAIN(TestThresholdAlarmChecker)
