@@ -95,6 +95,54 @@ public:
     //   那行是防御性的、当前不可达。详见 .cpp 里 hookDriver() 的注释。
     quint64 replyDispatchCount() const { return replyDispatchCount_; }
 
+    // ★ 2026-10-21:轮询统计 —— "业务到底在不在跑"的可测量证据
+    //
+    //   【为什么要有这三个计数器】
+    //     2026-10-21 查"16.5 小时零轮询流量",结论是:
+    //     一次协议级失败(异常响应/超时)之后,ModbusMaster 不发 readFinished(false),
+    //     PollScheduler 的 inFlight_ 永不清 → 那些变量再也不会被发出去。
+    //     而这件事在日志里【看不见】:协议层的错误只有 qCDebug,
+    //     而"程序还活着"的证据(历史心跳每 60 秒一行)一直在。
+    //     于是从外面看:进程健康、日志在长、内存平稳 —— 一切正常,
+    //     而它已经 16 小时没跟 PLC 说过一句话。
+    //
+    //   【这三个数字分别是什么】
+    //     pollSentCount_ —— 真正【发出】的读请求数(合并后的帧数,不是变量数)
+    //     pollOkCount_   —— 成功回包的读请求数
+    //     pollFailCount_ —— 失败回包的读请求数(异常响应/超时/帧太短)
+    //   【怎么用】
+    //     "发出在涨、成功不涨" = 发出去了但没人回 ⇒ 从站不响应或在途态卡死
+    //     "发出不涨"           = 一个请求都没发出去 ⇒ 压根没连上 / 没有到期变量
+    //     "成功在涨"           = 业务真的在跑(长跑 harness 的活体判据)
+    quint64 pollSentCount() const { return pollSentCount_; }
+    quint64 pollOkCount() const { return pollOkCount_; }
+    quint64 pollFailCount() const { return pollFailCount_; }
+
+    // ★ 2026-10-21:轮询统计行的【格式】,提成纯函数 —— 好让格式本身能被测。
+    //
+    //   【为什么必须提出来】
+    //     这一行的格式是【两方契约】:程序这边打出来,长跑 harness 那边用正则取数。
+    //     两边对不上时的表现是【判不出】,不是【判错】——
+    //     2026-10-21 实测:程序实际打的是 "发出= 271"(等号后多一个空格),
+    //     而 harness 的正则要的是 "发出=271",于是启动自检等 120 秒
+    //     一条都没匹配上,判成"没资格跑"——
+    //     而那 120 秒里程序一直在正常轮询(成功 271 次、失败 0 次)。
+    //     判据坏掉的样子,和程序坏掉的样子,一模一样。
+    //
+    //   【为什么原来是坏的】
+    //     QDebug 在【相邻两项之间插一个空格】。
+    //     `qCInfo(cat) << "发出=" << count` 出来是 "发出= 271",不是 "发出=271"。
+    //     而本文件下面那段注释写的、harness 正则认的,一直是 "发出=271" ——
+    //     也就是说:【程序一直在违反自己的文档】,而没有任何测试发现它。
+    //
+    //   【格式契约 —— 改这里必须同时改 scripts/long_run.ps1 的 $rePollStats】
+    //     "[PollScheduler] 轮询统计:发出=271 成功=271 失败=0 在途=0 PLC=1 变量=3"
+    //     harness 那边的正则对【等号后的空白】是容忍的(两种格式都认),
+    //     所以格式微调不会让判据失配 —— 但改了字段名/顺序就会。
+    //     tst_PollStatsFormat 把这份契约钉住,谁改都能立刻看见。
+    static QString formatStatsLine(quint64 sent, quint64 ok, quint64 fail,
+                                   int inflight, int plcCount, int varCount);
+
 	void start();// 开始轮询调度
 	void stop();// 停止轮询调度
 	bool isRunning() const { return timer_.isActive(); }// 是否正在运行
@@ -122,6 +170,13 @@ signals:
 
 private slots:
     void onTick();                                       // 100ms 一次扫描
+    // ★ 2026-10-21:每 60 秒打一条轮询统计(INFO 级,业务类)
+    //   【为什么必须有一条默认级别下看得见的"业务在跑"】
+    //     长跑 harness 需要一个【不能被自己骗】的活体判据。
+    //     历史上它试过日志总量 —— 被本地心跳骗过(假绿);
+    //     又试过日志类别 —— 健康的轮询根本不产生业务类日志(假红)。
+    //     唯一靠得住的是【计数器】:"成功读计数在涨"这件事没法伪造。
+    void onStatsTick();
     // ★ C.5:readFinished 也带 plcId(因为可能 N 个 driver 同时发 reply)
     void onDriverReadFinished(const QString& plcId, quint32 requestId, QVector<quint16> registers, bool success);
     // ★ 2026-10-10:变量被删/被替换 → 把上面四个容器里的指针全部清干净。
@@ -159,7 +214,19 @@ private:
     QSet<QString> hooked_;               // 已经接了 readFinished 的 plcId
     // ★ 2b:纯观测计数器,给"有没有重复连接"用。生产逻辑不读它。见 replyDispatchCount()。
     quint64 replyDispatchCount_ = 0;
+    // ★ 2026-10-21:轮询统计计数器(纯观测,生产逻辑不读它们)
+    //   发出 = 真正发出去的读请求帧数(合并后的)
+    //   成功 = 收到成功回包的次数
+    //   失败 = 收到失败回包的次数(异常响应/超时/帧太短)
+    quint64 pollSentCount_ = 0;
+    quint64 pollOkCount_ = 0;
+    quint64 pollFailCount_ = 0;
     QTimer timer_;                                       // 100ms tick
+    // ★ 2026-10-21:统计行的定时器(60s 一条)
+    //   【为什么不用 tick 计数代替】onTick 里有提前 return 的分支
+    //   (没有到期变量就直接返回),用 tick 计数会让统计行在"没事可做"时也不打,
+    //   而"没事可做"恰恰是最该被看见的状态。
+    QTimer statsTimer_;                                  // 60s 统计行
     QHash<Variable*, qint64> nextPollAtMs_;            // 下次轮询时刻(0 = 立即可发,>0 = 等到该时刻)
     // ★ IMPROVE-A7(2026-07-29):in-flight 状态独立用 QSet,替原来的 -1 magic number
     //   原代码 nextPollAtMs_[v] = -1 表示 in-flight,但 -1 跟"下次时间"语义混一起

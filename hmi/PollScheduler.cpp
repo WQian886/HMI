@@ -212,10 +212,23 @@ void PollScheduler::start() {
         hookDriver(it.key());
     }
     timer_.start();
+
+    // ★ 2026-10-21:统计行定时器(60s 一条)
+    //   【为什么单独一个 timer,不用 tick 计数】
+    //     onTick 里"没有到期变量"这一支会提前 return ——
+    //     用 tick 计数的话,"一个请求都没发"这种状态反而【没有统计行】,
+    //     而那正是最该被看见的状态(轮询卡住了 / 压根没连上)。
+    //   独立 timer 不受 onTick 分支影响:只要在跑,每 60 秒一定有一行。
+    if (!statsTimer_.isActive()) {
+        statsTimer_.setInterval(60000);
+        connect(&statsTimer_, &QTimer::timeout, this, &PollScheduler::onStatsTick);
+        statsTimer_.start();
+    }
 }
 
 void PollScheduler::stop() {
     timer_.stop();
+    statsTimer_.stop();   // ★ 2026-10-21:停了轮询就不再打统计行
     // ★ 2b:走 unhookDriver,顺带把 hooked_ 清空、running_ 落回 false。
     //   少了 running_ = false 这行,stop() 之后再 addDriver 会把连接接回来,
     //   stop() 就失去意义了(tst_IPollDriver 里约 7 条用例把它当拆解用)。
@@ -403,9 +416,73 @@ void PollScheduler::onTick() {
                     inFlight_.remove(v);              // 回滚在途标记
                     nextPollAtMs_[v] = now + 100;     // 100ms 后重试(与上面同节奏)
                 }
+            } else {
+                // ★ 2026-10-21:发出计数
+                //   【只数"真的发出去了"的】被拒收的(单 in-flight 防御拦下的)不算 ——
+                //   那种情况下一帧会重发,数进去会让"发出在涨"变成一句废话。
+                ++pollSentCount_;
             }
         }
     }
+}
+
+// ★ 2026-10-21:轮询统计行(INFO 级,每 60 秒一条)
+//
+//   【这一行是干什么的】
+//   它是长跑 harness 唯一的【不能被自己骗】的活体判据:
+//     "成功读计数在涨" —— 进程跟 PLC 之间确实有数据在流动。
+//   历史上试过的两种判据都骗过人:
+//     · 日志总量在长  → 被本地心跳撑住(假绿)
+//     · 业务类日志在长 → 健康的轮询根本不产生业务类日志(假红)
+//
+//   【格式为什么定成这样】
+//   字段用 键=值、中间空格分隔,是因为 harness 要用正则从中取数字:
+//     发出=123 成功=120 失败=3 在途=0 PLC=1
+//   改格式 = 改 harness,两边要一起改。harness 侧的正则在
+//   scripts/long_run.ps1 的 $rePollStats 里。
+//
+//   【★ 2026-10-21:这个格式曾经【对不上】,而且是程序这边在违反自己的文档】
+//   原来这里写的是:
+//     qCInfo(hmiPoll) << "[PollScheduler] 轮询统计:发出=" << pollSentCount_
+//                     << " 成功=" << pollOkCount_ ...
+//   而 QDebug 在【相邻两项之间插一个空格】—— 于是实际输出是
+//     轮询统计:发出= 271  成功= 271  失败= 0  在途= 0  PLC= 1  变量= 3
+//   等号后面多了一个空格,正好把 harness 的正则(要 "发出=123")顶掉。
+//   实测后果:长跑的启动自检等满 120 秒,一条统计行都没匹配上,
+//   判成"这一轮没资格跑"—— 而那 120 秒里程序一直在正常轮询
+//   (成功 271 次、失败 0 次)。判据坏掉的样子和程序坏掉的样子一模一样。
+//   ★ 更难受的是:判据自带的验证脚本(verify_soak6_liveness.ps1)
+//     用的是【它自己想象的格式】("发出=123",没空格),于是那个脚本一直绿。
+//     一个拿自己当参照的测试,证明不了它和现实对得上。
+//
+//   【现在的做法】
+//   把整行拼成【一个】字符串再输出 —— QDebug 就没有可插空隙的地方了,
+//   输出与上面那段注释写的格式【一字不差】。
+//   格式本身提成纯函数 PollScheduler::formatStatsLine(),
+//   由 tst_PollStatsFormat 钉住(harness 那边的正则也钉在同一个测试里)。
+//
+//   【为什么在途变量数也要打】
+//   2026-10-21 查出的那个根因,现场形态就是"在途变量数不为 0 且不再增长"
+//   —— 变量卡在在途态,永远等不到回包。把这个数打出来,一眼就能看见。
+QString PollScheduler::formatStatsLine(quint64 sent, quint64 ok, quint64 fail,
+                                        int inflight, int plcCount, int varCount) {
+    return QStringLiteral("[PollScheduler] 轮询统计:发出=%1 成功=%2 失败=%3 在途=%4 PLC=%5 变量=%6")
+        .arg(sent).arg(ok).arg(fail).arg(inflight).arg(plcCount).arg(varCount);
+}
+
+void PollScheduler::onStatsTick() {
+    const QString line = formatStatsLine(pollSentCount_, pollOkCount_, pollFailCount_,
+                                          static_cast<int>(inFlight_.size()),
+                                          static_cast<int>(drivers_.size()),
+                                          static_cast<int>(varMgr_->allVariables().size()));
+    // ★ 用 toUtf8(),不用 qPrintable()。
+    //   qPrintable 走的是 toLocal8Bit() —— 在中文 Windows 上那是 GBK,
+    //   "轮询统计"会变成乱码,而 harness 的正则是在【UTF-8 的日志行】上匹配的。
+    //   走 const char* 还有一个好处:QDebug 对 const char* 是【原样输出】的,
+    //   不会像 QString 那样自动加引号 —— 加了引号,行首的 "[" 就不再是第一个字符,
+    //   noiseRe 那个 ^\[ 的锚点会失配。
+    const QByteArray utf8 = line.toUtf8();
+    qCInfo(hmiPoll) << utf8.constData();
 }
 
 // ★ C.5(2026-09-18):readFinished 改签名带 plcId(因为可能 N 个 driver 同时发 reply)
@@ -426,12 +503,14 @@ void PollScheduler::onDriverReadFinished(const QString& plcId, quint32 requestId
 
     if (!success) {
         // 失败:全部标 Bad,等下一个 poll interval 再试
+        ++pollFailCount_;   // ★ 2026-10-21:失败计数(长跑 harness 的活体判据要用)
         for (Variable* v : batch) {
             v->setQuality(Variable::Quality::Bad);
             nextPollAtMs_[v] = now + v->pollIntervalMs();
         }
         return;
     }
+    ++pollOkCount_;   // ★ 2026-10-21:成功计数
 
     // 成功:按合并顺序分发到各 Variable
     int regIdx = 0;

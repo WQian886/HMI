@@ -390,6 +390,20 @@ add_test(NAME tst_SingleInstanceKey COMMAND tst_SingleInstanceKey)
 #   那种漏网的调用方在【没设覆盖】时完全看不出来。
 #   所以这条测试逐个点名 users.json / 审计日志 / 崩溃 dump / history.db / 日志目录。
 add_hmi_test(tst_Paths)
+# ★ 2026-10-21:轮询统计行的【两方契约】。
+#   2026-10-21 实测:长跑的启动自检等满 120 秒一条统计行都没匹配上,
+#   判成"没资格跑" —— 而那 120 秒里程序一直在正常轮询(成功 271 次、失败 0 次)。
+#   根因:程序打的 "发出= 271"(QDebug 在相邻两项之间插了空格)与判据要的
+#   "发出=271"对不上,而失配的表现是【判不出】,不是【判错】,最难发现。
+#   ★ 这个测试把 scripts/long_run.ps1 里的 $rePollStats 【原样读出来】,
+#     再去匹配程序【真的打出来的那一行】—— 一边改了另一边没改,这里立刻红。
+#   单独钉程序那一侧没用:两边照样能各改各的、一起漂走。
+#   (同 tst_MenuBar / tst_Theme 的理由:要路径宏读磁盘上的文件。)
+add_executable(tst_PollStatsFormat tst_PollStatsFormat.cpp)
+target_link_libraries(tst_PollStatsFormat PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_PollStatsFormat PRIVATE /utf-8)
+target_compile_definitions(tst_PollStatsFormat PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_PollStatsFormat COMMAND tst_PollStatsFormat)
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
 add_hmi_test(tst_TcpClient)
