@@ -14,6 +14,8 @@
 #include "history/AlarmHistoryView.h" // ★ F4(2026-10-08):报警历史查询视图(填 D.3 占位 tab)
 #include "alarm/AlarmRowPalette.h"   // ★ 2026-10-14:报警表配色的唯一权威(与运行时画布共用)
 #include "alarm/AlarmTablePresenter.h" // ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改/留多少行)
+#include "alarm/ActionWiring.h"      // ★ 2026-10-25:"报警→联动"那根接线的唯一出处
+#include "util/ValueCoercion.h"      // ★ 2026-10-25:值类型适配(联动值要转成变量声明的类型)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
 #include "widgets/NumberDisplay.h"
@@ -726,8 +728,18 @@ hmi::hmi(QWidget *parent)
     actionMgr_ = new ActionManager(this);
     actionMgr_->setVariableManager(varMgr_);  // ★ E #29(2026-09-15):按名查指针需要 varMgr
     initActionManager(speed);   // 阶段 5.6 收尾:集中 mapping 配置(speed 是构造函数局部变量)
-    connect(alarmMgr_, &AlarmManager::alarmTriggered,
-            actionMgr_, &ActionManager::onAlarmTriggered);
+    // ★ 2026-10-25:这根 connect 抽到 src/alarm/ActionWiring.h 了。
+    //   抽出来的理由跟 MenuBuilder / AlarmTablePresenter 一模一样:
+    //   写在 hmi.cpp 里的接线,测试只能【复制一份】跑 —— 测的是副本。
+    //   而"报警触发了但联动不执行"是这个模块上最严重的失效形态:
+    //   界面正常、报警正常响、审计正常记"已执行",而 PLC 一个字节都没收到
+    //   (从站那边 FC6/FC16 计数 = 0),现场只能靠猜。
+    //   24 小时长跑实测里,"温度高 → 速度写 0"(也就是"停机")
+    //   【真的 24 小时一次都没执行过】。
+    //   抽出来之后 hmi.cpp 和测试调的是同一个函数,测试绿了才说明生产也是绿的。
+    //   —— 顺带修掉 2026-10-25 那条真 bug:write_value 是 QVariant(Int),
+    //      写不进 UInt16 变量(严格 typeId 匹配),见 ActionManager.cpp:91-122。
+    qwhmi::alarm::bindActionToAlarms(alarmMgr_, actionMgr_);
 
     // ★ 阶段 6.3 onVariableReplaced connect 已删除(E #29):改为按名查,无需监听 variableReplaced 广播
 
@@ -2004,8 +2016,26 @@ void hmi::updateModbusLabel() {
 //   【参照】Wqian 2026-08-07 阶段 5.6 收尾拍板
 void hmi::initActionManager(Variable* speed) {
     // ★ E #29(2026-09-15):传变量名而不是裸指针(Mapping 已改存 QString)
-    actionMgr_->addMapping("温度高", speed->name(), 0);   // 温度 > 50 触发 → 速度 = 0(停机)
-    actionMgr_->addMapping("温度低", speed->name(), 0);   // 温度 < 10 触发 → 速度 = 0(停机)
+    //
+    // ★★ 2026-10-25:那个字面量 0 【不能再直接传给 addMapping】★★
+    //   C++ 字面量 0 → QVariant(Int),typeId = 2。
+    //   而 speed 的声明类型是 UInt16,Variable::setValue 要的是
+    //   QMetaType::UShort(36) —— 严格 typeId 相等,2 ≠ 36 → Rejected
+    //   → 不 markDirty → WriteScheduler 看不到它 → 【联动一次都没执行过】。
+    //   跟 JSON 那条路是同一个 bug、两个独立实例:
+    //     · JSON "write_value": 0 → QVariant(LongLong),typeId = 4
+    //     · C++ 字面量 0        → QVariant(Int),     typeId = 2
+    //   ActionManager 那侧现在有运行时适配兜底(util/ValueCoercion),
+    //   但【本项目既定的做法是在调用方适配】(tst_ControlBaseWrite.cpp:188
+    //   修过一次一模一样的 bug),所以这里也显式转好。
+    //   —— 而且这里转比在 ActionManager 里转【更早】:mapping 存的就是
+    //   已经对类型的值,连"写进工程文件"这条路也是对的
+    //   (Project::saveToFile 会把 mapping 的值原样写进 JSON)。
+    const QVariant stopValue =
+        qwhmi::util::coerceToDataType(QVariant(0), speed->dataType());
+
+    actionMgr_->addMapping("温度高", speed->name(), stopValue);   // 温度 > 50 触发 → 速度 = 0(停机)
+    actionMgr_->addMapping("温度低", speed->name(), stopValue);   // 温度 < 10 触发 → 速度 = 0(停机)
 }
 
 // ★ 阶段 6.2(2026-08-07):UI 保存按钮槽函数 → 调 project_->saveToFile

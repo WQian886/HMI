@@ -11,6 +11,13 @@
 #include "auth/AuditLog.h"
 #include "auth/CurrentUser.h"
 #include "auth/Permission.h"
+// ★ 2026-10-25:类型适配搬去共用模块了。
+//   原来这里有一份私有实现(文件下方的匿名 namespace),现在改成调
+//   util/ValueCoercion —— 因为 ActionManager 那条写路径需要同一份,
+//   而"各写一份"正是本项目反复出事的地方。
+//   ★ 那份私有实现里还藏着一个 typeId 碰撞的 bug(见 ValueCoercion.cpp 头部),
+//     搬过来的时候一并修掉了。
+#include "util/ValueCoercion.h"
 
 #include <QDir>
 #include <QHash>
@@ -76,62 +83,19 @@ QColor colorFromJson(const QJsonValue& v, const QColor& fallback) {
 
 // ★ E.1c:把控件传来的通用 QVariant 适配成 Variable 声明的精确类型
 //
-// 【为什么必须有】Variable::setValue 里的 matchesDataType(Variable.cpp:35-45)
-//   是【严格 typeId 相等】:Bool 只认 QMetaType::Bool,Float 只认 QMetaType::Float,
-//   double 一个都不认。但控件内部一律用 double 算 —— ToggleControl.cpp:68 的
-//   `value().toDouble() < 0.5`、SliderControl 的百分比、Gauge 的比例,全是 double。
-//   不适配的结果:每个开关、每个滑块点下去都被 Variable 静默拒绝 ——
-//   画面不动、PLC 不动,日志里只有一行 type mismatch。写回通道等于没接通。
+// ★ 2026-10-25:整段搬走了 —— 现在在 util/ValueCoercion.h/.cpp。
+//   【为什么搬】ActionManager 的联动写入需要同一份适配,而这份原来在
+//   本文件的匿名 namespace 里,别的模块够不着 → 只能再抄一份 → 必然漂移。
+//   (本项目同一个教训已经犯过两次:MenuBuilder、AlarmTablePresenter。)
 //
-// 【跟既有写路径一致】Binding.cpp:120-137 的 inline edit 同样做这个适配
-//   (按 dataType 分支 fromValue<qint16>/<quint16>/<qint32>/<float>),只是它
-//   在调用方做。这里放在 writeToPlc 是因为控件有 22 个派生类,散着做必漏。
-//
-// 【转不了就返回空 QVariant】调用方按"值非法"处理,跟 Rejected 走同一条路。
-QVariant coerceToDataType(const QVariant& v, Variable::DataType t) {
-    // 已经是对的类型就别动 —— 避免 float→float 之类无意义的往返丢精度
-    if (v.typeId() == static_cast<int>(t)) return v;
-
-    switch (t) {
-    case Variable::DataType::Bool: {
-        // 非 0 即真。QVariant::toBool 对字符串会按 "true"/非空 判断,
-        // 但变量值不会来自字符串(PLC 那边是寄存器),这里只处理数值/布尔
-        if (v.typeId() == QMetaType::QString) return {};
-        return QVariant::fromValue<bool>(v.toDouble() != 0.0);
-    }
-    case Variable::DataType::Int16: {
-        bool ok = false;
-        const qint64 n = v.toLongLong(&ok);
-        if (!ok || n < std::numeric_limits<qint16>::min()
-                 || n > std::numeric_limits<qint16>::max()) return {};
-        return QVariant::fromValue<qint16>(static_cast<qint16>(n));
-    }
-    case Variable::DataType::UInt16: {
-        bool ok = false;
-        const qint64 n = v.toLongLong(&ok);
-        // ★ 无符号:负数直接判非法,不静默回绕成 65535 —— 那会把 -1 写成 65535,
-        //   现场表现是"写个 -1 结果寄存器变最大正数",极难排查
-        if (!ok || n < 0 || n > std::numeric_limits<quint16>::max()) return {};
-        return QVariant::fromValue<quint16>(static_cast<quint16>(n));
-    }
-    case Variable::DataType::Int32: {
-        bool ok = false;
-        const qint64 n = v.toLongLong(&ok);
-        if (!ok || n < std::numeric_limits<qint32>::min()
-                 || n > std::numeric_limits<qint32>::max()) return {};
-        return QVariant::fromValue<qint32>(static_cast<qint32>(n));
-    }
-    case Variable::DataType::Float:
-        // toFloat 失败返回 0 且 ok=false,必须查 ok —— 否则用户输 "abc" 会静默写 0
-        if (v.typeId() == QMetaType::QString) {
-            bool ok = false;
-            const float f = v.toString().toFloat(&ok);
-            return ok ? QVariant::fromValue<float>(f) : QVariant();
-        }
-        return QVariant::fromValue<float>(v.toFloat());
-    }
-    return {};
-}
+// 【原来那份里的 bug,搬的时候修掉了】
+//   它写的是 `if (v.typeId() == static_cast<int>(t)) return v;` ——
+//   拿 QMetaType 的 id 跟 DataType 的【枚举序号】比,两套编号会撞车:
+//     DataType::UInt16(2) == QMetaType::Int(2)
+//   ⇒ 传 QVariant(Int) 给 UInt16 变量时,"已经是对的类型"会误判成立,
+//     原样返回 Int → Variable::setValue 还是拒收 → 适配静默失效。
+//   控件那边一直没事,是因为它传的是 double(Double 的 id 是 6,不撞)。
+//   详见 util/ValueCoercion.cpp 的文件头。
 } // namespace
 
 void ControlBase::registerControlType(const QString& typeName, FactoryFn factory) {
@@ -536,7 +500,7 @@ bool ControlBase::writeToPlc(const QVariant& v) {
     //   Variable::setValue 的 matchesDataType 是严格 typeId 相等(Variable.cpp:35-45),
     //   不适配就等于闸 4 永远在拦 —— 写回通道看着通着,实际什么都写不进去。
     //   适配本身转不了(字符串、溢出 UInt16 等)也算这一闸拒。
-    const QVariant typed = coerceToDataType(v, bound_->dataType());
+    const QVariant typed = qwhmi::util::coerceToDataType(v, bound_->dataType());
     if (!typed.isValid()) {
         qCWarning(qwhmi::auth::hmiPerm) << "[Control] 值" << v.toString()
                            << "无法适配成变量" << bound_->name() << "的数据类型";

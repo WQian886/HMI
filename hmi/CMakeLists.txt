@@ -110,6 +110,14 @@ set(SOURCES
     src/alarm/AlarmSoundDialog.cpp     # ★ F5:报警声音设置对话框
     src/alarm/AlarmRowPalette.cpp       # ★ 2026-10-14:报警行配色唯一权威(两套报警 UI 共用)
     src/alarm/AlarmTablePresenter.cpp   # ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改/留多少行)
+    # ★ 2026-10-25:"报警触发了要执行联动"这根接线的唯一出处。
+    #   抽出来是因为写在 hmi.cpp 里的接线只能被测试【复制一份】跑 ——
+    #   测的是副本。而"接线断了"在这个模块上最严重:
+    #   界面正常、报警正常响、审计记"已执行",而 PLC 一个字节都没收到。
+    src/alarm/ActionWiring.cpp
+    # ★ 2026-10-25:值类型适配(把"来路不明的 QVariant"转成变量声明的精确类型)
+    #   控件写回和报警联动共用这一份 —— 见 src/util/ValueCoercion.h 的文件头。
+    src/util/ValueCoercion.cpp
     # ★ 2026-10-19:变量配置对话框 —— 让变量 plcId 有 UI 入口(多 PLC 2b 的收尾缺口)
     src/plc/VariableConfigDialog.cpp
     # ★ 2026-10-10:协议下拉框"未实现"标注(置灰 + tooltip)
@@ -206,6 +214,8 @@ set(HEADERS
     src/alarm/AlarmSoundDialog.h      # ★ F5:报警声音设置对话框
     src/alarm/AlarmRowPalette.h        # ★ 2026-10-14:报警行配色唯一权威(纯函数,无 Q_OBJECT)
     src/alarm/AlarmTablePresenter.h   # ★ 2026-10-24:报警【行】的呈现(两套报警 UI 共用)
+    src/alarm/ActionWiring.h          # ★ 2026-10-25:"报警→联动"接线的唯一出处(两边共用)
+    src/util/ValueCoercion.h         # ★ 2026-10-25:值类型适配(控件写回 + 报警联动共用一份)
     # ★ 2026-10-10:协议下拉框"未实现"标注
     src/drivers/ProtocolAvailabilityUi.h
     src/history/AlarmHistoryView.h  # ★ F4:报警历史查询视图

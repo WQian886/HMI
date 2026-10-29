@@ -32,6 +32,10 @@ set(HMI_CORE_SOURCES
     #   Logging / AuditLog / UserStore / HistoryRecorder / CrashHandler
     #   现在都从它那儿拿目录(以前各算各的),所以它必须进 hmi_core。
     ${HMI_SRC_DIR}/src/util/Paths.cpp
+    # ★ 2026-10-25:util/ValueCoercion —— 值类型适配。
+    #   ControlBase(控件写回)和 ActionManager(报警联动)都要调它,
+    #   所以它必须进 hmi_core,否则链接不过。
+    ${HMI_SRC_DIR}/src/util/ValueCoercion.cpp
     # 阶段 A · A3 日志(UserManager 用 qCInfo/qCWarning)
     ${HMI_SRC_DIR}/src/logging/Logging.cpp
     # 阶段 B · B1 用户/角色/密码哈希
@@ -153,6 +157,11 @@ set(HMI_CORE_SOURCES
     #   原来两边各写一份,主画面那份【少写了状态列】,于是主画面报警表整张废了
     #   (状态列空白/确认无效/无配色/不闪烁/"确认"菜单恒灰)。
     ${HMI_SRC_DIR}/src/alarm/AlarmTablePresenter.cpp
+    # ★ 2026-10-25:"报警→联动"这根接线的唯一出处。
+    #   抽到共享模块是因为写在 hmi.cpp 里的接线只能被测试【复制一份】跑 ——
+    #   测的是副本(hmi.cpp 不在 hmi_core 里)。两边调同一个函数,
+    #   测试绿了才说明生产那根线也是通的。
+    ${HMI_SRC_DIR}/src/alarm/ActionWiring.cpp
     # ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
     #   逐个加:写完一个接线一个,避免文件还不存在就编不过
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
@@ -472,6 +481,23 @@ target_link_libraries(tst_WriteStatsFormat PRIVATE hmi_core Qt6::Test)
 target_compile_options(tst_WriteStatsFormat PRIVATE /utf-8)
 target_compile_definitions(tst_WriteStatsFormat PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_WriteStatsFormat COMMAND tst_WriteStatsFormat)
+# ★ 2026-10-25:报警联动的【写通路】端到端。
+#   24 小时长跑实测(soaks/20261021_164804)挖出来的:
+#     工程里配的"温度高 → 速度写 0"(也就是"停机")【24 小时一次都没执行过】。
+#     根因:write_value 的类型跟变量声明类型对不上 → setValue 返 Rejected
+#     → 不 markDirty → WriteScheduler 看不到它 → 从站 FC6/FC16 计数 = 0。
+#   而"界面正常、报警正常响、审计正常记'已执行'"—— 从站那边一个字节没收到。
+#
+#   ★ 不用 add_hmi_test:它有一条用例要读 hmi.cpp 源码文本
+#     (确认 hmi.cpp 真的调了共享接线函数),所以要 HMI_SRC_DIR_STRING。
+#     同 tst_Theme / tst_ModbusPanel 的理由。
+#   ★ 行为部分调的是【共享函数】qwhmi::alarm::bindActionToAlarms,
+#     不是自己 connect 一份 —— 抄一份就是"测副本"(BUGFIX-C3 的形状)。
+add_executable(tst_ActionWrite tst_ActionWrite.cpp)
+target_link_libraries(tst_ActionWrite PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_ActionWrite PRIVATE /utf-8)
+target_compile_definitions(tst_ActionWrite PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_ActionWrite COMMAND tst_ActionWrite)
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
 add_hmi_test(tst_TcpClient)
