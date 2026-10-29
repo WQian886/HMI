@@ -199,6 +199,19 @@ private:
     //   改之前是"全局一个在途"(onTick 开头判一次 pendingCount)。
     //   多 PLC 之后全局一个在途等于：一台卡住的 PLC 会让另外两台也停写。
     QHash<QString, int> inflightPerPlc_;
+    // ★ BUGFIX-D1(2026-10-26):requestId → 【发出时】写出去的值。
+    //   【为什么必须记下来】
+    //     审计条目里的 newValue 以前是在【reply 时刻】现取 v->value()。
+    //     而写挂起的那 100ms 里,一次轮询回包就可能把本地值冲掉
+    //     (PollScheduler 那边的同一个 bug,已修)。
+    //     于是审计会记下一个【不是发出去的那个值】——
+    //     事故复盘时唯一的证据写着"写了 100",而线上跑的是 0。
+    //   【跟 pendingPlcId_ 同一个道理】
+    //     那边记 plcId 是因为"变量在途时可能被改归属";这边记值是因为
+    //     "变量在途时本地值可能被改"。两个字段是同一个教训的两面。
+    //   【为什么不回头问 v->value()】
+    //     因为审计要记的是【实际传输的那一帧】,不是"回复时本地长什么样"。
+    QHash<quint32, QString> pendingSentValue_;
     // ★ IMPROVE-A2(2026-07-29):quint32 防回绕。进程内全局唯一,理由见头注释 ①。
     quint32 nextReqId_ = 1;                            // 请求 id 自增
     QList<WriteAuditEntry> auditLog_;                  // 阶段 4.x 写审计日志

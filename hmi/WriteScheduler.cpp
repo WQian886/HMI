@@ -58,6 +58,7 @@ void WriteScheduler::stop() {
     hooked_.clear();
     pending_.clear();
     pendingPlcId_.clear();
+    pendingSentValue_.clear();   // ★ BUGFIX-D1(2026-10-26):跟另外两个一起清
     inflightPerPlc_.clear();
     qCDebug(hmiWrite) << "[WriteScheduler] 停止";
 }
@@ -199,6 +200,19 @@ void WriteScheduler::onTick() {
         QVector<quint16> payload;
         if (!buildWritePayload(v, &area, &payload)) continue;
 
+        // ★ BUGFIX-D1(2026-10-26):把【发出时】的值记下来。
+        //   【为什么记在这一行,而不是 sendWriteRequest 之后】
+        //     buildWritePayload 刚刚读过 v->value() 并把它编进了 payload ——
+        //     这一行读到的就是【真的会被发出去的那个值】。
+        //     放在发送之后再取,理论上存在一个空隙:那期间本地值可能又变了
+        //     (理论上不会,但那正是这条守卫要防的事,自己别踩)。
+        //   【为什么必须记】
+        //     审计条目以前是在 reply 时刻现取 v->value() —— 而写挂起的那 100ms 里,
+        //     一次轮询回包就可能把本地值冲掉(PollScheduler 那边同一个 bug,已修),
+        //     于是审计记的是【另一个值】:复盘时唯一的证据写着"写了 100",
+        //     而 PLC 上跑的是 0。跟 pendingPlcId_ 同一个道理,详见 .h 里的注释。
+        const QString sentValue = v->value().toString();
+
         // ★ slaveId 从 provider 取。改之前是字面量 1。
         const int slaveId = provider_->slaveIdFor(plcId);
 
@@ -213,7 +227,7 @@ void WriteScheduler::onTick() {
                  << "plc=" << plcId
                  << "slaveId=" << slaveId
                  << "addr=0x" << QString::number(v->address(), 16).toUpper()
-                 << "value=" << v->value().toString()
+                 << "value=" << sentValue
                  << "reqId=" << reqId;
 
         // ★ 关键顺序:【先发,后登记】。
@@ -233,6 +247,7 @@ void WriteScheduler::onTick() {
 
         pending_[reqId] = v;
         pendingPlcId_[reqId] = plcId;
+        pendingSentValue_[reqId] = sentValue;
         inflightPerPlc_[plcId] = inflightPerPlc_.value(plcId) + 1;
         // ★ 这里【不】 break。每台 PLC 每帧只发一个,靠的是循环结构本身:
         //   循环体是"按 plcId 走一遍",同一个 plcId 一帧只被访问一次,
@@ -252,6 +267,10 @@ void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
     //   【不】只在找到变量时才减。否则变量被删了(QPointer 置空),
     //   那个 PLC 的在途计数就永远降不下来 → 那台 PLC 从此再也不写任何东西。
     const QString plcId = pendingPlcId_.take(requestId);
+    // ★ BUGFIX-D1(2026-10-26):摘出【发出时】的值(跟 plcId 一起摘,同一个道理)。
+    //   注意 take 要【无条件】做 —— 变量在途时被删了(QPointer 置空)也一样,
+    //   否则这个条目会永远留在哈希里。
+    const QString sentValue = pendingSentValue_.take(requestId);
     if (!plcId.isEmpty()) {
         const int n = inflightPerPlc_.value(plcId) - 1;
         if (n > 0) inflightPerPlc_[plcId] = n;
@@ -274,7 +293,8 @@ void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
     if (success) {
         v->clearDirty();
         v->clearWriteFail();  // ★ IMPROVE-A4(2026-07-29):成功后清失败计数
-        qCDebug(hmiWrite) << "[Write] OK:" << v->name() << "=" << v->value().toString()
+        // ★ BUGFIX-D1(2026-10-26):打【发出时】的值,不是 reply 时刻的 v->value()
+        qCDebug(hmiWrite) << "[Write] OK:" << v->name() << "=" << sentValue
                           << "(plc=" << v->plcId() << ")";
     } else {
         // ★ IMPROVE-A4(2026-07-29):失败累加,达到上限报警 + 清 dirty(工业铁律)
@@ -290,7 +310,7 @@ void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
             emit writeFailedOnPlc(plcId, v->name(), reason);   // ★ 2b 新增
         } else {
             qWarning() << "[Write] FAIL:" << v->name()
-                       << "=" << v->value().toString()
+                       << "=" << sentValue
                        << "(plc=" << plcId << ","
                        << v->writeFailCount() << "/" << kMaxWriteRetries << " 保留 dirty)";
         }
@@ -300,7 +320,12 @@ void WriteScheduler::onWriteReply(quint32 requestId, bool success) {
     WriteAuditEntry e;
     e.timestamp    = QDateTime::currentDateTime();
     e.variableName = v->name();
-    e.newValue     = v->value().toString();
+    // ★ BUGFIX-D1(2026-10-26):记【发出时】的值,不是 reply 时刻现取的 v->value()。
+    //   写挂起的那 100ms 里轮询回包可能把本地值冲掉,
+    //   那样审计记的就是一个【没发出去】的值 —— 复盘时唯一的证据是假的。
+    //   sentValue 为空只可能是"这个 reqId 不是我们发的"(未知 reqId),
+    //   那条路径上面已经 return 了,走不到这里。
+    e.newValue     = sentValue;
     e.success      = success;
     e.address      = QString("0x%1").arg(v->address(), 4, 16, QChar('0')).toUpper();
     QString failSuffix;

@@ -559,9 +559,64 @@ void PollScheduler::onDriverReadFinished(const QString& plcId, quint32 requestId
                 break;
             }
         }
-        // ★ IMPROVE-A6(2026-07-29):PLC 读路径不查范围(原始寄存器值可能超工程值)
-        //   返 NoChange 时也继续推进 quality=Good + nextPollAt(只是没 emit valueChanged)
-        v->setValue(val, false);
+        // ★ BUGFIX-D1(2026-10-26):PLC 读回【不许】覆盖"待写"的值
+        //
+        //   【它挡的是什么】
+        //     联动 / 控件反向写 / 行内编辑这三条写路径都是同一个形状:
+        //       setValue(新值) → markDirty → 等 WriteScheduler 下一拍(100ms)发出去
+        //     而 PollScheduler 每 100ms 也轮询【同一个变量】——
+        //     轮询的筛选条件里【没有 isDirty】(onTick 第三圈只查
+        //     isDerived / alwaysPoll / activeVariables / inFlight),
+        //     所以 ReadWrite 变量【同时在读列表和写列表里】。
+        //     于是存在这个窗口:
+        //       ① 动作把 Speed 设成 0 并标脏
+        //       ② 轮询回包到,带着【旧值 100】
+        //       ③ 原来这里无条件 v->setValue(100) → 刚写的 0 被冲掉
+        //       ④ WriteScheduler 下一拍【现取 v->value()】→ 发出去的是 100
+        //     现场表现:"界面显示停机成功、审计记着写了 0,PLC 上跑的还是老转速"。
+        //     而长跑工程里那条联动正是"温度高 → 速度写 0"(停机)。
+        //
+        //   【为什么这不是"读回的新值更可信"】
+        //     读回的是【PLC 里的值】,我们要保护的是【我们刚要求 PLC 变成的值】。
+        //     在写真正发出去之前,PLC 里的值【本来就】还是旧的 ——
+        //     读回来覆盖它是【必然】的,不是意外。
+        //     写成功之后 PLC 里的值就等于我们写的值了,下一帧读回来自然一致。
+        //     所以"写挂起的这段时间里不许读回覆盖"是对的,不是将就。
+        //
+        //   【为什么条件里要带 access() == ReadWrite】
+        //     WriteScheduler::onTick 只发 ReadWrite 的变量(见 WriteScheduler.cpp:150),
+        //     所以【只有】ReadWrite 变量的 dirty 才真的意味着"有一笔写要发出去"。
+        //     而 ActionManager 不检查 access(它对任何变量都 setValue + markDirty),
+        //     联动如果配了一个只读变量,那个变量会被标脏却【永远不会被写出去】——
+        //     那种情况下挡住读回,画面上那个值会【永久停在联动写的值上】,
+        //     跟 PLC 里的真实值永远对不上。
+        //     所以这里只保护"真的要写出去"的变量;ReadOnly 的照常被读回覆盖
+        //     (保持改动前的行为,不顺手引入一个新的"值永远不刷新"故障)。
+        //
+        //   【★ 只跳过 setValue,别的【照做】 ★】
+        //     ★ setQuality(Good) 必须照做:quality 说的是"链路通不通",
+        //       不是"这个值是不是刚读回来的"。跳过它会把变量标成 Bad,
+        //       而 ThresholdAlarmChecker::onRawRead 头一行就查 quality == Good
+        //       —— 跳过 = 整个报警系统对这个变量【彻底哑掉】。
+        //     ★ emit rawRead(v, raw) 必须照做:报警系统【整个】跑在 rawRead 上,
+        //       它看的是原始寄存器值,不是 v->value()
+        //       (见 ThresholdAlarmChecker.cpp:135)。
+        //       跳过它 = 报警不再触发 —— 而报警正是联动的触发源。
+        //     ★ nextPollAtMs_ 必须照做:不推进的话这个变量【立刻】会被再轮询一次,
+        //       变成"每帧都发一帧读请求",把总线打满。
+        const bool writePending = v->isDirty() && v->access() == Variable::Access::ReadWrite;
+        if (writePending) {
+            // ★ 用 DEBUG 不用 INFO:这个事件在正常写流程里【本该】发生,
+            //   而且"写一直挂着"的情况下它会每 100ms 重复一次 ——
+            //   INFO 级别写文件会一天写几十万行。
+            //   要看它就把 hmi.poll 调到 DEBUG。
+            qCDebug(hmiPoll) << "[PollScheduler] 变量" << v->name()
+                 << "有待写的值,跳过本次读回覆盖(本地值保留,等写出去)";
+        } else {
+            // ★ IMPROVE-A6(2026-07-29):PLC 读路径不查范围(原始寄存器值可能超工程值)
+            //   返 NoChange 时也继续推进 quality=Good + nextPollAt(只是没 emit valueChanged)
+            v->setValue(val, false);
+        }
         v->setQuality(Variable::Quality::Good);
         // ★ 阶段 5.3+ 修 Bug #3(2026-08-05):emit 原始 register 给 AlarmChecker
         //   emit 在 setValue 之后,raw 还是原始 register(不是过滤后的 val)

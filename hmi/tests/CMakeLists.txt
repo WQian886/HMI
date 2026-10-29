@@ -369,6 +369,51 @@ add_hmi_test(tst_AuditE2E)
 add_hmi_test(tst_ProjectSchema)
 # 阶段 C · C.1 协议抽象层
 add_hmi_test(tst_IPollDriver)
+# ★ 2026-10-21:BUGFIX-C1 回归 —— "从站失败之后应用必须还能继续轮询"
+#   2026-10-21 查"16.5 小时零轮询流量"查到的根因:协议级失败不发 readFinished,
+#   而 PollScheduler 清 inFlight_ 的唯一入口就是 readFinished
+#   ⇒ 一次失败,那台 PLC 就再也收不到任何读请求,而且日志里一声不吭。
+#   改之前这条路径【一次都没被测过】(它压根不产生可观测信号),
+#   现在用自己写的最小从站把它钉成断言。
+add_hmi_test(tst_ModbusFailureRecovery)
+# ★ 2026-10-21:写响应的 echo 地址必须真的跟请求比对。
+#   改之前 ModbusMaster::handleWriteResponse 里那行是
+#   `echoAddr != quint16(req->reply ? /*addr 通过 reply 拿*/0 : 0)` ——
+#   三元两分支【都是 0】,占位从没填上,于是它判的其实是 "echoAddr != 0"。
+#   后果:每一次正常的写都被报成"不一致"(内容是假的,qCDebug 默认还不落盘),
+#   而"回包地址恰是 0"这种真的不一致反而一声不吭。
+#   ★ 这个测试自己开一个按 Modbus 协议现写的从站(不跟被测代码共享逻辑),
+#     回什么地址由用例显式指定 —— 免得变成"自己拿自己当参照"。
+add_hmi_test(tst_ModbusEchoAddress)
+# ★ 2026-10-26:写【排队】,不再跟读抢那个在途槽。
+#   2026-10-26 短跑实测(soaks/sweep_m85)挖出来的:
+#     604 次写尝试全部被拒、0 帧到达从站,而 547 次读全部成功;
+#     写被拒到读回包到达平均只隔 2.18 ms(94.2% 在 5 ms 内)。
+#     而同样配置的另外六轮写一次都没被拒 —— 决定成败的是两个 100ms
+#     节拍的【启动相位差】,它一辈子不变 ⇒ 开机掷一次硬币,
+#     掷到坏的那一面 24 小时一个字节都写不出去。
+#   ★ 危险的地方在于:读照常成功 ⇒ 长跑的活体判据照样绿
+#     ⇒ 只有【从站那侧收到的字节】才能抓住它,应用日志和读计数都抓不住。
+add_hmi_test(tst_ModbusWriteQueue)
+# ★ 2026-10-23:单 in-flight 限流【不得】被当成错误。
+#   这条钉的是一个已经造成过 P0 的契约(2026-10-23 修的 G-11):
+#   Modbus 协议串行,onTick 一个 tick 连发多帧时第 2 帧起必然撞上限流。
+#   限流是【内部调度细节】不是错误 —— 它一旦 emit errorOccurred,
+#   在 hmi.cpp 那边就变成「改状态 Failed + 弹模态 QMessageBox」,
+#   于是任何【地址不连续】的工程第一次轮询之后永久停摆,而全程零告警。
+#   ★ 为什么以前 92 条用例全绿也没抓到:调度器层的回滚是用【假 driver】测的,
+#     假 driver 上方没有 hmi.cpp —— 没有任何一条用例穿过 errorOccurred 这根线。
+#   不用 add_hmi_test:它要 HMI_SRC_DIR_STRING 读 hmi.cpp 源码文本
+#   (UI 层的弹窗守卫没法在进程内断言 —— QMessageBox 是模态阻塞的,
+#    弹出来测试自己就卡住了,跟现场同一个坑)。
+add_executable(tst_ThrottleNotAnError tst_ThrottleNotAnError.cpp)
+target_link_libraries(tst_ThrottleNotAnError PRIVATE
+    hmi_core
+    Qt6::Test
+)
+target_compile_options(tst_ThrottleNotAnError PRIVATE /utf-8)
+target_compile_definitions(tst_ThrottleNotAnError PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_ThrottleNotAnError COMMAND tst_ThrottleNotAnError)
 # ★ 2026-10-21:单实例键可指定 —— "不动上一轮长跑"方案的地基。
 #   不用 add_hmi_test:SingleInstance.cpp 不在 hmi_core 里
 #   (主工程那边是靠 GLOB 兜底捡进去的,测试工程是显式列表),
@@ -404,6 +449,24 @@ target_link_libraries(tst_PollStatsFormat PRIVATE hmi_core Qt6::Test)
 target_compile_options(tst_PollStatsFormat PRIVATE /utf-8)
 target_compile_definitions(tst_PollStatsFormat PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_PollStatsFormat COMMAND tst_PollStatsFormat)
+# ★ 2026-10-27:写侧统计行的【两方契约】。
+#   SOAK-W(写侧闸)量的是程序自己报出来的写侧统计行 ——
+#   读侧活着不代表写能落地:BUGFIX-E1 修之前是"读 547 次全成功、
+#   写 604 次全被拒、0 帧到达从站",而当时的活体判据(SOAK-6)【只看读】。
+#
+#   ★ 这条比轮询统计那条【更要紧】,因为写侧统计有 17 个字段:
+#     判据会把它们【分开算】(恒等式①用已发出/成功/失败/在途写,
+#     恒等式②用排队/排队发出/排队作废/在队)——
+#     取错一格 ⇒ 恒等式必然残差 ⇒ 判据【看着绿、其实在量错东西】。
+#     而"看着绿"比"判红"危险得多。
+#   ★ 所以这个测试除了"能不能匹配上",还要钉"取出来的数【逐个】对不对得上"。
+#   ★ 方法同 tst_PollStatsFormat:把 scripts/long_run.ps1 里的 $reWriteStats
+#     【原样读出来】,两边【物理上】就是同一份,漂不了。
+add_executable(tst_WriteStatsFormat tst_WriteStatsFormat.cpp)
+target_link_libraries(tst_WriteStatsFormat PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_WriteStatsFormat PRIVATE /utf-8)
+target_compile_definitions(tst_WriteStatsFormat PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_WriteStatsFormat COMMAND tst_WriteStatsFormat)
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
 add_hmi_test(tst_TcpClient)

@@ -45,10 +45,16 @@ public:
 
     // ★ 2b(2026-10-19):模仿 ModbusMaster 的单 in-flight 拒收。
     //   默认 false = 原来的老行为(pendingCount 恒 0、从不拒收),20 条老用例不受影响。
-    //   打开后行为与 ModbusMaster.cpp:231-237 一致:
-    //     上一帧未完成 → 【拒收】+ 只 emit errorOccurred,【不发 readFinished】。
+    //   打开后行为与 ModbusMaster.cpp 的限流分支一致:
+    //     上一帧未完成 → 【拒收】+ 【不发 readFinished】。
     //   不照抄这个行为就测不出 BUG-2(地址不连续的变量永久卡住),
     //   因为那个 bug 的成因正是"拒收的那几帧永远等不到 readFinished"。
+    //
+    //   ★★ 2026-10-23:限流【不再 emit errorOccurred】(产品那边同步改了)——
+    //     它是内部调度细节,不是错误。曾经它在 hmi.cpp 被接到
+    //     "改状态 Failed + 弹模态框",于是任何一个地址不连续的工程
+    //     都在第一个 tick 弹一个框、轮询永久停摆、日志零告警。
+    //     详见 ModbusMaster.cpp 限流分支那里的长注释。
     bool serialInFlight = false;
     // 回包内容用"请求的地址"填充 —— 不这样就没法证明"三组变量各自都轮到了":
     //   全用同一个 nextReplyRegisters 的话,哪怕调度器只轮询了第一组,
@@ -71,9 +77,18 @@ public:
     // ★ 2b(2026-10-19):返回"是否被接收",与 ModbusDriver 同形。
     //   false = 已拒绝,【不会】来 readFinished —— PollScheduler 必须回滚。
     bool sendReadRequest(const ReadRequest& req) override {
-        // ★ 与 ModbusMaster.cpp:233-237 同形:拒收 + 只报错,不回 readFinished
+        // ★ 与 ModbusMaster.cpp 的单 in-flight 限流同形:拒收 + 不回 readFinished。
+        //
+        // ★★ 2026-10-23:【不再 emit errorOccurred】—— 跟产品同步改的 ★★
+        //   【为什么测试替身必须跟着产品改】
+        //     原来这里发 errorOccurred,而真实 ModbusMaster 当时也发。
+        //     2026-10-23 那次把产品改成 qCDebug(限流是内部调度细节,不是错误),
+        //     如果替身留在旧行为上,这个 double 就【不再复刻产品】——
+        //     而"替身和产品分叉"正是本仓库反复吃亏的形状:
+        //     代码读起来完全正常,测出来的东西却跟现场不是一回事。
+        //   留一条 errorOccurred 在替身里,任何"错误会不会冒到 UI"的断言
+        //   都会拿到一个产品根本不会给的信号。
         if (serialInFlight && serialInflight_ > 0) {
-            emit errorOccurred(QStringLiteral("上一帧未完成,稍后再发"));
             return false;
         }
         lastReadReq = req;
