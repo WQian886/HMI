@@ -65,6 +65,36 @@ const char* levelName(QtMsgType t) {
     return "?    ";
 }
 
+// ★★★ 2026-10-26(BUGFIX-C6):严重程度排名 —— 【不要直接比 QtMsgType 的数值】★★★
+//
+//   【实测出来的真 bug(Qt 6.8.3)】
+//     QtMsgType 的枚举值【不是按严重程度排的】:
+//       QtDebugMsg=0  QtWarningMsg=1  QtCriticalMsg=2  QtFatalMsg=3  QtInfoMsg=4
+//     —— Info 是【后加上去的】,数值比 Fatal 还大。
+//     于是 handler 里 `if (type < effLevel) return;` 这种直接比数值是错的:
+//     默认级别(=QtInfoMsg=4)会把 Warning(1)/Critical(2)/Fatal(3)
+//     【全部丢掉】。
+//
+//   【后果:整个应用一条告警都写不进日志】
+//     实测:24 小时长跑的两份日志共 2918 行,WARN 行数 = 0 ——
+//     连启动期那条"[协议可用性] S7 尚未实现"这种固定会出现的告警都没有。
+//     而【联动失败】的告警恰恰在这一档:
+//       "报警响了、界面正常、审计记着已执行、PLC 一个字节没收到",
+//       现场能看到的线索被滤掉了 —— 只能靠猜。
+//     这也是本次负向对照里"变异后日志一声不吭"的真正原因:
+//     告警【发出去了】,被【过滤掉了】。
+//
+//   【改法】
+//     比【严重程度排名】,不比 QtMsgType 数值。
+//     排名的定义就是本项目日志里显示的那一档(DEBUG/INFO/WARN/CRIT/FATAL)。
+//
+//   【为什么不用 Qt::LoggingSeverity / qInstallMessageHandler 的别的机制】
+//     Qt 自己的 QLoggingCategory 也有同样的问题(它的 minLevel 比的是数值),
+//     那是 Qt 的事;本项目自己的 handler 自己比,就得自己比对。
+//
+// ★ 本函数的定义在【文件末尾、匿名 namespace 之外】——
+//   它要能被测试直接断言,所以不能藏在匿名 namespace 里。
+
 QtMsgType parseLevel(const QString& s) {
     const QString u = s.trimmed().toUpper();
     if (u == "DEBUG")                              return QtDebugMsg;
@@ -111,7 +141,10 @@ void messageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString
             effLevel = it.value();
         }
     }
-    if (type < effLevel) return;
+    // ★ 2026-10-26:比【严重程度排名】,不是比 QtMsgType 数值。
+    //   QtMsgType 的数值不是按严重程度排的(QtInfoMsg=4 比 QtFatalMsg=3 还大),
+    //   直接比会把 Warning/Critical/Fatal 全部丢掉 —— 详见 severityRank()。
+    if (severityRank(type) < severityRank(effLevel)) return;
 
     const QString ts  = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
     const QString cat = ctx.category ? QString::fromLatin1(ctx.category) : QStringLiteral("hmi");
@@ -209,6 +242,31 @@ Config loadConfig() {
 void applyConfig(const Config& cfg) {
     QMutexLocker lock(&g_state.mutex);
     g_state.config = cfg;
+}
+
+// ★★★ 2026-10-26:严重程度排名(公开 API,见 Logging.h 的说明)★★★
+//
+//   ★ 【实测(Qt 6.8.3)】QtMsgType 的枚举值【不是按严重程度排的】:
+//       QtDebugMsg=0  QtWarningMsg=1  QtCriticalMsg=2(=QtSystemMsg)  QtFatalMsg=3  QtInfoMsg=4
+//     —— Info 是后加的,数值比 Fatal 还大。
+//     所以直接比 QtMsgType 数值会把告警全丢掉(默认级别=Info=4)。
+//
+//   【为什么放在匿名 namespace 之外】
+//     测试要能直接断言"排名顺序是对的",而不只是间接看某行有没有落盘。
+//
+//   【QtSystemMsg 的处理】
+//     它的枚举值【跟 QtCriticalMsg 一样】(都是 2)—— 写两个 case 会编译报错
+//     (error C2196: case 值"2"已使用)。所以只能留一个。
+//     留着 Critical、去掉 System:两者数值相同,switch 本来也只会走同一个分支。
+int severityRank(QtMsgType t) {
+    switch (t) {
+    case QtDebugMsg:    return 0;
+    case QtInfoMsg:     return 1;
+    case QtWarningMsg:  return 2;
+    case QtCriticalMsg: return 3;   // QtSystemMsg 数值相同(=2),见上面的说明
+    case QtFatalMsg:    return 4;
+    }
+    return 1;   // 未知级别按 Info 处理 —— 【宁可多写,不可静默丢掉告警】
 }
 
 } // namespace qwhmi::logging

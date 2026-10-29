@@ -43,6 +43,26 @@ Config loadConfig();
 void applyConfig(const Config& cfg);
 QString logDirectory();
 
+// ★★★ 2026-10-26(BUGFIX-C6):严重程度排名 ★★★
+//
+//   【为什么单独暴露出来】
+//     Qt 的 QtMsgType 枚举【不是按严重程度排的】(实测 Qt 6.8.3):
+//       QtDebugMsg=0  QtWarningMsg=1  QtCriticalMsg=2  QtFatalMsg=3  QtInfoMsg=4
+//     —— Info 是【后加上去的】,数值比 Fatal 还大。
+//     handler 里直接比数值(`if (type < effLevel) return;`)会把
+//     Warning/Critical/Fatal 【全部丢掉】—— 整个应用一条告警都写不进日志。
+//     实测:24 小时长跑的两份日志共 2918 行,WARN 行数 = 0。
+//
+//   【契约】返回【严重程度】排名,不是 QtMsgType 数值:
+//     Debug(0) < Info(1) < Warning(2) < Critical(3) < Fatal(4)
+//   比较日志级别一律用这个,不要用 QtMsgType 的数值。
+//
+//   【为什么暴露成公开 API】
+//     测试要能直接断言"排名是对的这个顺序",而不只是间接地
+//     "看某行有没有出现在日志里"。间接断言有个盲区:
+//     Fatal 一旦真打出来,进程就结束了 —— 那一档没法用间接法测。
+int severityRank(QtMsgType t);
+
 } // namespace qwhmi::logging
 
 Q_DECLARE_LOGGING_CATEGORY(hmiApp)

@@ -71,6 +71,11 @@ private slots:
     //   它同时也是"归类到底做完了没有"的旁证。
     void unclassifiedQDebug_ignoresCategoryConfig();
 
+    // ----★★ 告警级别必须真的写得进去(2026-10-26 修的真 bug 的回归钉子)★★
+    //   见下面那条用例的长注释。★ 这条是"应用是不是在告警上瞎了"的守门人。★
+    void warningLevel_mustSurviveInfoDefault();
+    void everyLevelAboveDefault_mustBeWritten();
+
 private:
     QTemporaryDir m_dir;
     QString readLog() const;
@@ -327,6 +332,120 @@ void tst_LoggingCategory::unclassifiedQDebug_ignoresCategoryConfig() {
     QVERIFY(readLog(&log, "unclassifiedQDebug(恢复)"));
     QVERIFY2(log.contains("TC-MARKER-G"),
              "默认级别已是 Debug,裸 qDebug 仍不写 —— handler 判定逻辑有问题");
+
+    resetToDefault(m_dir.path());
+}
+
+// ============================================================================
+//  ★★★ 2026-10-26:告警级别必须真的写得进去 ★★★
+//
+//  【这是什么 bug】
+//    Qt 的 QtMsgType 枚举【不是按严重程度排的】(实测 Qt 6.8.3):
+//      QtDebugMsg=0  QtWarningMsg=1  QtCriticalMsg=2  QtFatalMsg=3  QtInfoMsg=4
+//    —— Info 是【后加上去的】,数值比 Fatal 还大。
+//    而 handler 里原来写的是 `if (type < effLevel) return;`,【直接比数值】。
+//    默认级别 = QtInfoMsg(=4) ⇒ Warning(1)/Critical(2)/Fatal(3)
+//    【全部被丢掉】—— 整个应用一条告警都写不进日志。
+//
+//  【后果:不是"日志不好看",是"现场没线索"】
+//    实测:24 小时长跑的两份日志共 2918 行,WARN 行数 = 0 ——
+//    连启动期那条"[协议可用性] S7 尚未实现"这种固定会出现的告警都没有。
+//    而"报警→联动"失败的告警恰恰在这一档:
+//      界面正常、报警正常响、审计记着"已执行"、PLC 一个字节都没收到,
+//      而能指出这件事的那条日志被【过滤掉了】。
+//    这次负向对照里"变异后日志一声不吭",根因就在这里 ——
+//    告警【发出去了】,被【滤掉了】。
+//
+//  【为什么这条测试以前没有抓住】
+//    以前的用例只测【类别级抑制】,而且全部用 qCDebug 打 marker。
+//    Debug 是【最低】的一档,任何 effLevel 都放行它 ——
+//    也就是说:哪怕把整个过滤逻辑写反了,那些用例照样全绿。
+//    ★ 这就是"绿色的测试不一定有效"的又一个实例。★
+//
+//  【负向对照】
+//    把 severityRank() 改回直接比数值,本文件必须【变红】。
+// ============================================================================
+
+void tst_LoggingCategory::warningLevel_mustSurviveInfoDefault() {
+    // 【前提】默认级别就是 Info —— 这是 Config{} 的默认值,
+    //   也是生产环境实际跑的那一档(没有 hmi.json 时用它)。
+    Config c;
+    c.directory    = m_dir.path();
+    c.defaultLevel = QtInfoMsg;
+    applyConfig(c);
+
+    // Info 应当写得进去(这是基准:说明日志没整体挂)
+    qCInfo(hmiAlarm) << "TC-SEV-INFO-应当出现";
+    // ★ 关键这一条:Warning 严格高于 Info,必须写得进去 ★
+    qCWarning(hmiAlarm) << "TC-SEV-WARN-应当出现";
+
+    QString log;
+    QVERIFY2(readLog(&log, "warningLevel_mustSurviveInfoDefault"),
+             "见上面 qCritical —— 读不到日志内容,后面两条断言全是假绿");
+
+    QVERIFY2(log.contains("TC-SEV-INFO-"),
+             "Info 级别的行都没写进去 —— 日志整体挂了,不是过滤逻辑的问题");
+    QVERIFY2(log.contains("TC-SEV-WARN-"),
+             "★ defaultLevel=Info 时,Warning 级别的日志被丢掉了 ★\n"
+             "  根因:QtMsgType 的数值不是按严重程度排的(QtInfoMsg=4 > QtWarningMsg=1),\n"
+             "  handler 直接比数值 ⇒ 所有告警(Critical/Fatal 更不用说)全部消失。\n"
+             "  后果:现场出问题时,唯一能指出问题的告警【写不进日志】。\n"
+             "  这不是日志不好看,是【应用在告警上瞎了】。");
+}
+
+void tst_LoggingCategory::everyLevelAboveDefault_mustBeWritten() {
+    // ---- 第一段:直接断言【排名顺序】本身 ----
+    //   这一段能覆盖 Fatal 那一档:真打 qCFatal 会让进程结束,
+    //   间接法("看这行有没有落盘")测不了它。
+    QVERIFY2(severityRank(QtDebugMsg) < severityRank(QtInfoMsg),
+             "严重程度排名:Debug 必须在 Info 之下");
+    QVERIFY2(severityRank(QtInfoMsg) < severityRank(QtWarningMsg),
+             "★ 严重程度排名:Info 必须在 Warning 之下 ★\n"
+             "  这一条就是本次那个 bug 的核心断言 —— QtMsgType 的【数值】\n"
+             "  不是严重程度(QtInfoMsg=4 比 QtWarningMsg=1 还大),\n"
+             "  拿数值当严重程度用,默认级别=Info 就把告警全丢了。");
+    QVERIFY2(severityRank(QtWarningMsg) < severityRank(QtCriticalMsg),
+             "严重程度排名:Warning 必须在 Critical 之下");
+    QVERIFY2(severityRank(QtCriticalMsg) < severityRank(QtFatalMsg),
+             "严重程度排名:Critical 必须在 Fatal 之下");
+
+    // ★ 这条直接说明"为什么不能比 QtMsgType 数值":★
+    //   它把 Qt 的真实枚举值钉在这 —— 将来谁看到 Info 数值最大想改回去,
+    //   这条会先红。
+    QVERIFY2(static_cast<int>(QtInfoMsg) > static_cast<int>(QtWarningMsg),
+             "★ Qt 的 QtMsgType 数值顺序变了?★\n"
+             "  如果 Qt 改了枚举,本文件的 severityRank 可能不再需要 ——\n"
+             "  但【在那之前】,直接比 QtMsgType 数值一定是错的。");
+
+    // ---- 第二段:凡是【严格高于】默认级别的,都必须真的写进日志 ----
+    //   Fatal 不在这里打 —— qCFatal 会终止进程,测不了。
+    //   它的排名由上面第一段钉住。
+    Config c;
+    c.directory    = m_dir.path();
+    c.defaultLevel = QtInfoMsg;
+    applyConfig(c);
+
+    qCWarning(hmiAlarm)  << "TC-SEV-W2-应当出现";
+    qCCritical(hmiAlarm) << "TC-SEV-C2-应当出现";
+
+    QString log;
+    QVERIFY(readLog(&log, "everyLevelAboveDefault_mustBeWritten"));
+    QVERIFY2(log.contains("TC-SEV-W2-"),
+             "Warning 级别高于默认的 Info,却没写进日志 —— 过滤逻辑把告警丢了");
+    QVERIFY2(log.contains("TC-SEV-C2-"),
+             "Critical 级别高于默认的 Info,却没写进日志 —— 过滤逻辑把告警丢了");
+
+    // ---- 反向:低于默认级别的(Debug)必须【被压住】----
+    //   少了这条,上面那两条可能是"什么都往写"蒙对的。
+    Config d;
+    d.directory    = m_dir.path();
+    d.defaultLevel = QtInfoMsg;
+    applyConfig(d);
+    qCDebug(hmiAlarm) << "TC-SEV-D2-应当消失";
+    QString log2;
+    QVERIFY(readLog(&log2, "everyLevelAboveDefault(压制 Debug)"));
+    QVERIFY2(!log2.contains("TC-SEV-D2-"),
+             "Debug 级别低于默认的 Info,却写进去了 —— 压制逻辑没生效");
 
     resetToDefault(m_dir.path());
 }
