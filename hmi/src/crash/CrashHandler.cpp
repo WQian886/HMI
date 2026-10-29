@@ -19,6 +19,8 @@
 
 #include "crash/CrashHandler.h"
 
+#include "util/Paths.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -112,10 +114,10 @@ QString dumpDirectory() {
         return QFile::decodeName(overrideDir);
     }
 
-    // ★ 用 GenericDataLocation(纯环境变量)+ 本模块常量拼,
+    // ★ 用 util::appDataDir() —— 它是【纯函数】:环境变量 + 本项目常量,
     //   【不读 QCoreApplication 的 org/app 全局状态】。
     //
-    //   原来用的是 AppLocalDataLocation —— 那个值含 <org>/<app>,
+    //   原来这里直接用 AppLocalDataLocation —— 那个值含 <org>/<app>,
     //   取决于调用方什么时候设好了 org/app。而写 dump 的时刻
     //   (崩溃瞬间,org/app 早设好了)和读标记的时刻(启动最早期,
     //   main() 还没设)拿到的就是两个不同的目录,于是标记永远读不到。
@@ -124,10 +126,12 @@ QString dumpDirectory() {
     //   改成纯函数之后,"调用方的调用顺序"再也不可能影响 dump 去哪 ——
     //   这比单纯把 main() 的语句调个顺序更可靠:顺序是被注释约束着的,
     //   而纯函数是被测试守着的。
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    return base + QLatin1Char('/') + QLatin1String(kOrgName)
-         + QLatin1Char('/') + QLatin1String(kAppName)
-         + QStringLiteral("/crash");
+    //
+    // ★ 2026-10-21:默认值与改动前【逐字节相同】
+    //   (GenericDataLocation/QianWei/HMI/crash),但现在多了一个 HMI_DATA_DIR 覆盖 ——
+    //   长跑实例要把 dump 目录也带去私有目录,否则两边共用一个 pending.txt,
+    //   一边取走就把另一边的现场弄丢了。
+    return qwhmi::util::appDataDir() + QStringLiteral("/crash");
 }
 
 bool hasPendingDump() {

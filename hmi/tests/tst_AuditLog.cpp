@@ -24,6 +24,8 @@ using namespace qwhmi::auth;
 class TestAuditLog : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase();
+    void cleanupTestCase();
     void init();      // 每个用例前清临时文件 + logout 复位
     void cleanup();   // 每个用例后 logout 复位
 
@@ -63,6 +65,26 @@ QStringList readAuditLines() {
     return text.split('\n', Qt::SkipEmptyParts);
 }
 } // namespace
+
+void TestAuditLog::initTestCase() {
+    // ★ 2026-10-21:把审计日志【隔离】到临时目录。
+    //   以前这个测试直接用 AuditLog::defaultFilePath(),
+    //   而它指向【真实的】%LOCALAPPDATA%\QianWei\HMI\audit-<今天>.log;
+    //   加上 resetForTesting() 里那一句 QFile::remove(defaultFilePath()) ——
+    //   等于【每跑一次单元测试,就把现场当天的审计日志删掉】。
+    //   2026-10-21 实测:跑完一轮 ctest,当时正在跑的那一轮长跑的
+    //   audit-2026-10-21.log 当场没了。
+    //   上面那个 tempDir() 辅助函数是【摆设】—— 它清的是临时目录,
+    //   而文件实际写在真实目录里,谁也没拦住。
+    //   现在有 HMI_DATA_DIR 了(见 util/Paths.h),把整个数据目录指到临时目录,
+    //   读写两端一起改,不用在测试里加"只给测试用"的路径接口。
+    qputenv("HMI_DATA_DIR", tempDir().toUtf8());
+    QDir().mkpath(tempDir());
+}
+
+void TestAuditLog::cleanupTestCase() {
+    qunsetenv("HMI_DATA_DIR");
+}
 
 void TestAuditLog::init() {
     CurrentUser::instance().logout();

@@ -30,7 +30,27 @@ public:
     explicit SingleInstance(QObject* parent = nullptr);
     ~SingleInstance() override;
 
-    bool tryBecomePrimary(const QString& key = QStringLiteral("hmi-single-instance-v1"));
+    // ★ 2026-10-21:默认键提升为【公开常量】
+    //   原来它只是 tryBecomePrimary 的默认参数值,写在头文件里。
+    //   现在 main.cpp 也要用它(当"用户没指定键"时的缺省值),
+    //   两边各写一份字符串,迟早有一个忘了改 —— 而漏改的后果是
+    //   "两个实例互相把对方当 sender",症状极难查。
+    static const char* kDefaultKey;   // "hmi-single-instance-v1"
+
+    // ★ 2026-10-21:实例键从【环境变量】HMI_INSTANCE_KEY 取。
+    //   【为什么走环境变量,而不是命令行选项】
+    //     单实例检测发生在 main() 的最前面 —— 比 QApplication 还早。
+    //     而 QCommandLineParser::process() 需要一个 app 实例,
+    //     于是"命令行选项"这条路上,单实例键【拿不到】。
+    //     (要把解析器整体前移,就得把 parse() 挪到 QApplication 之前,
+    //      那是改公共启动路径,风险比收益大。)
+    //     环境变量没有这个次序问题:任何时候都能读。
+    //   【安全边界】没设这个变量时,行为与改动前【完全一样】。
+    //     它只是给"需要和已有实例共存"的场景(长跑)留一个出口,
+    //     不是绕过单实例机制的后门:同一键的第二个实例照样被挡。
+    static QString keyFromEnvironment();
+
+    bool tryBecomePrimary(const QString& key = QString::fromLatin1(kDefaultKey));
     bool isPrimary() const { return isPrimary_; }
 
     // 非主实例 → 给主实例发消息

@@ -43,6 +43,55 @@ public:
     hmi(QWidget *parent = nullptr);
     ~hmi();
 
+    // ★ 2026-10-21:命令行 --project 的落地入口
+    //
+    //   【为什么要有这个方法】
+    //     --project 这个开关从加进来那天起就只打了一行日志,什么都没做
+    //     (main.cpp 里写着"打开工程功能在阶段 B 接入")。
+    //     一个"看着能用、其实完全不生效"的命令行参数比没有更糟:
+    //     长跑脚本带着 --project 起进程,以为跑的是那份工程,
+    //     实际跑的是 default.json —— 测的根本不是想测的东西。
+    //
+    //   【它做什么】
+    //     复用 UI 那条"打开工程"的同一条通路:project_->loadFromFile(path)。
+    //     那个 applier(→ plcMgr_->applyConfig)已经在构造函数里接好了,
+    //     所以工程里的 PLC 配置会真的建出连接,变量表也会真的换掉。
+    //
+    //   【返回 false 的两种情况】
+    //     · 文件不存在 / 不是文件
+    //     · loadFromFile 解析失败(内部会 emit loadError)
+    //   两种都【不静默回退到 default.json】—— 调用方要自己决定退出还是继续。
+    bool loadProjectAtStartup(const QString& path);
+
+    // ★ 2026-10-21:禁止弹模态对话框(长跑模式)
+    //
+    //   【为什么长跑必须关掉】
+    //     工程加载失败会弹 QMessageBox —— 那是【模态阻塞】的。
+    //     长跑脚本没有人去点它,程序就永远停在那儿:
+    //     进程活着、日志停长、内存不涨 —— 从外面看全是"正常"的假象。
+    //     这跟登录框、自动注销是同一类东西:人机界面挡住机器。
+    //   【关掉之后】
+    //     同样的错误改成记日志(qCWarning),信息一条不少,
+    //     但不挡 anybody —— 脚本能自己看到"启动时工程没加载成"。
+    void setModalAlertsEnabled(bool enabled) { modalAlertsEnabled_ = enabled; }
+    bool modalAlertsEnabled() const { return modalAlertsEnabled_ && s_modalAlertsEnabledGlobally; }
+
+    // ★ 2026-10-21:全局版的"不许弹模态框"开关
+    //
+    //   【为什么必须是 static】
+    //     构造 hmi 窗口时,它自己就会去 loadFromFile(default.json);
+    //     那一步失败会 emit loadError → 弹窗 → 长跑脚本没人去点它 →
+    //     程序【永久卡在那个框上】:进程活着、日志停长、内存不涨,
+    //     从外面看全是"正常"的假象。
+    //     而 main.cpp 要把开关设好,必须发生在【构造窗口之前】 ——
+    //     那时候窗口还不存在,成员变量还没出生,所以只能是 static。
+    //
+    //   【两处开关的关系】
+    //     实例开关(上面的 setModalAlertsEnabled)给测试用,
+    //     全局开关给 main.cpp 用;两者【与】起来才生效。
+    static void setModalAlertsEnabledGlobally(bool enabled) { s_modalAlertsEnabledGlobally = enabled; }
+    static bool modalAlertsEnabledGlobally() { return s_modalAlertsEnabledGlobally; }
+
 
 protected:
     // ★ DIAG-2026-09-09:窗口关闭原因日志(spontaneous=true 表示外部/Qt,=false 表示用户代码)
@@ -164,6 +213,9 @@ private slots:
 
 private:
     // 阶段 0x 第 2 练:状态机雏形(业务)
+    // ★ 2026-10-21:全局"不许弹模态框"开关的存放处(见 public 段的 static 注释)
+    static bool s_modalAlertsEnabledGlobally;
+
     // [BUG #10] 原代码(已注释):enum class State { Stopped, Running, Reset };
     //           原因:Reset 跟 Qt 内部信号/方法名太像,容易混淆
     // [FIX #10] 改 Resetting(正在复位),语义更清晰
@@ -250,6 +302,9 @@ private:
 	void executePendingModbus();// 阶段 2-4 重设计:连接建立后待发的请求(消除 500ms hack)
 
 	Ui::hmiClass ui;// UI 设计器生成的界面类成员
+    // ★ 2026-10-21:能不能弹模态对话框(长跑模式关掉)
+    //   默认 true = 正常交互模式;--soak 时由 main.cpp 设成 false。
+    bool modalAlertsEnabled_ = true;
     QTimer *timer;  // 阶段 0 第 1 练:QTimer 成员变量(1 秒 counter)
     QTimer *resetTimer_ = nullptr;  // 阶段 1 第 2 练:复位定时器(3 秒单次,到点转 Stopped)
     QTimer *alarmBlinkTimer_ = nullptr;  // 阶段 5.4:严重级报警闪烁定时器(500ms 切亮/暗两相)

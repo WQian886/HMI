@@ -442,4 +442,16 @@
     <ClInclude Include="src\comm\CommTraceModel.h" />
     <ClInclude Include="src\comm\CommFrame.h" />
   </ItemGroup>
+  <!-- 2026-10-24: data dir isolation (util/Paths) -->
+  <!--   Paths.cpp has real code and is referenced by 6 .cpp files: -->
+  <!--     main.cpp, src/auth/AuditLog.cpp, src/auth/UserStore.cpp, -->
+  <!--     src/crash/CrashHandler.cpp, src/history/HistoryRecorder.cpp, src/logging/Logging.cpp -->
+  <!--   It MUST be in <ClCompile> or MSBuild fails at link time with an unresolved -->
+  <!--   external symbol qwhmi::util::appDataDir(). CMake hid this because it has a -->
+  <!--   GLOB fallback; the vcxproj has no such safety net. -->
+  <!--   Neither header has Q_OBJECT -> ClInclude only, no QtMoc. -->
+  <ItemGroup>
+    <ClCompile Include="src\util\Paths.cpp" />
+    <ClInclude Include="src\util\Paths.h" />
+  </ItemGroup>
 </Project>

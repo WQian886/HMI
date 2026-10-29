@@ -158,6 +158,42 @@ param(
     [string] $SoakUser = '',
     [string] $SoakPass = '',
 
+    # ---- 2026-10-21:可执行文件 / 工程文件 覆盖 --------------------------
+    #  为什么需要这两个参数
+    #  ------------------------
+    #  1) -Exe:修好的二进制编在 out/build/debug2(Qt-Debug-Alt preset),
+    #     因为 out/build/debug/hmi.exe 当时被正在跑的旧进程占着(Windows 锁 exe)。
+    #     而这段脚本原来只认 out/build/debug 和 x64/Debug 两个候选路径 ——
+    #     不给覆盖入口,它会挑中【旧二进制】,跑一晚上验的是没修的版本。
+    #     ★ 这种"脚本跑起来了、验的却是旧代码"最难发现:所有指标都正常。
+    #
+    #  2) -Project:--project 原来是个空壳(只打一行日志,什么都不做),
+    #     2026-10-21 才真的能打开指定工程。脚本得有个入口把它传下去。
+    [string] $Exe     = '',
+    [string] $Project = '',
+
+    # ---- 2026-10-21:单实例锁的键可指定 --------------------------------
+    #  为什么需要这个参数
+    #  -------------------
+    #  单实例锁用的是一把【固定的】共享内存键 "hmi-single-instance-v1"。
+    #  机器上只要有另一个 hmi.exe 在跑,第二个实例一启动就退出 ——
+    #  于是这个脚本只有两个选择:"拒绝开跑"(exit 2),或者"把那个结束掉"。
+    #  2026-10-21 的现场正是卡在这:上一轮的长跑进程还挂着
+    #  (而且从它启动后【第一秒】起就没再跟 PLC 说过一句话),
+    #  用户明确要求"不想影响它"。
+    #
+    #  给了 -InstanceKey 之后:长跑实例用另一把键 → 两把锁互不相干 →
+    #  两个实例各跑各的,谁也不动谁 —— 已有进程一个字节都不动。
+    #
+    #  【安全边界】
+    #   · 不给这个参数 = 行为和以前完全一样(固定键,撞上就退)。
+    #   · 给了它也【不是】"取消单实例":同一把键的第二个实例照样被挡
+    #     (tst_SingleInstanceKey::sameKeyStillCollides 钉着这一条)。
+    #   · 它只换【锁】,不换【数据目录】。两个实例共用一份 history.db
+    #     会互相写坏 —— 所以真要用它,必须同时把 LOCALAPPDATA 指到
+    #     一份私有目录(scripts\run_soak.ps1 就是干这个的)。
+    [string] $InstanceKey = '',
+
     # ---- 判据阈值 ----
     # 做成参数不是为了"调",是为了能被【证伪】:
     # 把 MaxMemRatio 拧到 1.0001,内存曲线必须判红。
@@ -192,10 +228,39 @@ Set-StrictMode -Version 2.0
 # ---- 事实常量(全部实测过,不是猜的)------------------------------------
 # main.cpp:105-107 -> org=QianWei app=HMI
 # QStandardPaths::AppLocalDataLocation 在 Windows 上是 Local 而非 Roaming
-$dataDir = Join-Path $env:LOCALAPPDATA 'QianWei\HMI'
+#
+# ★ 2026-10-21:数据目录的算法必须跟应用【完全一致】。
+#   脚本读一份、应用写另一份 ⇒ 判据全废(而且是那种"看着在跑、其实在读空气"的废)。
+#   应用那边是 util::appDataDir()(见 hmi/src/util/Paths.h):
+#     · HMI_DATA_DIR 设了 → 用它(长跑隔离走这条)
+#     · 没设 → %LOCALAPPDATA%\QianWei\HMI
+#   这里照抄同一份规则,一个字都不许差。
+#
+#   ★ 为什么【不是】直接读 $env:LOCALAPPDATA:
+#     2026-10-21 实测:把 LOCALAPPDATA 指到别处再起一个实例,
+#     它照样把日志写进真实的 %LOCALAPPDATA%\QianWei\HMI\,
+#     还把同名的 audit-2026-10-21.log 截断了。
+#     Qt 在 Windows 上用 SHGetKnownFolderPath 解析 LocalAppData —— 不认环境变量。
+if ($env:HMI_DATA_DIR) {
+    $dataDir = $env:HMI_DATA_DIR
+} else {
+    $dataDir = Join-Path $env:LOCALAPPDATA 'QianWei\HMI'
+}
 $logDir  = Join-Path $dataDir  'logs'
 $crashDir = Join-Path $dataDir 'crash'
 $marker  = Join-Path $crashDir 'pending.txt'
+
+# ★★ 2026-10-27:数据目录是【私有】的吗?★★
+#   私有 = HMI_DATA_DIR 设了(长跑隔离走这条,见 run_soak.ps1)。
+#   ★ 这个标记后面决定两件事:
+#     (1) 【2026-10-27 之前】能不能往 <数据目录>/hmi.json 写日志级别配置 ——
+#         写进【用户真实的 %LOCALAPPDATA%】等于改了他机器上正式应用的行为
+#         (把 debug 日志打开,永久生效),那是别人的机器,不能我替他决定。
+#         ★★ 那一整块已经【删掉】了 —— 写侧统计行改成 INFO 级,默认就落地。
+#     (2) 写侧判据(SOAK-W)的证据跟正式应用的日志会不会混在一起。
+#   不是私有 ⇒ 证据会混,但【不影响】SOAK-W 能不能拿到证据
+#   (2026-10-27:写侧统计行是 INFO 级,默认就落地,不再依赖 hmi.json)。
+$dataDirIsPrivate = [bool]$env:HMI_DATA_DIR
 
 # 日志格式(Logging.cpp:104-152):[yyyy-MM-dd hh:mm:ss.zzz] [LEVEL] category - msg
 $reLine = '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\s+\[(\w+)\s*\]\s+([\w.]+)\s+-\s+(.*)$'
@@ -368,6 +433,14 @@ function Write-RunState {
     }
     $sb.Add("本次落盘          : " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
     $sb.Add("计划时长          : $Hours 小时")
+    $sb.Add("单实例键          : " + $(if ($InstanceKey) { $InstanceKey } else { "默认(hmi-single-instance-v1)" }))
+    $sb.Add("数据目录          : $dataDir")
+    # ★ 2026-10-21:把"这一轮实际跑的是哪个二进制"落进状态文件。
+    #   上面那段注释一直写着"把实际用的 exe 落到状态文件里",但其实【没落】——
+    #   于是 2026-10-21 那次 -Exe 被静默忽略(变量名大小写撞车)的现场,
+    #   报告里【没有任何一处】写着"跑的是旧二进制"。
+    #   报告必须能自证:跑的是哪个 exe、哪个数据目录、哪把锁,三样都在文件里。
+    $sb.Add("被测二进制        : " + $(if ($exePath) { $exePath } else { "(观察模式:未启动新进程)" }))
     if ($null -ne $owned -and $null -ne $owned.StartTime) {
         $sb.Add("被测进程          : PID=" + $owned.Id + " 启动于 " + $owned.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))
     } else {
@@ -406,41 +479,82 @@ if ($existing.Count -gt 0) {
          $p.Id, $p.StartTime.ToString('yyyy-MM-dd HH:mm:ss'),
          ((Get-Date) - $p.StartTime).TotalMinutes, [math]::Round($p.WorkingSet64/1MB,1)) 'Yellow'
 
-    if (-not $AdoptExisting) {
+    # ★ 2026-10-21:给了独立实例键 → 允许共存,不碰那个进程。
+    #   【为什么这条是安全的】
+    #     锁不同 → 两个进程的共享内存不是同一块 → 谁也不会把对方当 sender。
+    #     数据目录不同(见 run_soak.ps1 的私有 LOCALAPPDATA)→ 不抢同一个 history.db。
+    #     被测进程由本脚本自己启动、自己采样、自己收尾 —— 那个已有进程
+    #     【不参与本轮任何判定】,它继续跑它自己的,本轮一个字节都不动它。
+    if ($InstanceKey) {
+        Say "给了 -InstanceKey,本轮用【独立的单实例键】—— 允许与已有实例共存:" 'Cyan'
+        Say ("  本轮实例键  : {0}" -f $InstanceKey) 'Cyan'
+        Say "  已有进程    : 不结束它、不抢它的锁、不读它的数据目录 —— 一个字节都不动。" 'Green'
+        Say "  ★ 前提:两边的数据目录必须分开(本脚本读 $dataDir)。" 'Yellow'
+        Say "    直接跑本脚本而没设 HMI_DATA_DIR 的话,两边会抢同一个 history.db ——" 'Yellow'
+        Say "    请用 scripts\run_soak.ps1 跑长跑,它会准备一份私有数据目录。" 'Yellow'
+    }
+    elseif (-not $AdoptExisting) {
         Say "拒绝启动第二个实例。原因有两个,都不是多余的:" 'Red'
         Say "  1) SingleInstance 会让第二次启动直接退出 —— 那样跑 2 小时采到的全是空气,还看不出异常;" 'Red'
         Say "  2) 那是你的进程,不是我的实验品。要跑长跑请先自己关掉它。" 'Red'
         Say "想改成观察它(拿不到干净基线,只算参考): -AdoptExisting" 'Yellow'
+        Say "想和它共存(各跑各的,不动它): -InstanceKey <任意键名>" 'Yellow'
         exit 2
     }
-    $owned = $p
-    Say "采用 -AdoptExisting:只观察,不接管、不杀。" 'Yellow'
+    else {
+        $owned = $p
+        Say "采用 -AdoptExisting:只观察,不接管、不杀。" 'Yellow'
 
-    # ★ 静默失效要堵:观察模式下【不会重启进程】,所以下面启动段那整套
-    #   --soak 参数根本不会被使用。给了 -SoakUser/-SoakPass 却不报错,
-    #   等于让人以为"我配了自动登录",实际跑的是那个还停在登录框的旧进程 ——
-    #   然后收获一个 UNKNOWN,还要花半小时想为什么。
-    #   这类"参数被接受但没用"比直接报错坏得多。
-    if ($SoakUser -or $SoakPass) {
-        Say "-SoakUser/-SoakPass 在 -AdoptExisting 下【无效】:" 'Red'
-        Say "  观察模式不重启进程,没法给它加启动参数 —— 你观察的还是原来那个。" 'Red'
-        Say "  要真正用 --soak 长跑,请先关掉已有 hmi,再去掉 -AdoptExisting。" 'Red'
-        exit 1
+        # ★ 静默失效要堵:观察模式下【不会重启进程】,所以下面启动段那整套
+        #   --soak 参数根本不会被使用。给了 -SoakUser/-SoakPass 却不报错,
+        #   等于让人以为"我配了自动登录",实际跑的是那个还停在登录框的旧进程 ——
+        #   然后收获一个 UNKNOWN,还要花半小时想为什么。
+        #   这类"参数被接受但没用"比直接报错坏得多。
+        if ($SoakUser -or $SoakPass) {
+            Say "-SoakUser/-SoakPass 在 -AdoptExisting 下【无效】:" 'Red'
+            Say "  观察模式不重启进程,没法给它加启动参数 —— 你观察的还是原来那个。" 'Red'
+            Say "  要真正用 --soak 长跑,请先关掉已有 hmi,再去掉 -AdoptExisting。" 'Red'
+            exit 1
+        }
     }
 }
 
 # ---- 前置 2:找可执行文件 -------------------------------------------
-$exe = $null
+# ★ 2026-10-21:本地变量【必须】叫 $exePath,不能叫 $exe ——
+#   PowerShell 变量名【不区分大小写】,$exe 和 $Exe 是【同一个变量】。
+#   原来这里写的是 `$exe = $null`,那一句把参数 $Exe 直接【抹成空了】,
+#   紧接着的 `if ($Exe)` 永远为假 ⇒ -Exe 指定的路径【被静默忽略】,
+#   脚本退回默认候选路径,挑中了【没修的】out\build\debug\hmi.exe。
+#   而报告里还打着一行"可执行文件: ...debug\hmi.exe" —— 一本正经地跑错了二进制,
+#   所有指标都正常,这一轮白跑一夜都没人看得出来。
+#   这正是那段注释里写的"最难发现"的那一类错,自己撞上了。
+#   变量改名 + 下面那句"选了哪个"照打,以后再撞不回来看一眼就知道。
+$exePath = $null
 if (-not $AdoptExisting) {
-    $cands = @(
-        (Join-Path $PSScriptRoot '..\hmi\out\build\debug\hmi.exe'),
-        (Join-Path $PSScriptRoot '..\hmi\x64\Debug\hmi.exe')
-    )
-    $exe = $cands | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $exe) {
-        Say "找不到 hmi.exe。先 build.ps1 编一份。" 'Red'; exit 1
+    if ($Exe) {
+        if (-not (Test-Path $Exe)) {
+            Say ("-Exe 指定的文件不存在: {0}" -f $Exe) 'Red'; exit 1
+        }
+        $exePath = (Resolve-Path $Exe).Path
+    } else {
+        $cands = @(
+            (Join-Path $PSScriptRoot '..\hmi\out\build\debug\hmi.exe'),
+            (Join-Path $PSScriptRoot '..\hmi\x64\Debug\hmi.exe')
+        )
+        $exePath = $cands | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $exePath) {
+            Say "找不到 hmi.exe。先 build.ps1 编一份。" 'Red'; exit 1
+        }
     }
-    Say ("可执行文件: {0} ({1} MB)" -f $exe, [math]::Round((Get-Item $exe).Length/1MB,2)) 'Gray'
+    Say ("可执行文件: {0} ({1} MB)" -f $exePath, [math]::Round((Get-Item $exePath).Length/1MB,2)) 'Gray'
+    # ★ 2026-10-21:把实际用的 exe 落到状态文件里。
+    #   报告里必须能一眼看出"这一轮跑的是哪个二进制"——
+    #   修好的版本在 debug2、没修的在 debug,认错了就等于白跑一夜。
+    if ($Exe) {
+        Say "  (由 -Exe 指定)" 'DarkGray'
+    } else {
+        Say "  (⚠ 没给 -Exe,用的是默认候选路径 —— 可能挑到旧二进制)" 'Yellow'
+    }
 }
 
 # ---- 基线快照 --------------------------------------------------------
@@ -465,14 +579,64 @@ $baselineMarker = if (Test-Path $marker) {
     [pscustomobject]@{ Exists = $true; Content = (Get-Content $marker -Raw -Encoding UTF8); Mtime = (Get-Item $marker).LastWriteTime }
 } else { [pscustomobject]@{ Exists = $false; Content = ''; Mtime = $null } }
 
+# ================================================================
+# ★★ 2026-10-27:【不再】往 <数据目录>/hmi.json 写日志级别配置 ★★
+# ================================================================
+#  ★ 这一整块被【删掉】了 —— 因为它是 2026-10-27 实测出来的一颗雷 ★
+#
+#  【它原来要干什么】
+#    应用读 <数据目录>/hmi.json 决定各类别的日志级别(Logging.cpp:loadConfig),
+#    没这个文件就是 default_level=info。
+#    而"写被排队"/"排队写已发出"/"[Write] OK"这几行【全是 qCDebug】——
+#    info 级别下一行都不落地 ⇒ 写侧判据会读到"排队 0 次、OK 0 次、拒收 0 次",
+#    然后判 PASS —— 而它其实【什么都没看见】。
+#
+#  ★★ 为什么最后把它删了(三条实测,不是推演)★★★
+#    (1) 【前提就是错的】
+#        实测:WriteScheduler.cpp:240 那行"driver 拒收了"是 qCWarning(hmiWrite),
+#        严重度排名 2 > info 的 1 ⇒ 【默认级别就看得见】。
+#        当时"必须开 debug 才看得见"这个前提本身就不成立。
+#    (2) ★ 它会【毁掉整轮长跑】★
+#        实测:开了 hmi.comm=debug 之后 893 行/分钟 ⇒ 24 小时约 129 万行。
+#        而 Get-LogSince 原来 limit=50000 且【到顶就整个停止读】
+#        ⇒ 只看得到前 0.9 小时 ⇒ 【所有】判据(SOAK-6 也包括)全被截断,
+#          而且报告上看不出任何异常 —— 它只是安静地判了个 UNKNOWN。
+#        ⇒ "开 debug 才能看见写侧"这个做法,代价是【所有判据都瞎】。
+#    (3) ★ 现在不需要它了 ★
+#        2026-10-27:写侧统计行([ModbusMaster] 写侧统计:…)是【qCInfo】——
+#        默认级别就落地。而它带的是【累计计数】,不是一次性的 debug 行。
+#        ⇒ 60 秒一条,24 小时约 1440 行,跟日志本底(实测 1440 行/24h)一个量级。
+#        ⇒ 根本不需要改日志级别。
+#
+#  ★ 现在的判定闸换成了什么 ★
+#    窗口内【一条写侧统计行都没有】⇒ UNKNOWN(看不见证据 ≠ 没问题)。
+#    这个闸比"有没有写 hmi.json"更直接:它问的是"证据在不在",而不是"配置在不在"。
+#
+#  ★ 私有数据目录这个标记还要留着 ★
+#    它不决定日志级别了,但它决定"这一轮的数据跟正式应用隔不隔离" ——
+#    隔离没做的话,长跑的证据会跟正式应用的日志混在一起,那证据就不算证据。
+if ($dataDirIsPrivate) {
+    Say ("数据目录   : 私有({0})—— 与正式应用完全隔离,证据不混。" -f $dataDir) 'Cyan'
+} else {
+    Say "★ 数据目录【不是私有的】(%LOCALAPPDATA%\QianWei\HMI)—— 本轮日志会跟正式应用的混在一起。" 'Yellow'
+    Say "  写侧统计行是 INFO 级、默认就落地,所以这一项【不再】影响 SOAK-W 的证据。" 'Yellow'
+    Say "  但隔离没做 ⇒ 长跑的证据会跟正式应用的日志混在同一批文件里。" 'Yellow'
+    Say "  ⇒ 要干净的证据,请用 scripts\run_soak.ps1(它会准备私有数据目录)。" 'Yellow'
+}
+
 # ★ 存量脏标记:上一轮崩溃留下的、还没被任何启动消费掉的那个。
 #   单独拎出来报 —— 免得被"本次没崩"盖过去。
 #   2026-10-14 实测:它在 crash/pending.txt 停了 28 天。
 Say "---- 基线 ----" 'Cyan'
-Say ("日志: {0} 个文件 / 合计 {1} KB;最大单个 {2} KB({3});最新 {4}({5} KB)" -f `
-     $baselineLog.Count, [math]::Round($baselineLog.Bytes/1KB,1),
-     [math]::Round($baselineLog.MaxFile.Length/1KB,1), $baselineLog.MaxFile.Name,
-     $baselineLog.Newest.Name, [math]::Round($baselineLog.Newest.Length/1KB,1))
+if ($baselineLog.Count -gt 0) {
+    Say ("日志: {0} 个文件 / 合计 {1} KB;最大单个 {2} KB({3});最新 {4}({5} KB)" -f `
+         $baselineLog.Count, [math]::Round($baselineLog.Bytes/1KB,1),
+         [math]::Round($baselineLog.MaxFile.Length/1KB,1), $baselineLog.MaxFile.Name,
+         $baselineLog.Newest.Name, [math]::Round($baselineLog.Newest.Length/1KB,1))
+} else {
+    # ★ 空目录也是【一种状态】,得说出来 —— 不说就等于"日志统计这行没跑"。
+    Say "日志: 0 个文件(数据目录是干净的 —— 这一轮的日志从零开始)" 'Gray'
+}
 if ($baselineMarker.Exists) {
     Say "★ 崩溃标记【已经存在】(上一轮崩溃没人清理):" 'Yellow'
     $baselineMarker.Content.Trim() -split "`n" | ForEach-Object { Say ("    " + $_) 'Yellow' }

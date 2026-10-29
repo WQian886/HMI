@@ -39,11 +39,11 @@
 
 namespace qwhmi::crash {
 
-// ★ 应用身份的唯一出处。
-//   main() 用这两个去设 org/app,本模块用它们算 dump 目录 ——
-//   同一份值,不许各写各的,否则两边一漂移就又回到"写一个目录读另一个"。
-inline constexpr char kOrgName[] = "QianWei";
-inline constexpr char kAppName[] = "HMI";
+// ★ 2026-10-21:应用身份(kOrgName / kAppName)搬到了 util/Paths.h。
+//   原因:数据目录(util::appDataDir)现在也要用这两个值,
+//   而它们原先住在这个"只管崩溃"的模块里 ——
+//   一个全局身份常量放在业务模块里,迟早被改散。
+//   main() 改成从 util::Paths.h 取,本模块用 util::appDataDir() 算目录。
 
 struct DumpInfo {
     QString path;

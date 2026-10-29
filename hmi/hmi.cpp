@@ -55,6 +55,7 @@
 #include "comm/CommTraceModel.h"     // ★ 2026-10-20:通讯帧监视(调试区第三页)     // ★ 2026-10-16:菜单栏搭建(抽出来才能被 tst_MenuBar 测到真实那份)
 #include <QColor>            // 阶段 5.4:严重级报警闪烁(红/橙背景色)
 #include <QFile>             // ★ 阶段 6.3 DEBUG:写日志文件(load_debug.log)
+#include <QFileInfo>         // ★ 2026-10-21:--project 参数要先判文件存不存在
 #include <QFileDialog>       // ★ 阶段 6.4:UI 打开工程 → 选 .json 文件
 #include <QStandardPaths>    // ★ D.4.1:CSV 导出默认路径(桌面)
 #include <QMenu>             // 阶段 5.5:alarmTable 右键菜单
@@ -150,6 +151,11 @@ static QString alarmLevelName(AlarmLevel l) {
     }
     return "?";
 }
+
+// ★ 2026-10-21:全局"不许弹模态框"开关(长跑模式)
+//   默认 true = 正常交互;main.cpp 在 --soak 时设成 false。
+//   详见 hmi.h 里同名 static 方法的注释(为什么必须是 static)。
+bool hmi::s_modalAlertsEnabledGlobally = true;
 
 hmi::hmi(QWidget *parent)
     : QMainWindow(parent)
@@ -355,6 +361,16 @@ hmi::hmi(QWidget *parent)
                 hasPendingModbus_ = false;
                 updateUi();
                 if (wasConnecting) {
+                    // ★ 2026-10-23:受 modalAlertsEnabled() 约束。
+                    //   这一支是【机器自己触发】的(连不上不是用户点的),
+                    //   而 QMessageBox 是模态阻塞的 —— 长跑脚本没有人去点它,
+                    //   程序就停在那儿:进程活着、日志停长、内存不涨,
+                    //   从外面看全是"正常"的假象(跟登录框、自动注销同一类)。
+                    //   无头模式下改为记日志,信息一条不少。
+                    if (!modalAlertsEnabled()) {
+                        qCWarning(hmiApp) << "[hmi] Modbus 连不上(长跑模式,不弹窗)";
+                        return;
+                    }
                     // 主动发起的连接失败 —— 常见原因:ModbusSlave 仿真器没起 / IP 端口不对
                     QMessageBox::warning(this, "Modbus 连不上",
                         "TCP 连不上 ModbusSlave(默认 127.0.0.1:5000)。\n\n"
@@ -364,16 +380,43 @@ hmi::hmi(QWidget *parent)
                         "• 防火墙挡住\n\n"
                         "调好后点 [发送] 重试。");
                 } else if (hadPending) {
+                    if (!modalAlertsEnabled()) {
+                        qCWarning(hmiApp) << "[hmi] Modbus 断了(长跑模式,不弹窗)";
+                        return;
+                    }
                     QMessageBox::information(this, "Modbus 断了",
                         "连接意外中断,刚才排队的请求被丢弃。\n请重新点 [发送]。");
                 }
             });
             connect(d, &qwhmi::drivers::IPollDriver::errorOccurred, this,
                 [this](QString msg){
-                    qCDebug(hmiComm) << "Modbus 错误(伴随状态):" << msg;
+                    // ★ 2026-10-23:qCDebug → qCWarning。
+                    //   原来这里是 qCDebug,INFO 级别下一行都不落 ——
+                    //   现场表现是"程序活着、PLC 不通、日志里什么都没有",
+                    //   跟 ModbusMaster 那条静默路径(BUGFIX-C1)是同一类。
+                    qCWarning(hmiComm) << "Modbus 错误(伴随状态):" << msg;
+
+                    // ★★ 2026-10-23:弹窗必须受 modalAlertsEnabled() 约束 ★★
+                    //   【为什么】这个 lambda 以前是无条件弹框的,而它拦的是
+                    //   【机器自己触发】的路径 —— 不是用户点的按钮。
+                    //   QMessageBox::warning 是模态阻塞的:
+                    //     · 正常交互下,一台地址不连续的 PLC 每 100 ms 撞一次
+                    //       单 in-flight 限流,用户就得每 100 ms 点掉一个框;
+                    //     · --soak 长跑下没人点它 → 主线程永久卡死 →
+                    //       进程活着、日志停长、内存不涨,全是"正常"的假象。
+                    //   2026-10-23 实测就是这个:9 个不连续地址变量,
+                    //   第一个 tick 弹一个「Modbus 错误」框,轮询从 1 停到永远。
+                    //   (协议层那边已经把"限流"从 errorOccurred 里摘出去了,
+                    //    但这条线还接着真正的故障 —— 断线、超时、回包异常 ——
+                    //    那些在无头长跑里照样会弹,所以守卫必须留。)
+                    if (!modalAlertsEnabled()) {
+                        qCWarning(hmiApp) << "[hmi] Modbus 错误(长跑模式,不弹窗):" << msg;
+                        return;
+                    }
+
+                    // 2026-07-09:协议/网络错误也弹窗 —— 之前只 qDebug 太隐了
                     modbusState_ = ModbusState::Failed;
                     updateUi();
-                    // 2026-07-09:协议/网络错误也弹窗 —— 之前只 qDebug 太隐了
                     QMessageBox::warning(this, "Modbus 错误", msg);
                 });
             // 2026-07-09:UI 防抖 —— pending_ 变空时重新启用发送按钮
@@ -814,6 +857,15 @@ hmi::hmi(QWidget *parent)
     // ★ 阶段 6.3 FIX(2026-08-07):把 connect 提前到 project_ 实例化之后(loadFromFile 之前)
     //   原来 connect 在 DEBUG block 之后,loadFromFile emit loadError 时还没连 → lambda 不触发
     connect(project_, &Project::loadError, this, [this](const QString& reason){
+        // ★ 2026-10-21:长跑模式不弹模态框
+        //   【为什么】QMessageBox 是模态阻塞的 —— 长跑脚本没有人去点它,
+        //   程序就停在那儿:进程活着、日志停长、内存不涨,
+        //   从外面看全是"正常"的假象(跟登录框、自动注销同一类问题)。
+        //   【替代】同一条信息记进日志,信息一条不少,但不挡人。
+        if (!modalAlertsEnabled()) {
+            qCWarning(hmiApp) << "[hmi] 工程加载失败(长跑模式,不弹窗):" << reason;
+            return;
+        }
         QMessageBox::warning(this, "加载失败", reason);
     });
 
@@ -1398,24 +1450,48 @@ void hmi::onRuntimeCanvasClicked() {
     //   以前没有这一层:控件建不出来、变量绑不上,统统无声无息,
     //   用户看到的是一片空白画布,只能猜"是不是我哪里做错了"。
     if (canvas_->lastError().isEmpty() && n == 0) {
-        QMessageBox::information(canvas_, QStringLiteral("运行时画面"),
-                                 QStringLiteral("工程文件里一个控件也没有。\n"
-                                                "请先在编辑器里放几个控件并保存。"));
+        // ★ 2026-10-23:受 modalAlertsEnabled() 约束(理由同 :356 那处 lambda)。
+        //   这三个框都发生在【打开工程】这条机器路径上,不是用户点的 ——
+        //   长跑脚本启动后没人点,任何一个都足以把主线程焊死。
+        if (modalAlertsEnabled()) {
+            QMessageBox::information(canvas_, QStringLiteral("运行时画面"),
+                                     QStringLiteral("工程文件里一个控件也没有。\n"
+                                                    "请先在编辑器里放几个控件并保存。"));
+        } else {
+            qCWarning(hmiApp) << "[hmi] 工程文件里一个控件也没有(长跑模式,不弹窗)";
+        }
     } else if (!canvas_->lastError().isEmpty()) {
-        QMessageBox::warning(canvas_, QStringLiteral("加载失败"), canvas_->lastError());
+        if (modalAlertsEnabled()) {
+            QMessageBox::warning(canvas_, QStringLiteral("加载失败"), canvas_->lastError());
+        } else {
+            qCWarning(hmiApp) << "[hmi] 画面加载失败(长跑模式,不弹窗):"
+                              << canvas_->lastError();
+        }
     }
 
     if (!canvas_->unboundNames().isEmpty()) {
         // ★ 变量名打错是【用户操作失误】,不是程序错误 ——
         //   必须让他看见具体是哪几个名字没对上,而不是只说一句"部分控件未绑定"
-        QMessageBox::warning(canvas_, QStringLiteral("部分控件没绑上变量"),
-                             QStringLiteral("画面加载了 %1 个控件,其中 %2 个填了变量名\n"
-                                            "但在当前变量表里找不到:\n\n%3\n\n"
-                                            "变量表来自正在运行的工程(打开工程时会变)。\n"
-                                            "如果变量刚在编辑器里加过,先在主窗口【打开工程】再回来看。")
-                                 .arg(n)
-                                 .arg(canvas_->unboundNames().size())
-                                 .arg(canvas_->unboundNames().join(QStringLiteral("\n"))));
+        //
+        // ★ 2026-10-23:同样受 modalAlertsEnabled() 约束。
+        //   这条最隐蔽 —— 它只在【变量名对不上】时弹,而工程刚打开、
+        //   画面加载完的那一瞬间最最容易对不上。
+        //   一旦弹出来没人点,主线程就此停住,轮询/报警/历史全停,
+        //   而外面看到的是"进程活着、曲线平稳"。
+        const QString detail =
+            QStringLiteral("画面加载了 %1 个控件,其中 %2 个填了变量名\n"
+                           "但在当前变量表里找不到:\n\n%3\n\n"
+                           "变量表来自正在运行的工程(打开工程时会变)。\n"
+                           "如果变量刚在编辑器里加过,先在主窗口【打开工程】再回来看。")
+                .arg(n)
+                .arg(canvas_->unboundNames().size())
+                .arg(canvas_->unboundNames().join(QStringLiteral("\n")));
+        if (modalAlertsEnabled()) {
+            QMessageBox::warning(canvas_, QStringLiteral("部分控件没绑上变量"), detail);
+        } else {
+            qCWarning(hmiApp) << "[hmi] 部分控件没绑上变量(长跑模式,不弹窗):"
+                              << canvas_->unboundNames().join(QStringLiteral(", "));
+        }
     }
 
     canvas_->show();
@@ -1973,6 +2049,48 @@ void hmi::onOpenClicked() {
         "HMI 工程文件 (*.json);;所有文件 (*.*)");
     if (path.isEmpty()) return;     // 用户按"取消"
     project_->loadFromFile(path);   // 6.3 已实现,失败由 loadError 信号弹窗
+}
+
+// ★ 2026-10-21:命令行 --project 的落地入口
+//
+//   【它为什么不能简单地"调一下 loadFromFile 就完事"】
+//   三个坑,每一个都让"看起来实现了"跟"真的能用"不是一回事:
+//
+//   1) 构造函数里已经自动 loadFromFile(default.json) 了。
+//      所以 --project 是【第二次】加载 —— 变量表要换、PLC 连接要按新工程重连。
+//      走 loadFromFile 这条路是对的(applier 会 applyConfig),
+//      但要清楚:它不是"从零开始",是"覆盖"。
+//
+//   2) 失败不能静默。
+//      加载失败时如果什么都不做,程序就带着 default.json 继续跑 ——
+//      长跑脚本以为在跑 A 工程,实际跑的是 B 工程,
+//      一整天测的是一个根本没打开的东西。
+//      所以这里返回 false,由 main.cpp 决定退出。
+//
+//   3) 失败信息不能只靠弹窗传出去(长跑模式)。
+//      loadError 信号那条路已经在构造函数里接了(弹窗),
+//      这里只负责把"文件根本不存在"这一种(信号不会发的情况)补上。
+bool hmi::loadProjectAtStartup(const QString& path) {
+    if (!project_) {
+        qCCritical(hmiApp) << "[hmi] --project 失败:project_ 指针为空";
+        return false;
+    }
+    const QFileInfo fi(path);
+    if (!fi.exists() || !fi.isFile()) {
+        qCCritical(hmiApp) << "[hmi] --project 失败:文件不存在或不是普通文件:" << path;
+        if (modalAlertsEnabled()) {
+            QMessageBox::warning(this, "加载失败",
+                                 QString("工程文件不存在:\n%1").arg(path));
+        }
+        return false;
+    }
+    if (!project_->loadFromFile(path)) {
+        // loadFromFile 失败时内部会 emit loadError → 那条 lambda 会弹窗/记日志
+        qCCritical(hmiApp) << "[hmi] --project 失败:解析或应用失败:" << path;
+        return false;
+    }
+    qCInfo(hmiApp) << "[hmi] --project 工程已加载:" << path;
+    return true;
 }
 
 void hmi::onAlarmTriggered(const Alarm& a) {

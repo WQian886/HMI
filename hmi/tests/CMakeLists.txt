@@ -28,6 +28,10 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/Variable.cpp
     ${HMI_SRC_DIR}/VariableManager.cpp
     ${HMI_SRC_DIR}/JsonSerializer.cpp
+    # ★ 2026-10-21:util/Paths —— 应用数据目录的唯一出处。
+    #   Logging / AuditLog / UserStore / HistoryRecorder / CrashHandler
+    #   现在都从它那儿拿目录(以前各算各的),所以它必须进 hmi_core。
+    ${HMI_SRC_DIR}/src/util/Paths.cpp
     # 阶段 A · A3 日志(UserManager 用 qCInfo/qCWarning)
     ${HMI_SRC_DIR}/src/logging/Logging.cpp
     # 阶段 B · B1 用户/角色/密码哈希
@@ -365,6 +369,27 @@ add_hmi_test(tst_AuditE2E)
 add_hmi_test(tst_ProjectSchema)
 # 阶段 C · C.1 协议抽象层
 add_hmi_test(tst_IPollDriver)
+# ★ 2026-10-21:单实例键可指定 —— "不动上一轮长跑"方案的地基。
+#   不用 add_hmi_test:SingleInstance.cpp 不在 hmi_core 里
+#   (主工程那边是靠 GLOB 兜底捡进去的,测试工程是显式列表),
+#   所以这个目标得自己带一份源文件 —— 跟 tst_Theme 一个路子。
+add_executable(tst_SingleInstanceKey
+    tst_SingleInstanceKey.cpp
+    ${HMI_SRC_DIR}/src/instance/SingleInstance.cpp
+)
+target_link_libraries(tst_SingleInstanceKey PRIVATE
+    hmi_core
+    Qt6::Test
+)
+target_compile_options(tst_SingleInstanceKey PRIVATE /utf-8)
+add_test(NAME tst_SingleInstanceKey COMMAND tst_SingleInstanceKey)
+# ★ 2026-10-21:应用数据目录(HMI_DATA_DIR 覆盖)
+#   长跑实例要与"已经在跑的实例"各写各的 —— 日志 / history.db / 审计日志 /
+#   崩溃标记,任意一个共用都会互相写坏。
+#   只测 util::appDataDir() 是弱测试:真正的风险是"某个调用方忘了跟着走",
+#   那种漏网的调用方在【没设覆盖】时完全看不出来。
+#   所以这条测试逐个点名 users.json / 审计日志 / 崩溃 dump / history.db / 日志目录。
+add_hmi_test(tst_Paths)
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
 add_hmi_test(tst_TcpClient)

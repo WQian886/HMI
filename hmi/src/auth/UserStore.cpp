@@ -16,11 +16,13 @@
 #include <QStandardPaths>
 
 #include "logging/Logging.h"
+#include "util/Paths.h"
 
 namespace qwhmi::auth {
 
 QString UserStore::defaultFilePath() {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    // ★ 2026-10-21:走 util::appDataDir() —— 见 util/Paths.h。
+    const QString dir = qwhmi::util::appDataDir();
     return dir + QStringLiteral("/users.json");
 }
 

@@ -28,6 +28,21 @@
 
 namespace qwhmi::instance {
 
+// ★ 2026-10-21:见头文件里的说明 —— 默认键的【唯一出处】。
+const char* SingleInstance::kDefaultKey = "hmi-single-instance-v1";
+
+// ★ 2026-10-21:实例键从环境变量 HMI_INSTANCE_KEY 取。
+//   没设 / 设成空 → 用默认键(行为与改动前完全一致)。
+//   设了 → 用它。于是同一台机器上可以并存两个实例:
+//   各自一把共享内存锁,谁也不抢谁。
+QString SingleInstance::keyFromEnvironment() {
+    const QByteArray v = qgetenv("HMI_INSTANCE_KEY");
+    if (v.isEmpty()) {
+        return QString::fromLatin1(kDefaultKey);
+    }
+    return QString::fromLocal8Bit(v);
+}
+
 class SingleInstance::Impl {
 public:
     QString        key;

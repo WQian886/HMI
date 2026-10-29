@@ -6,6 +6,7 @@
 #include "history/HistoryRecorder.h"
 #include "../../Variable.h"
 #include "../../VariableManager.h"
+#include "util/Paths.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -93,7 +94,7 @@ bool HistoryRecorder::ensureSchema() {
             variable_name TEXT NOT NULL,
             timestamp INTEGER NOT NULL,    -- Unix 毫秒
             value REAL NOT NULL,
-            quality INTEGER NOT NULL,       -- 0=Bad, 1=Good, 2=Stale
+            quality INTEGER NOT NULL,       -- 0=Good, 1=Bad, 2=Stale(跟 Variable::Quality 枚举一致)
             is_heartbeat INTEGER DEFAULT 0 -- ★ D.2:1=心跳(60s 一次确认数据流活着),0=变化检测
         )
     )";
@@ -221,6 +222,16 @@ bool HistoryRecorder::isRunning() const {
 // ★ D.2:心跳 tick — 遍历所有 Variable 各写一行 is_heartbeat=1
 //   关键设计:心跳是"确认数据流还活着"的标志,即使值不变也写;
 //   D.2 Trend 画曲线时不必区分 is_heartbeat(两种都画),但做"健康度检查"时可只查心跳行。
+//
+//   ★★ 2026-10-21:读这张表的人一定要知道的一件事 ★★
+//   quality=0 是 Good,但它【也是 Variable 的初始值】——
+//   一个从来没被读过的变量,quality 也是 0。
+//   所以"表里全是 quality=0"【不能】证明"读到了数据",
+//   它只证明"没人把质量标成 Bad"。
+//   想证明"真的读到了",只能看:值会不会变(而且要跟现场对得上),
+//   或者看 PollScheduler 的"成功读计数"在不在涨。
+//   —— 2026-10-21 查"16.5 小时零轮询流量"时,这条注释的方向是反的
+//     (写着 0=Bad 1=Good),害我把 15024 行 Good 读成"读成功了"。
 void HistoryRecorder::onHeartbeatTick() {
     if (!isOpen() || !varMgr_) return;
 
@@ -354,10 +365,11 @@ QVector<QPair<QDateTime, double>> HistoryRecorder::query(
 
 // ★ D.1.2:默认路径 %APPDATA%\QianWei\HMI\history.db
 QString HistoryRecorder::defaultDbPath() {
-    // ★ 改用 AppLocalDataLocation(Qt6)— 跟 users.json / audit log 同目录
-    //   Qt6 默认 AppDataLocation → Roaming(Qt5 是 Local),但其他配置都在 Local
-    //   AppLocalDataLocation 在所有 Qt 版本都返 Local
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    // ★ 2026-10-21:改走 util::appDataDir() —— 跟 users.json / audit log / 日志
+    //   同一个目录(以前是各算各的,靠"碰巧算出同一个值"才凑到一起),
+    //   而且支持 HMI_DATA_DIR 覆盖。
+    //   这一条是【隔离的关键】:history.db 是 SQLite,两个实例同时写会互相锁死。
+    const QString base = qwhmi::util::appDataDir();
     return base + "/history.db";
 }
 

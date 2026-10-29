@@ -46,6 +46,7 @@
 #include "logging/Logging.h"
 #include "crash/CrashHandler.h"
 #include "instance/SingleInstance.h"
+#include "util/Paths.h"
 #include "tray/SystemTray.h"
 #include "auth/AdminSetupDialog.h"
 #include "auth/LoginDialog.h"
@@ -81,10 +82,11 @@ int main(int argc, char *argv[])
     //    日志、历史库、以及崩溃 dump 的目录都由 org/app 推导。
     //    放在后面的话,崩溃处理看到的是另一个目录(2026-10-14 修的就是这个)。
     //    这几个 setter 是静态的,不需要 QCoreApplication 实例,放最前面没有代价。
-    //    名字取自 crash::kOrgName / kAppName —— 全项目唯一出处,不许各写各的。
-    QCoreApplication::setOrganizationName(QString::fromLatin1(crash::kOrgName));
+    //    名字取自 util::kOrgName / kAppName —— 全项目唯一出处,不许各写各的。
+    //    ★ 2026-10-21:从 crash/ 搬到 util/Paths.h —— 数据目录也要用这两个值。
+    QCoreApplication::setOrganizationName(QString::fromLatin1(util::kOrgName));
     QCoreApplication::setOrganizationDomain(QStringLiteral("qianwei.com"));
-    QCoreApplication::setApplicationName(QString::fromLatin1(crash::kAppName));
+    QCoreApplication::setApplicationName(QString::fromLatin1(util::kAppName));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
 
     // 2. 崩溃处理
@@ -92,9 +94,15 @@ int main(int argc, char *argv[])
     qCInfo(hmiApp) << "[main-early] crash::install OK";
 
     // 3. 单实例检测
+    //   ★ 2026-10-21:实例键改成从环境变量 HMI_INSTANCE_KEY 取(见 SingleInstance.h)。
+    //     动机:长跑时机器上可能已经有另一个 hmi.exe 在跑,单实例锁用固定键,
+    //     第二个实例一启动就退出 —— 长跑脚本只能"拒绝开跑"。
+    //     键可换之后,长跑实例和已有实例各走各的,谁也不动谁。
+    //     不给这个变量 = 行为和以前一模一样。
     instance::SingleInstance instance;
-    qCInfo(hmiApp) << "[main-early] tryBecomePrimary start";
-    if (!instance.tryBecomePrimary()) {
+    const QString instanceKey = instance::SingleInstance::keyFromEnvironment();
+    qCInfo(hmiApp) << "[main-early] tryBecomePrimary start, key=" << instanceKey;
+    if (!instance.tryBecomePrimary(instanceKey)) {
         QStringList args;
         for (int i = 0; i < argc; ++i) {
             args << QString::fromLocal8Bit(argv[i]);
@@ -401,6 +409,17 @@ int main(int argc, char *argv[])
     });
 
     // 7. 主窗口 + 托盘
+    // ★ 2026-10-21:--soak 模式禁止弹模态对话框
+    //   【必须在构造窗口【之前】设】
+    //     构造 hmi 时它自己会 loadFromFile(default.json);
+    //     那一步失败会 emit loadError → 弹 QMessageBox →
+    //     长跑脚本没有人去点它 → 程序【永久卡在那个框上】。
+    //     从外面看:进程活着、日志停长、内存不涨 —— 全是"正常"的假象。
+    //     这跟登录框、自动注销是同一类东西:人机界面挡住机器。
+    if (soakMode) {
+        hmi::setModalAlertsEnabledGlobally(false);
+        qCInfo(hmiApp) << "[main] --soak 模式:禁止弹模态对话框(失败只记日志)";
+    }
     hmi window;
     tray::SystemTray trayIcon(&window);
 
@@ -492,8 +511,16 @@ int main(int argc, char *argv[])
 
     if (parser.isSet(projectOpt)) {
         const QString path = parser.value(projectOpt);
-        qCInfo(hmiApp) << "启动参数 --project =" << path
-                       << "(打开工程功能在阶段 B 接入)";
+        qCInfo(hmiApp) << "启动参数 --project =" << path;
+        // ★ 2026-10-21:真的去打开它(以前这里只打了一行日志,什么都没做)
+        //   【为什么失败就退出,而不是"回退到 default.json 继续跑"】
+        //     回退 = 长跑脚本以为在跑那份工程,实际跑的是另一份 ——
+        //     一整天的数据测的是一个根本没打开的东西,而且【看不出来】。
+        //     宁可当场退出(退出码 2),让 harness 立刻知道"没验成"。
+        if (!window.loadProjectAtStartup(path)) {
+            qCCritical(hmiApp) << "[main] --project 工程加载失败,拒绝启动:" << path;
+            return 2;
+        }
     }
 
     if (!parser.isSet(minimizeOpt)) {

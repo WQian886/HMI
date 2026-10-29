@@ -55,6 +55,10 @@ void enterTestMetadata() {
     QCoreApplication::setOrganizationName(kTestOrg);
     QCoreApplication::setApplicationName(kTestApp);
     qputenv("HMI_CRASH_DIR", testDumpDir().toUtf8());
+    // ★ 2026-10-21:把数据目录覆盖也清掉。
+    //   dumpDirectory() 现在走 util::appDataDir()(它认 HMI_DATA_DIR),
+    //   环境里要是残留着这个变量,下面那条"默认路径"的断言就不是在验默认路径了。
+    qunsetenv("HMI_DATA_DIR");
 }
 
 QString markerPath() {

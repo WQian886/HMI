@@ -16,6 +16,8 @@
 
 #include "logging/Logging.h"
 
+#include "util/Paths.h"
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QIODevice>
@@ -170,13 +172,15 @@ QString logDirectory() {
     if (!g_state.config.directory.isEmpty()) {
         return g_state.config.directory;
     }
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    // ★ 2026-10-21:改走 util::appDataDir() —— 全应用同一个数据目录,
+    //   而且支持 HMI_DATA_DIR 覆盖(长跑实例要与正在跑的实例隔离,见 util/Paths.h)。
+    const QString base = qwhmi::util::appDataDir();
     return base + QLatin1Char('/') + QLatin1String(kLogSubDir);
 }
 
 Config loadConfig() {
     Config cfg;
-    const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    const QString base = qwhmi::util::appDataDir();
     QFile f(base + QLatin1Char('/') + QLatin1String(kConfigFileName));
     if (!f.exists() || !f.open(QIODevice::ReadOnly)) {
         return cfg;

@@ -38,6 +38,8 @@ using namespace qwhmi::auth;
 class TestAuditE2E : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase();
+    void cleanupTestCase();
     void init();      // 每个用例前 logout + 重置 audit
     void cleanup();
 
@@ -137,6 +139,21 @@ void TestAuditE2E::init() {
     AuditLog::instance().resetForTesting();
     cleanTempDir();
     QDir().mkpath(tempDir());
+}
+
+void TestAuditE2E::initTestCase() {
+    // ★ 2026-10-21:把审计日志【隔离】到临时目录 —— 理由同 tst_AuditLog。
+    //   AuditLog::defaultFilePath() 指向真实的 %LOCALAPPDATA%\QianWei\HMI\,
+    //   而 resetForTesting() 里有一句 QFile::remove(defaultFilePath())
+    //   ⇒ 每跑一次单元测试,现场当天的审计日志就没了。
+    //   2026-10-21 实测踩到过:跑完 ctest,正在跑的那一轮长跑的
+    //   audit-2026-10-21.log 当场消失。
+    qputenv("HMI_DATA_DIR", tempDir().toUtf8());
+    QDir().mkpath(tempDir());
+}
+
+void TestAuditE2E::cleanupTestCase() {
+    qunsetenv("HMI_DATA_DIR");
 }
 
 void TestAuditE2E::cleanup() {

@@ -18,6 +18,7 @@
 #include "auth/Role.h"
 
 #include "logging/Logging.h"
+#include "util/Paths.h"
 
 #include <QDate>
 #include <QDateTime>
@@ -47,7 +48,9 @@ AuditLog::~AuditLog() {
 }
 
 QString AuditLog::defaultFilePath() {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    // ★ 2026-10-21:走 util::appDataDir() —— 见 util/Paths.h。
+    //   这一条尤其重要:审计日志按天命名,两个实例写同一份会互相截断。
+    const QString dir = qwhmi::util::appDataDir();
     const QString today = QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
     return QStringLiteral("%1/audit-%2.log").arg(dir, today);
 }
