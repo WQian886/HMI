@@ -29,6 +29,12 @@ namespace qwhmi::comm { class CommTraceModel; }
 // ★ E.4a(2026-09-21):编辑器按钮入口
 #include "editor/EditorMainWindow.h"
 #include "editor/RuntimeCanvas.h"   // ★ E.5(2026-09-29):运行时画布
+// ★ G-20(2026-10-30):调试面板请求的【唯一描述类型】。
+//   以前"要发什么"是几个散落的参数(isRead/type/slaveId/addr/count/values),
+//   而"从 UI 读一遍"和"校验"又发生在不同地方 —— 于是校验过的和发出去的
+//   未必是同一份(从站号 0 = 广播写就是这么来的)。
+//   现在待发请求直接存这个结构:【验过的就是发的】。
+#include "plc/ModbusRequestParser.h"
 
 // ★ QMenu 一直是靠 QtWidgets 传递包含进来的,这里把两个都显式前向声明 ——
 //   2026-10-14 新增 QAction 成员时才发现:不能假设"QMenu 可见则 QAction 也可见"。
@@ -257,14 +263,11 @@ private:
     ModbusState modbusState_ = ModbusState::Disconnected;
 
     // 阶段 2-4 重设计:连接建立后待发的请求(消除 500ms hack)
-    struct PendingModbusRequest {
-        bool isRead;
-        QModbusDataUnit::RegisterType type;
-        int addr;
-        QVector<quint16> values;  // 写时用
-        int count;                // 读时用
-    };
-    PendingModbusRequest pendingModbus_;
+    // ★ G-20(2026-10-30):原来这里是一个自己定义的 PendingModbusRequest,
+    //   里面【没有从站号】—— 所以"连上再发"那条路径只能重新读 UI 文本。
+    //   现在直接用共享层那个 RequestSpec(它带从站号),并且存的是
+    //   【点击那一刻已经校验过的那一份】。
+    qwhmi::plc::RequestSpec pendingModbus_;
     bool hasPendingModbus_ = false;
 
     // 阶段 2-4 重设计:最近一次结果(由 updateUi() 推到 resultLabel)
@@ -303,7 +306,11 @@ private:
     static constexpr int kResetIntervalMs   = 3000;  // 复位 QTimer 间隔(到点转 Stopped)
 
     // 2026-07-07 重设计:Modbus 通用请求入口
-	void executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int slaveId, int addr);// 统一入口:Modbus 读/写请求,由 ModbusMaster 调用
+    // ★ G-20(2026-10-30):参数改成【一份已经校验过的请求】。
+    //   以前是 (isRead, type, slaveId, addr) 四个散参数 + 函数内部
+    //   【再去 UI 上读一遍值列表】—— 那第二遍读取绕过了全部校验。
+    //   现在:传进来的这份就是要发的那份,函数内部不再碰 UI。
+	void executeModbus(const qwhmi::plc::RequestSpec& spec);// 统一入口:Modbus 读/写请求,由 ModbusMaster 调用
 	void executePendingModbus();// 阶段 2-4 重设计:连接建立后待发的请求(消除 500ms hack)
 
 	Ui::hmiClass ui;// UI 设计器生成的界面类成员

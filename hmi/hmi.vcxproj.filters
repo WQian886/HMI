@@ -4,6 +4,15 @@
     <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
          症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
          所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
+    <ClCompile Include="src\plc\ModbusRequestParser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="src\plc\ModbusRequestParser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,
+         症状是它们在 VS 解决方案资源管理器里看不见(编译不受影响,
+         所以 ctest 全绿也照样漏)。由 scripts/fix_filters_entries.py 补齐。 -->
     <ClCompile Include="src\alarm\ActionWiring.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

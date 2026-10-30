@@ -207,6 +207,11 @@ set(HMI_CORE_SOURCES
     #   而报错点全在测试文件里,离病根(这一行没加)很远。
     #   同 WriteFailChecker / AlarmSoundPlayer 那两段注释说的同一个坑。
     ${HMI_SRC_DIR}/src/comm/CommTraceModel.cpp
+    # ★ G-20(2026-10-30):调试面板请求解析。
+    #   【必须进 hmi_core】hmi.cpp 不在里面,所以调试面板那一行的解析
+    #   以前只能"抄一份跑"—— 而这份逻辑抄错了就是【广播写】。
+    #   现在测试调的是生产用的同一个 parseRequestSpec。
+    ${HMI_SRC_DIR}/src/plc/ModbusRequestParser.cpp
 )
 
 # ============================================================
@@ -683,6 +688,9 @@ add_hmi_test(tst_EditorMainWindow)
 # ★ E.5(2026-09-29):运行时画布 —— 编辑器存的画面能不能在主画面显示、变量绑不绑得上。
 #   重点测两件以前【零覆盖】的事:JSON 字符串 → Variable* 绑定,以及绑不上时能被看见。
 add_hmi_test(tst_RuntimeCanvas)
+# ★ G-20(2026-10-30):调试面板那一行的解析 —— 从站号 0 = 广播写。
+#   纯逻辑,无界面,QTEST_GUILESS_MAIN 就够。
+add_hmi_test(tst_ModbusRequestParser)
 # ★ E.7(2026-09-30):复制 / 粘贴 / 删除 + 它们的 Undo(原为零覆盖)。
 #   重点是"删→撤→删→撤"连环 —— 命令存 JSON 快照,撤销造的是新对象,
 #   旧指针当场失效,残留一处在第二轮就会出事。

@@ -5,6 +5,7 @@
 #include "drivers/IPollDriver.h"   // ★ C.1(2026-09-17):协议抽象层
 #include "drivers/IPlcDriverProvider.h" // ★ 2b(2026-10-19):WriteScheduler 按 plcId 问它要 driver
 #include "plc/PlcConnectionManager.h"  // ★ 2b:工程里 N 台 PLC 的连接持有者 + provider 实现
+#include "plc/ModbusRequestParser.h"  // ★ G-20:调试面板输入的唯一解析处(从站号 0 = 广播,必须拒)
 #include "drivers/ModbusDriver.h"  // ★ C.1:Modbus 协议 Driver
 #include "drivers/DriverFactory.h" // ★ C.1:driver 工厂
 #include "drivers/ProtocolGuard.h" // ★ C.4(2026-09-18):跨协议 UX 锁纯逻辑(可单测)
@@ -141,8 +142,12 @@ QString statusBadgeStyle(StatusTone tone, bool large = false) {
 //   少一个类、少一层转发,现场行为还从"永远单 PLC"变成"真的多 PLC"。
 
 
-// 2026-07-13 阶段 2 第 6 练:parseValueList 前向声明(定义在文件底部;默认值在定义里)
-QVector<quint16> parseValueList(const QString& text, QString* errOut);
+// ★ G-20(2026-10-30):parseValueList 原来定义在【本文件底部】,
+//   而且【整个调试面板的输入解析】都散在这一个文件里 ——
+//   于是 hmi_core 编不到它,测试只能"抄一份跑"(测的是副本)。
+//   现在整块搬进 src/plc/ModbusRequestParser.{h,cpp}(纯 QtCore),
+//   测试调的是【生产用的同一个函数】。
+//   头文件见 src/plc/ModbusRequestParser.h 顶部的完整问题说明。
 
 // 阶段 5.4:AlarmLevel → 字符串(给 alarmTable 等级列用;内联避免头文件污染)2026-08-04
 static QString alarmLevelName(AlarmLevel l) {
@@ -501,49 +506,45 @@ hmi::hmi(QWidget *parent)
             statusBar()->showMessage("IP 或端口不能为空", kStatusBarMediumMs);  // ★ IMPROVE-B4
             return;
         }
-        int slaveId = ui.modbusSlaveEdit->text().toInt(&ok);
-        int addr    = ui.modbusAddrEdit->text().toInt(&ok);
-        if (!ok || slaveId < 0 || slaveId > 255) {
-            statusBar()->showMessage("slaveId 必须 0-255", kStatusBarMediumMs);  // ★ IMPROVE-B4
+
+        // ★★ G-20(2026-10-30):【先解析,后动作】★★
+        //   原来的写法是:
+        //       int slaveId = ...toInt(&ok);
+        //       int addr    = ...toInt(&ok);    ← ok 被第二次调用覆盖了
+        //       if (!ok || ...) { return; }
+        //   ⇒ 从站号那一栏填了垃圾、地址那一栏填的是对的 ⇒ 检查通过
+        //   ⇒ 而 toInt 失败返回 0 ⇒ slaveId = 0 ⇒ ★ 广播地址 ★
+        //   ⇒ 写请求会发给总线上的【每一台】设备,界面上只显示"写成功"。
+        //   完整说明见 src/plc/ModbusRequestParser.h 的文件头。
+        const int typeIdx = ui.modbusTypeCombo->currentIndex();
+        if (typeIdx < 0 || typeIdx > 3) {
+            // 防一手:下面按索引取表,越界就是未定义行为。
+            statusBar()->showMessage("寄存器类型无效", kStatusBarMediumMs);
             return;
         }
-        int typeIdx = ui.modbusTypeCombo->currentIndex();
-        bool isRead = ui.modbusRwCombo->currentIndex() == 0;  // 0=读,1=写
-        // 2026-07-09:UI 下拉框索引 ≠ Qt 枚举值(Qt 0 是 Invalid)
-        // 这里做显式映射,以后加类型只改这张表
-        static const QModbusDataUnit::RegisterType kTypeMap[] = {
-            QModbusDataUnit::HoldingRegisters,   // UI 0 = 保持寄存器
-            QModbusDataUnit::InputRegisters,     // UI 1 = 输入寄存器
-            QModbusDataUnit::Coils,              // UI 2 = 线圈
-            QModbusDataUnit::DiscreteInputs,     // UI 3 = 离散输入
-        };
-        QModbusDataUnit::RegisterType type = kTypeMap[typeIdx];
+        const bool isRead = ui.modbusRwCombo->currentIndex() == 0;  // 0=读,1=写
+
+        qwhmi::plc::RequestSpec spec;
+        QString parseErr;
+        if (!qwhmi::plc::parseRequestSpec(ui.modbusSlaveEdit->text(),
+                                           ui.modbusAddrEdit->text(),
+                                           ui.modbusDataEdit->text(),
+                                           isRead,
+                                           static_cast<qwhmi::plc::RegisterKind>(typeIdx),
+                                           &spec, &parseErr)) {
+            // ★ 原因要能照着改:解析层已经把"哪一项、为什么、合法范围是多少"写清楚了。
+            statusBar()->showMessage(parseErr, kStatusBarMediumMs);
+            return;
+        }
 
         if (!modbus_->isConnected()) {
             // 未连接:先连,等 connected 再发
             modbusState_ = ModbusState::Connecting;
             hasPendingModbus_ = true;
-            pendingModbus_.isRead = isRead;
-            pendingModbus_.type = type;
-            pendingModbus_.addr = addr;
-            pendingModbus_.count = 1;
-            pendingModbus_.values.clear();
-            if (!isRead) {
-                // 2026-07-13 阶段 2 第 6 练:写多值(逗号分隔)
-                QString err;
-                QVector<quint16> vals = parseValueList(ui.modbusDataEdit->text(), &err);
-                if (vals.isEmpty()) {
-                    statusBar()->showMessage(err.isEmpty() ? "写值不能为空" : err, kStatusBarMediumMs);  // ★ IMPROVE-B4
-                    return;
-                }
-                pendingModbus_.values = vals;  // 整个 list(单值就是 size=1)
-            } else {
-                pendingModbus_.count = ui.modbusDataEdit->text().toInt(&ok);
-                if (!ok || pendingModbus_.count < 1 || pendingModbus_.count > 125) {
-                    statusBar()->showMessage("读数量必须 1-125", kStatusBarMediumMs);  // ★ IMPROVE-B4
-                    return;
-                }
-            }
+            // ★ G-20:排队的就是【刚校验过的那一份】——
+            //   包含从站号。原来的 PendingModbusRequest 里【没有从站号】,
+            //   于是"连上再发"只能重新读 UI 文本,那一读绕过了全部校验。
+            pendingModbus_ = spec;
             updateUi();
             // ★ 2b:连的是【plc1 现有的那条连接】,host/port 只是 UI 上那两个框。
             //   真正生效的是工程配置里的 host/port —— 这两个框现在只是"看着像"
@@ -558,7 +559,7 @@ hmi::hmi(QWidget *parent)
         }
 
         // 已连接:直接发
-        executeModbus(isRead, type, slaveId, addr);
+        executeModbus(spec);
     });
 
     // ==================== 阶段 3.2:VariableManager + demo 变量(订阅发布 UI 验证) ====================
@@ -990,44 +991,42 @@ hmi::~hmi()
 {}
 
 // ============================================================
-// 2026-07-13 阶段 2 第 6 练:parseValueList helper
-// 解析 "1,2,3" / "0xFF,0x00" 这种逗号分隔 uint16 列表
-// 失败:errOut 写错误信息(用于 statusBar),返回值是空 list
+// ★ G-20(2026-10-30):parseValueList 已搬到 src/plc/ModbusRequestParser.cpp
+//   原因见上面 include 那行的注释。
 // ============================================================
-QVector<quint16> parseValueList(const QString& text, QString* errOut = nullptr) {
-    QVector<quint16> result;
-    const QStringList parts = text.split(',', Qt::SkipEmptyParts);
-    for (const QString& p : parts) {
-        QString t = p.trimmed();
-        if (t.isEmpty()) continue;
-        bool ok = false;
-        quint16 v = 0;
-        if (t.startsWith("0x", Qt::CaseInsensitive)) {
-            v = t.toUShort(&ok, 16);  // 0x 前缀走十六进制
-        } else {
-            v = t.toUShort(&ok, 10);  // 默认十进制
-        }
-        if (!ok) {
-            if (errOut) *errOut = QString("非法值: '%1'(需 0-65535 或 0x 前缀)").arg(t);
-            return {};
-        }
-        result.append(v);
-    }
-    if (result.isEmpty() && errOut) *errOut = "值列表为空";
-    return result;
-}
 
 // 2026-07-07 重设计:执行待发请求(连接刚建好后)
+// ★ G-20:从站号现在用【排队时校验过的那一份】,不再重新读 UI 文本。
+//   原来这里读的是 ui.modbusSlaveEdit->text().toInt() ——
+//   【连不上→排队→连上→发】这段时间里,操作员把那一栏改掉(或者清空),
+//   发出去的就是另一台设备;而 toInt 失败时返回 0 ⇒ 广播写。
+//   排队的东西必须是【点击那一刻】就已经验过的那一份。
 void hmi::executePendingModbus() {
-    executeModbus(pendingModbus_.isRead, pendingModbus_.type,
-                  ui.modbusSlaveEdit->text().toInt(),
-                  pendingModbus_.addr);
+    executeModbus(pendingModbus_);
     hasPendingModbus_ = false;
 }
 
 // 2026-07-07 重设计:统一的读/写入口
-void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int slaveId, int addr) {
+// ★ G-20(2026-10-30):参数改成【一份已经校验过的请求】。
+//   以前这个函数【自己去 UI 上再读一遍值列表】——
+//   那一读绕过了全部校验(数量上限、地址范围),
+//   而且"读"和"写"两条分支的 count 语义还各写各的。
+//   现在:传进来的这份就是要发的那份,函数内部不再碰 UI。
+void hmi::executeModbus(const qwhmi::plc::RequestSpec& spec) {
     QModbusReply* reply = nullptr;
+
+    const bool isRead = spec.isRead;
+    const int  slaveId = spec.slaveId;
+    const int  addr    = spec.address;
+    // 2026-07-09:UI 下拉框索引 ≠ Qt 枚举值(Qt 0 是 Invalid)
+    // 这里做显式映射,以后加类型只改这张表
+    QModbusDataUnit::RegisterType type = QModbusDataUnit::HoldingRegisters;
+    switch (spec.kind) {
+    case qwhmi::plc::RegisterKind::HoldingRegisters: type = QModbusDataUnit::HoldingRegisters; break;
+    case qwhmi::plc::RegisterKind::InputRegisters:   type = QModbusDataUnit::InputRegisters;   break;
+    case qwhmi::plc::RegisterKind::Coils:            type = QModbusDataUnit::Coils;            break;
+    case qwhmi::plc::RegisterKind::DiscreteInputs:   type = QModbusDataUnit::DiscreteInputs;   break;
+    }
 
     // ★ C.1(2026-09-17):executeModbus 是 Modbus-特定调试 UI,需要 ModbusMaster 接口
     //   从 modbus_(IPollDriver*) cast 回 ModbusDriver*,再拿 inner() 用 ModbusMaster 接口
@@ -1043,25 +1042,13 @@ void hmi::executeModbus(bool isRead, QModbusDataUnit::RegisterType type, int sla
     ModbusMaster* modbus = modbusDriver->inner();
 
     if (isRead) {
-        int count = pendingModbus_.isRead == false ? 1 : pendingModbus_.count;
-        if (hasPendingModbus_ && pendingModbus_.isRead) count = pendingModbus_.count;
         // 读
-        QModbusDataUnit unit(type, addr, static_cast<quint16>(count));
+        QModbusDataUnit unit(type, addr, static_cast<quint16>(spec.count));
         reply = modbus->sendReadRequest(unit, slaveId);
     } else {
-        // 2026-07-13 阶段 2 第 6 练:写多值(逗号分隔)
-        QVector<quint16> vals;
-        if (hasPendingModbus_ && !pendingModbus_.isRead) {
-            vals = pendingModbus_.values;  // 来自点击时的排队
-        } else {
-            QString err;
-            vals = parseValueList(ui.modbusDataEdit->text(), &err);
-            if (vals.isEmpty()) {
-                statusBar()->showMessage(err.isEmpty() ? "写值不能为空" : err, kStatusBarMediumMs);  // ★ IMPROVE-B4
-                return;
-            }
-        }
-        QModbusDataUnit unit(type, addr, vals);
+        // 写多值(逗号分隔)—— 值已经在解析层校验过了,这里【不再】读 UI。
+        // ★ G-20:原来这里是"自己去 UI 再读一遍",那一读绕过了全部校验。
+        QModbusDataUnit unit(type, addr, spec.values);
         reply = modbus->sendWriteRequest(unit, slaveId);
     }
 
