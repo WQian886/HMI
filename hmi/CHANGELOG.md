@@ -7,6 +7,11 @@
 > `tst_DerivedVariable`（13 条）/ `tst_ModbusRequestParser` / `tst_ControlWriteRejection` /
 > `tst_LoggingFileUnavailable` / `tst_QtReentryProbe`；
 > 负向对照：G-19 / G-20 / G-21 / G-22 各 1 个 + G-23 5 个变异，**全部按预期变红**；
+> **CI run #21**（`codex/verify-20261029` @ `bbef7db`，**带全部修复**）：
+> **104/104 全绿、115.04 秒**（`build-windows: success`）
+> ⇒ 修复版第一次在**别的机器**上验过一遍；
+> ★ 本地也是**逐个提交**验的：6 个提交每个单独 checkout → `ninja -j 2` → 全套 ctest，
+> **6/6 全绿**（101 / 102 / 103 / 103 / 104 / 104 个目标，用例数阶梯跟每步新增的测试目标对得上）；
 > ★ 顺带挖出 `tst_PollSchedulerDerived` 一条**假绿**用例
 > （`speed->setValue(3)` 传 `int` 给 `Int16` 变量，被 `setValue` 的类型校验**拒收**
 > ⇒ 源变量从头到尾没值 ⇒ `QCOMPARE(after, before)` **恒真**
