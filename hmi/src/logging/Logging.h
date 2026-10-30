@@ -63,6 +63,30 @@ QString logDirectory();
 //     Fatal 一旦真打出来,进程就结束了 —— 那一档没法用间接法测。
 int severityRank(QtMsgType t);
 
+// ★★★ G-19(2026-10-30):日志模块的观测口 ★★★
+//
+//   【背景】
+//     G-19:日志目录打不开时,原来每【一条】日志都会重试一次打开
+//     (mkpath + open 失败 + 报错),⇒ stderr 被刷爆、CPU 白烧,
+//     而日志文件一个字也没写进去。
+//
+//   【契约】
+//     openAttempts —— 尝试打开日志文件的次数。
+//       日志文件打不开时,它必须【停在 1】:不能每条消息都重试一次。
+//     reentryCount —— messageHandler 被【重入】的次数。
+//       ★ 实测(Qt 6.8.3):Qt 不会重入自定义 handler,这个计数正常恒为 0。
+//         它是【哨兵】:哪天 Qt 改了这条语义,这里会先红。
+//
+//   【为什么暴露成公开 API】
+//     测试要能【精确】断言"没有反复重试"。
+//     只能靠"stderr 刷了多少行"来判红的话,负向对照既慢又不准。
+struct Diagnostics {
+    int reentryCount = 0;
+    int openAttempts = 0;
+};
+Diagnostics loggingDiagnostics();
+void resetLoggingDiagnostics();
+
 } // namespace qwhmi::logging
 
 Q_DECLARE_LOGGING_CATEGORY(hmiApp)

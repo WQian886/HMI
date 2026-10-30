@@ -582,6 +582,29 @@ add_hmi_test(tst_ModbusFrame)
 #   证明不了任何事 —— 类别写错名字编译就挂,写对了也可能因为 handler 没认出来
 #   而什么也不做,且【没有任何报错】。这个测试钉住"按类别能关掉"这个唯一收益。
 add_hmi_test(tst_LoggingCategory)
+# ★ 2026-10-30:G-19 —— 日志目录打不开 ⇒ 每条日志都重试一次打开
+#   (stderr 刷爆 + CPU 白烧 + 日志静默全丢)。
+#   不用 add_hmi_test:它要自己带 TIMEOUT ——
+#   万一哪天 handler 又被改成会卡住的形态,没有超时上限的话
+#   ctest 会一直挂着,CI 上要等全局超时(120 分钟)才知道出了事。
+#   60 秒足够区分"卡住"和"正常跑完"(本文件正常跑完 < 1 秒)。
+add_executable(tst_LoggingFileUnavailable tst_LoggingFileUnavailable.cpp)
+target_link_libraries(tst_LoggingFileUnavailable PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_LoggingFileUnavailable PRIVATE /utf-8)
+add_test(NAME tst_LoggingFileUnavailable COMMAND tst_LoggingFileUnavailable)
+set_tests_properties(tst_LoggingFileUnavailable PROPERTIES TIMEOUT 60)
+# ★ 2026-10-30:Qt 消息处理器的【重入语义】基线。
+#   G-19 那条"死锁"结论就是被这个探针推翻的 ——
+#   Qt 6.8.3 不会重入自定义 handler(handler 内部再打一条日志,
+#   Qt 会把它交给【默认 handler】)。
+#   ★ 所以它必须留成【断言】,而不是一次性探针:
+#     哪天 Qt 升级改了这条语义,这里会先红,提醒我们重新审视
+#     Logging.cpp 里那把非递归 QMutex 和"重入保护"的定位,
+#     而不是等到现场发现程序不动了。
+add_executable(tst_QtReentryProbe tst_QtReentryProbe.cpp)
+target_link_libraries(tst_QtReentryProbe PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_QtReentryProbe PRIVATE /utf-8)
+add_test(NAME tst_QtReentryProbe COMMAND tst_QtReentryProbe)
 # 阶段 C · C.4 协议选择 UX 锁(教训 1.5)
 add_hmi_test(tst_ProtocolSwitch)
 # ★ 2026-10-10:协议可用性(UI 置灰 S7/EIP 的查表)
