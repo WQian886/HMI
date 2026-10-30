@@ -20,8 +20,7 @@
 // 【关联】
 //   ControlBase::mayFlipLocallyAsPreview / notifyWriteRejected / writeRejected
 //   ValveControl / PumpControl / MotorControl / ToggleControl 的 mouseReleaseEvent
-//   RuntimeCanvas::showWriteRejection —— 生产环境里唯一接这个信号的地方
-//     (G-22 那个提交补齐:那条接收方还没进 hmi_core 之前,这里先不测它)
+//   RuntimeCanvas::showWriteRejection(生产环境里唯一接这个信号的地方)
 // ============================================================================
 
 #include <QtTest>
@@ -38,6 +37,7 @@
 #include "widgets/MotorControl.h"
 #include "widgets/ToggleControl.h"
 #include "widgets/base/ControlBase.h"
+#include "editor/RuntimeCanvas.h"
 #include "Variable.h"
 #include "auth/AuditLog.h"
 #include "auth/CurrentUser.h"
@@ -108,6 +108,10 @@ private slots:
     void rejectionReason_isRecordedOnTheControl();
     void rejectionReason_saysWhyItWasRejected();
     void boundButRejected_alsoCarriesAReason();
+
+    // ===== G-22:信号 + 生产环境的接收方 =====
+    void runtimeCanvas_surfacesTheRejection();
+    void runtimeCanvas_bannerIsHiddenUntilSomethingIsRejected();
 
     // ===== G-22:审计留痕 =====
     void audit_recordsTheRejection();
@@ -332,6 +336,41 @@ void TestControlWriteRejection::boundButRejected_alsoCarriesAReason() {
     QCOMPARE(spy.count(), 1);
     QVERIFY(!t.lastWriteRejection().isEmpty());
     QCOMPARE(spy.at(0).at(0).toString(), t.lastWriteRejection());
+}
+
+// =============================================================================
+// G-22:生产环境里唯一的接收方 —— RuntimeCanvas
+// =============================================================================
+
+void TestControlWriteRejection::runtimeCanvas_surfacesTheRejection() {
+    // ★★ 这条是 G-22 的核心:光发信号没人接,等于没发。
+    //   运行时画布必须把"写被拒"变成操作员看得见的东西。
+    //
+    //   走真实路径:RuntimeCanvas::loadControls 会 setRuntimeMode(true),
+    //   跟生产环境一样 —— 这正是本缺陷的触发条件。
+    qwhmi::editor::RuntimeCanvas canvas(nullptr);
+    auto* valve = new ValveControl;
+    canvas.loadControls({valve});
+
+    QVERIFY2(valve->runtimeMode(), "运行时画布上的控件必须是运行时模式");
+    QVERIFY2(!canvas.isRejectionBannerVisible(), "还没发生任何拒绝,提示条不该亮");
+
+    // 点一下那个没接线的阀门
+    clickInScene(canvas.scene(), valve);
+
+    QVERIFY2(canvas.isRejectionBannerVisible(),
+             "★ 运行时画布上写被拒,必须让操作员看得见(红条)");
+    QVERIFY2(!canvas.lastRejection().isEmpty(),
+             "★ 写被拒的原因必须能被上层取到");
+}
+
+void TestControlWriteRejection::runtimeCanvas_bannerIsHiddenUntilSomethingIsRejected() {
+    // 反向:没出事的时候不许有红条。
+    //   一个一直亮着的警告条等于没有警告条 —— 操作员会习惯性地忽略它。
+    qwhmi::editor::RuntimeCanvas canvas(nullptr);
+    auto* nd = new ValveControl;
+    canvas.loadControls({nd});
+    QVERIFY(!canvas.isRejectionBannerVisible());
 }
 
 // =============================================================================

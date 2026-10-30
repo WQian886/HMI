@@ -14,6 +14,11 @@
 #include <QGraphicsView>
 #include <QVBoxLayout>
 #include <QPainter>
+#include <QLabel>
+#include <QTimer>
+#include <QPalette>
+
+#include "logging/Logging.h"
 
 namespace qwhmi::editor {
 
@@ -38,6 +43,27 @@ RuntimeCanvas::RuntimeCanvas(VariableManager* varMgr, AlarmManager* alarmMgr, QW
     lay->setContentsMargins(0, 0, 0, 0);
     lay->addWidget(view_);
 
+    // ★ G-22:拒绝提示条。默认隐藏 —— 平时不该占画面。
+    //   为什么是"画布上方一条"而不是弹窗:
+    //     弹窗会被操作员随手关掉,关掉之后那件事就没了 —— 而"我点了阀门,
+    //     PLC 没动"这件事【必须留痕在屏幕上】,直到下一次成功的操作把它盖掉。
+    //
+    //   ★ 为什么它【不占布局】(不是 lay->addWidget(banner_)):
+    //     一旦放进布局,显示的瞬间画布整体下移 28 像素 —— 运行时看到的画面
+    //     跟编辑器里摆的不一样(控件位置全偏了)。这个类上面那段注释专门
+    //     强调过 WYSIWYG("两处长得一样"),那不只是颜色的事,是位置的事。
+    //     所以提示条做成【浮在画布上】的覆盖层,靠 resizeEvent 摆位。
+    banner_ = new QLabel(this);
+    banner_->setObjectName(QStringLiteral("writeRejectedBanner"));
+    banner_->setWordWrap(true);
+    banner_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    banner_->setMinimumHeight(28);
+    // 红底白字:现场画面常用深色,红底在深色底上照样跳得出来。
+    banner_->setStyleSheet(QStringLiteral(
+        "QLabel { background-color:#c62828; color:#ffffff; padding:4px 8px; "
+        "font-weight:bold; border-radius:3px; }"));
+    banner_->hide();
+
     // ★ 注册表预热:create(typeName) 靠它,漏了就是"画面空白且零报错"
     EditorMainWindow::ensureControlTypesRegistered();
 }
@@ -60,6 +86,11 @@ void RuntimeCanvas::clearCanvas() {
     boundCount_ = 0;
     expectedBindCount_ = 0;
     unboundNames_.clear();
+    // ★ G-22:换画面时把上一次的"写被拒"提示一并清掉 ——
+    //   上一张画面上的拒绝还挂在红条上,会让人以为【这张】画面出问题了。
+    lastRejection_.clear();
+    rejectionBannerShown_ = false;
+    if (banner_) banner_->hide();
 }
 
 int RuntimeCanvas::load(const QString& path) {
@@ -131,6 +162,13 @@ void RuntimeCanvas::loadControls(const QList<qwhmi::widgets::ControlBase*>& cont
         // ★ F3:接报警数据源。少了这一句,AlarmListControl 的 alarmMgr_ 恒为 null,
         //   表格永远空白且零报错(见 RuntimeCanvas.h 里的说明)。
         if (alarmMgr_) c->setAlarmManager(alarmMgr_);
+        // ★ G-22:接"写被拒"。这是全仓库【第一处】真正接这个信号的地方 ——
+        //   信号以前只在三个子类上各声明一份,谁都没连,于是"点了没生效"
+        //   对操作员是零反馈(现象跟"没点到"一模一样)。
+        //   ControlBase::writeRejected 现在在基类上,Valve/Pump/Motor/Toggle
+        //   全都发得到同一个信号 —— 一行 connect 覆盖全部控件。
+        QObject::connect(c, &qwhmi::widgets::ControlBase::writeRejected,
+                         this, &RuntimeCanvas::showWriteRejection);
         controls_.append(c);
         scene_->addItem(c);
     }
@@ -176,6 +214,49 @@ void RuntimeCanvas::bindAllControls() {
         qWarning() << "[RuntimeCanvas] 有" << unboundNames_.size()
                    << "个控件绑不上变量:" << unboundNames_;
     }
+}
+
+// ===== G-22:写被拒 → 操作员看得见 =====
+
+// ★ G-22:把"写被拒"变成三件事 —— 红条、日志、审计。
+//   (审计那一半在 ControlBase::notifyWriteRejected 里做,理由是
+//    "谁点的、点了什么、为什么没生效"要在控件自己的上下文里才说得清;
+//    这里只负责"让操作员当场看见"。)
+//
+// 【为什么红条【不自动消失】】
+//   如果 3 秒后自动隐藏,操作员低头看了一眼 PLC 回来一看红条没了 ——
+//   "刚才到底成没成"就又变成了只能猜。
+//   它一直挂着,直到下一次写被拒把它换成新的原因。
+//   (它不占布局,所以不会挡住画布 —— 见构造函数里那段说明。)
+void RuntimeCanvas::showWriteRejection(const QString& detail) {
+    lastRejection_ = detail;
+    rejectionBannerShown_ = true;
+
+    if (banner_) {
+        banner_->setText(tr("写入被拒:%1").arg(detail));
+        banner_->show();
+        positionBanner();
+        banner_->raise();
+    }
+
+    // 日志:【必须留一条】。画面是给人看的,日志是给事后复盘看的 ——
+    //   事故调查时能查到的第一条就是"操作员点了什么、系统怎么回的"。
+    qCWarning(hmiUi) << "[RuntimeCanvas] 控件写入被拒:" << detail;
+}
+
+// ★ 提示条是浮层:跟着画布的宽度走,贴在画布顶部。
+//   放在布局里会让画布整体下移 —— 运行时看到的元件位置就跟编辑器摆的不一样,
+//   操作员点同一个元件会点偏,这是比"少个提示"更严重的事。
+void RuntimeCanvas::positionBanner() {
+    if (!banner_ || !view_) return;
+    const int h = banner_->sizeHint().height();
+    banner_->setGeometry(view_->x(), view_->y(), view_->width(), h);
+    banner_->raise();
+}
+
+void RuntimeCanvas::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    positionBanner();
 }
 
 } // namespace qwhmi::editor

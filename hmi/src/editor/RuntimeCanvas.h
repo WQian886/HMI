@@ -38,6 +38,9 @@ class QGraphicsView;
 class Project;
 class VariableManager;
 class AlarmManager;
+class QLabel;
+class QTimer;
+class QResizeEvent;
 
 namespace qwhmi::widgets { class ControlBase; }
 
@@ -85,12 +88,39 @@ public:
     QGraphicsView* view() const { return view_; }
     QGraphicsScene* scene() const { return scene_; }
 
+    // ★★ G-22(2026-10-30):上一次"写被拒"的提示文本 ★★
+    //
+    //   【为什么运行时画布要自己接这个信号】
+    //     ControlBase::writeRejected 这个信号【一直没人接】——
+    //     信号在 Valve/Pump/Motor 上各声明了一份,ToggleControl 连声明都没有,
+    //     全仓库没有任何 connect。于是"操作员点了阀门,PLC 没动"这件事:
+    //       画面不变(好事)、日志里只有一条 qWarning(不够)、操作员零反馈(坏事)。
+    //     现象跟"我压根没点到"一模一样 —— 这就是典型的静默失败。
+    //
+    //   【为什么接在画布上,而不是 hmi.cpp 里】
+    //     hmi.cpp 不在 hmi_core 里 ⇒ 那里接的逻辑【测不到】。
+    //     RuntimeCanvas 在 hmi_core 里(tst_RuntimeCanvas 存在),
+    //     所以"写被拒必须被看见"这条能写成自动化断言。
+    //     —— 这也是"主画面逻辑必须抽到公共层"这条老教训的应用。
+    QString lastRejection() const { return lastRejection_; }
+    // ★ 拒绝提示条当前是不是亮着的(测试用:亮着 = 操作员看得见)
+    bool isRejectionBannerVisible() const { return rejectionBannerShown_; }
+
 private:
     QGraphicsView*  view_      = nullptr;
     QGraphicsScene* scene_     = nullptr;
     VariableManager* varMgr_   = nullptr;
     AlarmManager*    alarmMgr_ = nullptr;   // ★ F3:给 AlarmListControl 用
     QList<qwhmi::widgets::ControlBase*> controls_;
+
+    // ★ G-22:拒绝提示条。默认隐藏,写被拒时才亮起来。
+    QLabel* banner_ = nullptr;
+    QString lastRejection_;
+    // ★ 提示条"亮着"这件事自己记一份,不去问 QLabel::isHidden()。
+    //   理由:测试里窗口从不 show(),而 QLabel 是父窗口的子控件 ——
+    //   Qt 的 isHidden()/isVisible() 在"父窗口本身不可见"时语义会拧,
+    //   拿它当断言依据,测出来的可能是 Qt 的可见性规则而不是我们的逻辑。
+    bool   rejectionBannerShown_ = false;
 
     // ★ 绑定统计 —— 见 boundCount() 注释
     int         boundCount_       = 0;
@@ -104,6 +134,18 @@ private:
     QString basePath_;
 
     void bindAllControls();
+
+    // ★ G-22:把"写被拒"变成操作员看得见的东西(红条 + 日志)。
+    //   单独一个函数是为了让 loadControls 里那行 connect 不至于太长,
+    //   也是为了让"提示条怎么亮/怎么灭"这件事集中在一处、好测。
+    void showWriteRejection(const QString& detail);
+
+    // ★ G-22:提示条摆位。它是【浮层】,不占布局 —— 画布位置不能因为它出现而挪动。
+    void positionBanner();
+
+protected:
+    // ★ G-22:窗口尺寸变了,提示条要跟着画布重新摆位。
+    void resizeEvent(QResizeEvent* event) override;
 };
 
 } // namespace qwhmi::editor
