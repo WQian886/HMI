@@ -479,13 +479,27 @@ bool ControlBase::canWrite() const {
 // ★ IMPROVE #28 同款教训(见 ActionManager.cpp:75-86):setValue 返 Rejected 时
 //   【绝不能】照样 markDirty —— 那样审计会记「已执行」但 PLC 实际啥也没收到,
 //   事故复盘时唯一证据是假的。所以四道闸任一不过,都 return false 且不标 dirty。
+//
+// ★ G-22(2026-10-30):每一道闸拒绝时都把【理由】记进 lastWriteRejection_。
+//   原来"为什么被拒"是 Valve/Pump/Motor 各自在别处现编的,
+//   而 ToggleControl 压根没有这个概念 —— 于是"写被拒"在不同控件上
+//   表现完全不一样,有的有原因有的【一声不吭】。
+//   现在理由统一在这里产生,派生类只负责把它发出去。
 bool ControlBase::writeToPlc(const QVariant& v) {
+    lastWriteRejection_.clear();
+
     // 闸 1:没绑定变量 —— 纯编辑器里的摆件,没连 PLC 就没有可写的对象
-    if (!bound_) return false;
+    if (!bound_) {
+        lastWriteRejection_ = tr("控件未绑定变量 —— 画面上这个元件没有接到 PLC,写不出去");
+        return false;
+    }
 
     // 闸 2:只读变量(传感器数据)。跟 Binding.cpp 的权限闸并列,不合并 ——
     //   一个是「这台 PLC 不许写」,一个是「这个人没资格写」,拒绝理由不同,排查时要能分开。
-    if (bound_->access() != Variable::Access::ReadWrite) return false;
+    if (bound_->access() != Variable::Access::ReadWrite) {
+        lastWriteRejection_ = tr("变量「%1」是只读的(传感器数据),不能写").arg(bound_->name());
+        return false;
+    }
 
     // 闸 3:权限。Operator / Engineer / Admin 都有 WriteVariable(见 Permission.cpp:29-46),
     //   Viewer 没有。跟 Binding.cpp:147-155 同源。
@@ -493,6 +507,8 @@ bool ControlBase::writeToPlc(const QVariant& v) {
                                       qwhmi::auth::Permission::WriteVariable)) {
         qCWarning(qwhmi::auth::hmiPerm) << "[Control] 本用户" << qwhmi::auth::CurrentUser::instance().name()
                            << "无 WriteVariable 权限,控件写入被拒:" << bound_->name();
+        lastWriteRejection_ = tr("当前用户「%1」没有写权限,写入被拒")
+                                  .arg(qwhmi::auth::CurrentUser::instance().name());
         return false;
     }
 
@@ -504,9 +520,8 @@ bool ControlBase::writeToPlc(const QVariant& v) {
     if (!typed.isValid()) {
         qCWarning(qwhmi::auth::hmiPerm) << "[Control] 值" << v.toString()
                            << "无法适配成变量" << bound_->name() << "的数据类型";
-        qwhmi::auth::AuditLog::instance().appendCurrent(
-            QStringLiteral("control.write"), bound_->name(),
-            QStringLiteral("value=%1").arg(v.toString()), QStringLiteral("rejected"));
+        lastWriteRejection_ = tr("值 %1 无法适配成变量「%2」的数据类型")
+                                  .arg(v.toString(), bound_->name());
         return false;
     }
 
@@ -516,10 +531,8 @@ bool ControlBase::writeToPlc(const QVariant& v) {
     if (r == Variable::SetValueResult::Rejected) {
         qCWarning(qwhmi::auth::hmiPerm) << "[Control] 变量" << bound_->name()
                            << "拒绝值" << typed.toString() << "(超范围)";
-        // 审计记 fail:PLC 侧没收到,复盘时这里就是证据
-        qwhmi::auth::AuditLog::instance().appendCurrent(
-            QStringLiteral("control.write"), bound_->name(),
-            QStringLiteral("value=%1").arg(typed.toString()), QStringLiteral("rejected"));
+        lastWriteRejection_ = tr("变量「%1」拒绝值 %2(超出设定范围)")
+                                  .arg(bound_->name(), typed.toString());
         return false;
     }
 
@@ -536,6 +549,34 @@ bool ControlBase::writeToPlc(const QVariant& v) {
         QStringLiteral("control.write"), bound_->name(),
         QStringLiteral("value=%1").arg(v.toString()), QStringLiteral("ok"));
     return true;
+}
+
+// ===== G-21 / G-22:写被拒的出口 + "能不能本地预览" =====
+
+// ★ G-21:能不能本地翻一下当预览?
+//   只有【编辑模式】才可以 —— 见头文件里那段说明(为什么运行时绝对不行)。
+bool ControlBase::mayFlipLocallyAsPreview() const {
+    return !runtimeMode_;
+}
+
+// ★ G-22:把"写被拒"这件事说出去。
+//
+//   【为什么审计放在这里,而不是散在四道闸里】
+//     原来闸 4/闸 5 各写一条审计,而闸 1/闸 2/闸 3 一条都不写 ——
+//     于是"没绑定""只读""没权限"这三种最常见的被拒【查不到】。
+//     统一到这里之后:每一次"点了但没写成"都留下一条,
+//     而编辑器里的"本地预览"根本不会走到这里(它不是被拒)。
+void ControlBase::notifyWriteRejected() {
+    if (lastWriteRejection_.isEmpty()) {
+        // 兜底:理论上 writeToPlc 每道闸都会写理由,这里防的是"将来加了新闸忘了写"。
+        lastWriteRejection_ = tr("写入被拒绝");
+    }
+    // 审计:一次被拒的写,复盘时要能查到"点的是谁、为什么没生效"。
+    qwhmi::auth::AuditLog::instance().appendCurrent(
+        QStringLiteral("control.write"),
+        bound_ ? bound_->name() : QStringLiteral("<未绑定控件>"),
+        lastWriteRejection_, QStringLiteral("rejected"));
+    emit writeRejected(lastWriteRejection_);
 }
 
 } // namespace qwhmi::widgets

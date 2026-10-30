@@ -65,7 +65,8 @@ signals:
     void spinPeriodMsChanged();
     // ★ 跟的是"运行态变化"不是"点击" —— 远程启泵也要反映到画面
     void runningChanged();
-    void writeRejected(const QString& detail);
+    // ★ writeRejected 现在在基类 ControlBase 上(G-22),这里【不要】再声明 ——
+    //   子类重复声明会遮蔽基类的信号,基类 emit 的那个就没人收得到。
 
 private:
     // ★ 运行态变化时同步动画开关。没放 public 是因为它只该被 valueChanged

@@ -147,17 +147,17 @@ void PumpControl::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
             return;
         }
 
-        if (!boundVariable()) {
+        if (!boundVariable() && mayFlipLocallyAsPreview()) {
             // 未绑定 = 编辑器预览,本地翻一下
             setValue(targetRunning ? 1.0 : 0.0);
             return;
         }
         // 【真设备的拒绝】绝不能本地翻。跟 ValveControl 同理:
         //   画面显示"运行"而泵实际没动,操作员据此判断管路有压 —— 出事
-        emit writeRejected(
-            boundVariable()->access() != Variable::Access::ReadWrite
-                ? QStringLiteral("该变量是只读的,泵不能启停")
-                : QStringLiteral("无写权限或值超出范围,泵未启停"));
+        // ★ G-21:未绑定也一样 —— 运行时画面上摆了个没接线的泵,
+        //   点一下就"转起来"是骗人。编辑器里(预览)才允许翻。
+        // ★ G-22:理由统一由基类产生,这里只负责发出去。
+        notifyWriteRejected();
     }
     QGraphicsObject::mouseReleaseEvent(event);
 }

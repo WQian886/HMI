@@ -61,7 +61,8 @@ signals:
     void runColorChanged();
     void spinPeriodMsChanged();
     void runningChanged();
-    void writeRejected(const QString& detail);
+    // ★ writeRejected 现在在基类 ControlBase 上(G-22),这里【不要】再声明 ——
+    //   子类重复声明会遮蔽基类的信号,基类 emit 的那个就没人收得到。
 
 private:
     void   updateRunning();

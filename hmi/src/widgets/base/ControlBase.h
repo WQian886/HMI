@@ -229,6 +229,41 @@ public:
     // ★ 写权限判定(不含绑定检查)—— 供派生类在 mousePress 里做灰化/提示
     bool canWrite() const;
 
+    // ★★ G-22(2026-10-30):上一次写被拒的理由 ★★
+    //   writeToPlc() 的每一道闸拒绝时都会把理由记在这里,
+    //   派生类再用 notifyWriteRejected() 把它发出去。
+    //   【为什么不让派生类自己编理由】
+    //     原来 Valve/Pump/Motor 各自在 mouseReleaseEvent 里现编一句,
+    //     而 ToggleControl【根本没有】这个信号 ——
+    //     于是"写被拒"这件事在不同控件上表现完全不同,
+    //     有的有原因、有的【一声不吭】。
+    QString lastWriteRejection() const { return lastWriteRejection_; }
+
+protected:
+    // ★ G-22:派生类在 writeToPlc() 返回 false 之后调它 ——
+    //   补齐理由(必要时给兜底)+ 留一条审计 + 把信号发出去。
+    //   ★ 只有【真的没写成】才调它 ★
+    //     编辑器里未绑定控件的"本地预览"不算被拒,不许调。
+    void notifyWriteRejected();
+
+    // ★ G-21(2026-10-30):能不能"本地翻一下当预览"?
+    //
+    //   【只有编辑模式下未绑定的控件才可以】
+    //     那是作者在编辑器里摆件、点一下看效果 —— 不是在操作设备。
+    //
+    //   【★ 运行时模式下绝对不行 ★】
+    //     运行时画面上摆了个没接线的元件,操作员点它一下,
+    //     画面上那个阀门"开了"而 PLC 纹丝不动 ——
+    //     操作员据此判断管路状态,阀门背后是高压管路。
+    //     这跟 ActionManager.cpp:75-86 修的"联动撒谎上报"是同一类事故,
+    //     而且更严重:那个至少在审计里留了假记录,这个是【画面直接骗人】。
+    //
+    //   【判据放在基类的理由】
+    //     "运行时还是编辑"是【宿主】的性质,不是每个控件各自决定的事。
+    //     让 4 个控件各写一遍 if (runtimeMode()) 必然漏一个 ——
+    //     漏掉的那个就是"画面撒谎"的那一个。
+    bool mayFlipLocallyAsPreview() const;
+
 signals:
     void positionChanged();
     void sizeChanged();
@@ -236,6 +271,22 @@ signals:
     void valueChanged();
     void imagePathChanged();
     void scaleToFitChanged();
+
+    // ★★ G-22(2026-10-30):写回被拒 ★★
+    //
+    //   【原来这个信号只在 Valve/Pump/Motor 三个类上各声明了一份】,后果有三:
+    //     ① ToggleControl(开关)没有 —— 它写被拒时【一声不吭】;
+    //     ② 上层想统一处理"所有控件的写被拒"就接不到 ——
+    //        信号不在基类上只能逐个类型 connect,漏一个就是一个静默的口子;
+    //     ③ 全仓库【没有任何人接】它 —— 写被拒了操作员不知道、画面不变、
+    //        日志里也未必有,现象跟"没点"一模一样。
+    //   改法:信号下沉到基类,三个派生类删掉自己那份。
+    //     (已有测试写的是 &ValveControl::writeRejected —— 信号继承下来之后
+    //      那个写法照样编译通过、照样测的是同一个信号。)
+    //
+    //   【谁接】RuntimeCanvas(运行时画布)统一接:红条提示 + 日志 + 审计。
+    //   detail 是给用户看的中文原因。
+    void writeRejected(const QString& detail);
 
 private slots:
     // ★ Variable::valueChanged → 控件更新显示
@@ -253,6 +304,8 @@ private:
     //   不用改就变安全。现状.md 第五节约定 5 说的正是这件事(要求 connect
     //   variableReplaced),QPointer 是更省心的等价手段。
     QPointer<Variable> bound_;            // 当前绑定的 Variable(自动防悬空)
+    // ★ G-22:上一次写被拒的理由(见 lastWriteRejection())
+    QString      lastWriteRejection_;
     // ★ E.5(2026-09-29):这个成员以前声明了但从来没赋值过(全文件无赋值点),
     //   是条死成员。bindByName() 让它第一次有了用处。
     //   【为什么用成员而不是全局单例】VariableManager 没有 instance(),

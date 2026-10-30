@@ -691,6 +691,12 @@ add_hmi_test(tst_RuntimeCanvas)
 # ★ G-20(2026-10-30):调试面板那一行的解析 —— 从站号 0 = 广播写。
 #   纯逻辑,无界面,QTEST_GUILESS_MAIN 就够。
 add_hmi_test(tst_ModbusRequestParser)
+# ★ G-21 / G-22(2026-10-30):"写被拒"必须被看见 ——
+#   ① 运行时画面上没接线的控件,点一下绝不能本地翻(画面直接骗人);
+#   ② 编辑器里的本地预览必须保留(否则把一个静默失败换成另一个);
+#   ③ writeRejected 信号在基类上,四个控件都发得出;
+#   ④ RuntimeCanvas 是生产环境里唯一接这个信号的地方 —— 它必须让操作员看得见。
+add_hmi_test(tst_ControlWriteRejection)
 # ★ E.7(2026-09-30):复制 / 粘贴 / 删除 + 它们的 Undo(原为零覆盖)。
 #   重点是"删→撤→删→撤"连环 —— 命令存 JSON 快照,撤销造的是新对象,
 #   旧指针当场失效,残留一处在第二轮就会出事。

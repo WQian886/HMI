@@ -117,15 +117,17 @@ void ValveControl::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         //   "联动撒谎上报"同一类事故(参见 ToggleControl.cpp:77-87 的同类处理)。
         //   区别:阀门比开关更严重 —— 开关错了操作员按一下就好,
         //   阀门显示开着但实际关着,人可能直接伸手去动管路。
-        if (!boundVariable()) {
-            // 未绑定 = 编辑器里的空摆件,本地翻一下当预览
+        //
+        // ★ G-21(2026-10-30):"未绑定就本地翻"这条【只限编辑器】。
+        //   运行时画面上摆了个没接线的阀门,点它一下画面显示"开"而 PLC 纹丝不动 ——
+        //   那就是在骗操作员。所以运行时一律不翻,改为把拒绝说出去。
+        if (!boundVariable() && mayFlipLocallyAsPreview()) {
+            // 编辑器里的空摆件:本地翻一下当预览
             setValue(targetOpen ? 1.0 : 0.0);
             return;
         }
-        emit writeRejected(
-            boundVariable()->access() != Variable::Access::ReadWrite
-                ? QStringLiteral("该变量是只读的(传感器数据),阀门不能写")
-                : QStringLiteral("无写权限或值超出范围,阀门未动作"));
+        // ★ G-22:理由统一由基类产生(每道闸都记了),这里只负责发出去。
+        notifyWriteRejected();
     }
     QGraphicsObject::mouseReleaseEvent(event);
 }

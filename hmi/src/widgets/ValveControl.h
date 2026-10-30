@@ -59,7 +59,11 @@ signals:
     //   让上层能把"这条阀门被远程关了"记进画面日志
     void openedChanged();
     // ★ 写回被拒。detail 是给用户看的中文原因
-    void writeRejected(const QString& detail);
+    //   ★ G-22(2026-10-30):这个信号原来【只声明在 Valve/Pump/Motor 三个子类上】,
+    //   ToggleControl 没有,也没人 connect 过 —— 于是"写被拒"永远是静默的。
+    //   现在统一挪到基类 ControlBase 上,四个控件共用一个信号。
+    //   【原来在这里重复声明是错的】:子类再声明一次同名信号会【遮蔽】基类的,
+    //   基类 emit 的那个永远发不出去(connect 也得连子类的那个,才收得到)。
 
 private:
     QColor openColor_   = QColor(40, 170, 90);    // 开:绿(通行)

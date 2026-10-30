@@ -81,10 +81,19 @@ void ToggleControl::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         //    必须让用户看见没生效,绝不能本地翻,否则画面显示"ON"而 PLC 纹丝不动,
         //    操作员会据此判断设备状态 —— 这跟 ActionManager.cpp:75-86 修的
         //    "联动撒谎上报"是同一类事故。
-        if (!boundVariable()) {
+        //
+        // ★ G-21(2026-10-30):"未绑定就本地翻"这条【只限编辑器】。
+        //   运行时画面上摆了个没接线的开关,点它一下画面显示"ON"而 PLC 纹丝不动 ——
+        //   那就是在骗操作员。所以运行时一律不翻,改为把拒绝说出去。
+        if (!boundVariable() && mayFlipLocallyAsPreview()) {
             setValue(newVal);
             emit toggled(nowOn);
+            return;
         }
+        // ★ G-22:理由统一由基类产生(每道闸都记了),这里只负责发出去。
+        //   ★ 原来这里【什么都不做】—— 已绑定但被拒时是静默的,
+        //     操作员点了开关没反应,只能猜。ToggleControl 本来连信号都没声明。
+        notifyWriteRejected();
     }
     QGraphicsObject::mouseReleaseEvent(event);
 }

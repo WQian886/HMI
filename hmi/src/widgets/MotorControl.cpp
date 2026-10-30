@@ -148,16 +148,16 @@ void MotorControl::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
             return;
         }
 
-        if (!boundVariable()) {
+        if (!boundVariable() && mayFlipLocallyAsPreview()) {
             setValue(targetRunning ? 1.0 : 0.0);
             return;
         }
         // 【真设备的拒绝】绝不本地翻。电机显示"运行"而实际没转,
         //   操作员可能据此判断下游设备该不该处理 —— 与泵同等级的事故
-        emit writeRejected(
-            boundVariable()->access() != Variable::Access::ReadWrite
-                ? QStringLiteral("该变量是只读的,电机不能启停")
-                : QStringLiteral("无写权限或值超出范围,电机未启停"));
+        // ★ G-21:未绑定也一样 —— 运行时画面上摆了个没接线的电机,
+        //   点一下就"转起来"是骗人。编辑器里(预览)才允许翻。
+        // ★ G-22:理由统一由基类产生,这里只负责发出去。
+        notifyWriteRejected();
     }
     QGraphicsObject::mouseReleaseEvent(event);
 }
