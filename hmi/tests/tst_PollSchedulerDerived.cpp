@@ -66,12 +66,24 @@
 //
 // 关联:PollScheduler::onTick(第三圈过滤),
 //      VariableManager::addDerivedVariable(建出 address=0 的派生变量)
+//
+// ★ G-23(2026-10-30):本文件【改了一条断言】——
+//   derivedValue_isNotOverwrittenByRegisterZero 原来钉的是"派生量的值不被任何人改"。
+//   那等于把"派生量不自动重算"这个 bug 当规范钉住了 —— 派生量本来就该
+//   跟着源变量变。现在钉的是"派生量 == 它源变量的表达式算出来的值",
+//   详见那条用例里的长注释。
 // ============================================================================
 
 #include <QtTest>
 #include <QSignalSpy>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTemporaryDir>
 
 #include "PollScheduler.h"
+#include "Project.h"
 #include "VariableManager.h"
 #include "Variable.h"
 #include "drivers/IPollDriver.h"
@@ -150,6 +162,11 @@ private slots:
 
     // ★ 两个派生变量也都【不许】被读 —— 防"只挡了第一个"的实现
     void twoDerivedVariables_neitherIsPolled();
+
+    // ★ G-23(2026-10-30):从工程文件【读回来】的派生变量也不许被读。
+    //   这是本缺陷真正的触发路径 —— 以前 expression 根本不进 JSON,
+    //   派生量存盘再打开就变成普通变量,于是它去读 plc1 的 0 号寄存器。
+    void derivedVariableRestoredFromProjectFile_isNeverPolled();
 
     // 反向:普通变量照常轮询 —— 修这个过滤不许把正常轮询一起挡掉
     void pollStillWorksForNormalVariables();
@@ -295,16 +312,60 @@ void tst_PollSchedulerDerived::derivedValue_isNotOverwrittenByRegisterZero() {
     sum->setAlwaysPoll(true);
 
     // 给两个源变量一个已知的值,重算一次
-    speed->setValue(3);
-    temp->setValue(4);
+    //
+    // ★★ 这里以前写的是 `speed->setValue(3)` —— 【int】字面量。
+    //   Speed 是 Int16,Variable::setValue 会做类型校验:
+    //   Int16 只收 QMetaType::Short,给 int 就【被拒收】(日志里那句
+    //   "type mismatch: expected Int16, got int" 就是它)。
+    //   于是两个源变量从头到尾【没有值】→ 派生量算不出来 → before 是 0,
+    //   轮询之后还是 0 → `QCOMPARE(after, before)` 恒真。
+    //   ★★ 也就是说:这条【盯"派生量的值不被寄存器内容顶掉"】的用例,
+    //   从写下来那天起就是【假绿】—— 它压根没测到"被顶掉"这件事。
+    //   (这种"怎么改实现都绿"的用例,和一个没有用例是同一件事。)
+    //   现在改成类型对得上的 qint16,这条用例才真的在测它声称在测的东西。
+    speed->setValue(QVariant::fromValue<qint16>(3));
+    temp->setValue(QVariant::fromValue<qint16>(4));
     vm.recomputeDerivedVariables();
     const double before = sum->value().toDouble();
+    QCOMPARE(before, 7.0);
 
     PollScheduler sched(&vm, drv);
     startAndPoll(sched);
 
     const double after = sum->value().toDouble();
-    QCOMPARE(after, before);
+
+    // ★★ G-23(2026-10-30):这条断言【改过】,得把为什么写清楚。
+    //
+    //   【原来钉的是什么】
+    //     `QCOMPARE(after, before)` —— 意思是"派生量的值不被任何人改"。
+    //     在 G-23 之前,派生量【确实】不会自己变(它压根没有自动重算),
+    //     所以这条断言当时是绿的 —— 但它钉的是一个【bug 当成规范】。
+    //
+    //   【为什么现在这个钉法是错的】
+    //     轮询把两个源变量刷新成了 mock 填的 4242。派生量是源变量的函数,
+    //     源变量变了它【就该】跟着变。要求它不变,等于要求派生量撒谎 ——
+    //     而"派生量显示一个跟表达式对不上的数"正是本仓库最恨的那类毛病。
+    //
+    //   【现在钉的是什么 —— 真正的不变式】
+    //     ① 派生量永远等于【它源变量的表达式算出来的值】
+    //     ② 派生量永远不是【某台 PLC 的 0 号寄存器内容】
+    //   ①是"它是算出来的",②是"它没被寄存器内容顶掉"。
+    //   两条都在,派生量就既不撒谎、也没被现场数据污染。
+    //
+    //   ★ 补一句:现在"被寄存器内容顶掉"这件事有【两道】防线 ——
+    //     ① PollScheduler 的 isDerived 过滤(不发请求)
+    //     ② Variable::setValue 拒收对派生量的写(G-23 加的)
+    //     所以"把 onTick 里那行过滤删掉"这个负向对照,靠的是【请求层面】
+    //     的断言(everRequestedAddrZero),而不是这条的值断言。
+    //     这不是把测试变弱 —— 是生产代码变强了,值层面不再由这一条独扛。
+    const double speedNow = speed->value().toDouble();
+    const double tempNow  = temp->value().toDouble();
+    QVERIFY2(qAbs(after - (speedNow + tempNow)) < 0.001,
+             qPrintable(QStringLiteral(
+                 "★★ 派生变量的值(%1)不等于它源变量的表达式算出来的值(%2 + %3 = %4)。\n"
+                 "  派生量的值只有一个合法来源:表达式。\n"
+                 "  它变成别的数,只有两种可能:被谁直接写了,或者源变量本身不对。")
+                 .arg(after).arg(speedNow).arg(tempNow).arg(speedNow + tempNow)));
 
     QVERIFY2(qAbs(after - RecordingDriver::kRegisterZeroValue) > 0.001,
              qPrintable(QStringLiteral(
@@ -349,6 +410,103 @@ void tst_PollSchedulerDerived::twoDerivedVariables_neitherIsPolled() {
                  "★ 请求过 0 号寄存器。两个派生变量都建出来了,"
                  "只挡住一个也算失败。requestedAddrs = %1")
                  .arg(QString::number(drv->requestedAddrs.size()))));
+}
+
+// ★ G-23(2026-10-30):从工程文件读回来的派生变量,同样不许被读。
+//
+//   【为什么这条不能靠前面三条顶掉】
+//     前面三条的派生变量都是【代码 new 出来的】—— addDerivedVariable 会
+//     正确地给它们 setExpression,isDerived() 是 true,过滤自然生效。
+//     而【从工程文件读回来】的那条路以前【根本不走 setExpression】:
+//     expression 从来不存进 JSON,于是读回来 isDerived() == false ——
+//     过滤失效,派生量去读 plc1 的 0 号寄存器。
+//     这就是"过滤器是对的,但被过滤的对象认不出来"的典型:修过滤没用,
+//     得让被过滤的对象【还是它自己】。
+void tst_PollSchedulerDerived::derivedVariableRestoredFromProjectFile_isNeverPolled() {
+    // 手写一个工程文件:一个普通变量 + 一个派生变量(expression 手写在里面)。
+    //   为什么手写而不是 saveToFile 生成 —— 要测的正是"文件里写着 expression"
+    //   这条路径,而 saveToFile 生成的路径由 tst_DerivedVariable 负责。
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("derived.hmi.json"));
+
+    QJsonObject src;
+    src["name"]      = QStringLiteral("Speed");
+    src["address"]   = 100;
+    src["data_type"] = QStringLiteral("Int16");
+    src["access"]    = QStringLiteral("ReadOnly");
+    src["deadband"]  = 0;
+    src["poll_interval_ms"] = 1000;
+    src["alwaysPoll"] = false;
+
+    QJsonObject derived;
+    derived["name"]      = QStringLiteral("Sum");
+    derived["address"]   = 0;
+    derived["data_type"] = QStringLiteral("Float");
+    derived["access"]    = QStringLiteral("ReadOnly");
+    derived["deadband"]  = 0;
+    derived["poll_interval_ms"] = 1000;
+    derived["alwaysPoll"] = false;
+    derived["expression"] = QStringLiteral("Speed * 2");
+
+    QJsonObject root;
+    root["schema_version"] = 3;
+    root["project_name"]   = QStringLiteral("G-23 派生量工程");
+    root["variables"]      = QJsonArray{src, derived};
+    QJsonObject plc;
+    plc["id"]       = QStringLiteral("plc1");
+    plc["protocol"] = QStringLiteral("modbus_tcp");
+    plc["host"]     = QStringLiteral("127.0.0.1");
+    plc["port"]     = 502;
+    root["plcs"]    = QJsonArray{plc};
+
+    {
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QJsonDocument(root).toJson());
+        f.close();
+    }
+
+    // ★ 走【生产的】加载路径(不是手工 new 一个派生变量)
+    VariableManager vm;
+    Project p(&vm, nullptr, nullptr, nullptr, nullptr);
+    QString err;
+    QObject::connect(&p, &Project::loadError, [&err](const QString& m) { err = m; });
+    QVERIFY2(p.loadFromFile(path), qPrintable(QStringLiteral("加载失败:%1").arg(err)));
+
+    Variable* sum = vm.findVariable(QStringLiteral("Sum"));
+    QVERIFY(sum);
+    QVERIFY2(sum->isDerived(),
+             "★★ 从工程文件读回来的派生量必须还是派生量 —— "
+             "不然它就是一个 address=0 的普通变量,会去读 plc1 的 0 号寄存器。");
+
+    RecordingDriver* drv = makeConnectedDriver();
+    PollScheduler sched(&vm, drv);
+    startAndPoll(sched);
+
+    // 对照组:普通变量确实被读了(否则下面那句可能是"因为什么都没轮询"而绿)
+    QVERIFY2(drv->requestedAddrs.contains(100),
+             qPrintable(QStringLiteral(
+                 "对照组失败:普通变量 Speed(地址 100)没有被轮询 —— "
+                 "requestedAddrs = %1")
+                 .arg(QString::number(drv->requestedAddrs.size()))));
+
+    QVERIFY2(!drv->everRequestedAddrZero(),
+             qPrintable(QStringLiteral(
+                 "★★ 从工程文件读回来的派生变量被拿去轮询了 —— 它【没有寄存器】。\n"
+                 "  被请求的地址列表里出现了 0。\n"
+                 "  这正是 G-23 的老症状:expression 没存进 JSON → 读回来是普通变量\n"
+                 "  → 去读 plc1 的 0 号寄存器,把现场数据顶掉计算结果。\n"
+                 "  requestedAddrs = %1")
+                 .arg(QString::number(drv->requestedAddrs.size()))));
+
+    // ★ 顺带钉住"派生量还在算":源变量被刷成 4242,派生量就该是 8484。
+    //   少了这一句,"派生量被读成 4242"和"派生量压根没值"会长得一样。
+    QVERIFY2(qAbs(sum->value().toDouble() - 8484.0) < 0.001,
+             qPrintable(QStringLiteral(
+                 "★ 派生量的值是 %1,期望 8484(= 4242 * 2)。\n"
+                 "  它应该由表达式算出来,而不是由任何寄存器读出来。")
+                 .arg(sum->value().toDouble())));
 }
 
 // ★ 反向:加了 isDerived 过滤之后,普通变量【照常】轮询。

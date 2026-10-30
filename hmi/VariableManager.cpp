@@ -2,6 +2,7 @@
 
 #include "VariableManager.h"
 #include "tag/ExpressionParser.h"
+#include <QSet>
 #include <algorithm>
 
 VariableManager::VariableManager(QObject* parent)
@@ -37,6 +38,7 @@ bool VariableManager::addVariable(Variable* v) {
         vars_.remove(name);
         v->setParent(this);
         vars_.insert(name, v);
+        connectValueChanged(v);   // ★ G-23:替换进来的新变量同样要接上自动重算
         emit variableReplaced(old, v);
         delete old;
         return true;
@@ -58,7 +60,27 @@ bool VariableManager::addVariable(Variable* v) {
     // setParent 即使 v->parent() 已是 this,Qt 是 no-op,不会双重父
     v->setParent(this);  // 交给 manager 管生命周期
     vars_.insert(name, v);
+    connectValueChanged(v);   // ★ G-23:接上"值变了自动重算派生量"
     return true;
+}
+
+// ★ G-23(2026-10-30):把变量的 valueChanged 接到自动重算上。
+//
+//   【为什么先 disconnect 再 connect】
+//     同一个 Variable 对象有可能被 addVariable 加两次(比如外部先 new、
+//     后面又拿同一个指针来加)。不先断的话会连两次 ——
+//     一次值变化触发两次重算,派生量算两遍(值一样,但白白发两遍信号,
+//     趋势曲线上会多出两个点)。
+//
+//   【为什么用 this 当 context】
+//     manager 先于变量死时,连接自动断开;变量先死时(clear / removeVariable),
+//     QObject 析构也会把连接摘掉。不用手动管生命周期。
+void VariableManager::connectValueChanged(Variable* v) {
+    if (!v) return;
+    disconnect(v, &Variable::valueChanged,
+               this, &VariableManager::onVariableValueChanged);
+    connect(v, &Variable::valueChanged,
+            this, &VariableManager::onVariableValueChanged);
 }
 
 bool VariableManager::removeVariable(const QString& name) {
@@ -165,24 +187,105 @@ bool VariableManager::addDerivedVariable(const QString& name, const QString& exp
 void VariableManager::recomputeDerivedVariables() {
     for (Variable* v : vars_.values()) {
         if (!v->isDerived()) continue;
-        // ★ 用 evaluate 拿值
-        QString err;
-        const double val = qwhmi::tag::ExpressionParser::evaluate(
-            v->expression(),
-            [this](const QString& name) -> const QVariant {
-                Variable* dep = vars_.value(name, nullptr);
-                if (!dep) return {};
-                return dep->value();
-            },
-            &err);
-        if (qIsNaN(val)) {
-            if (!err.isEmpty()) {
-                qWarning() << "[VariableManager] 派生" << v->name() << "求值失败:" << err;
-            }
-            continue;
-        }
-        v->recomputeAsDerived(val);
+        recomputeOne(v);
     }
+}
+
+// ★ G-23(2026-10-30):重算一个派生变量。
+//
+//   【为什么要单独抽出来】
+//     "重算全部"(recomputeDerivedVariables)和"重算一个"(依赖变了的那一个)
+//     必须用【同一套】判定:依赖齐不齐、值算不算得出来。
+//     分成两处写,迟早有一处忘了判"依赖还没到齐" —— 而那种情况下的
+//     表现是"派生量算出一个错的值",比"不算"坏得多。
+//
+//   【依赖还没取到值 ≠ 出错】
+//     PLC 轮询是一台一台回的:同一拍里 Speed 的回包到了,Temp 的还没到。
+//     这时算出来的派生值是【错的】,不是"缺数据"。
+//     以前这里直接把依赖丢给 evaluate,evaluate 返 NaN 并报一句
+//     "variable 'Temp' not found" —— 而真实原因是"还没轮询到",
+//     不是"变量不存在"。日志被这种假警报淹了,真出事时反而看不见。
+//     现在:依赖【存在但还没值】→ 静默跳过,等下一个源变量到齐再算;
+//           依赖【压根不存在】→ 明确警告(这才是真错)。
+bool VariableManager::recomputeOne(Variable* d) {
+    if (!d || !d->isDerived()) return false;
+
+    for (const QString& depName : d->dependencies()) {
+        Variable* dep = vars_.value(depName, nullptr);
+        if (!dep) {
+            qWarning() << "[VariableManager] 派生" << d->name()
+                       << "依赖的变量不存在:" << depName;
+            return false;
+        }
+        if (!dep->value().isValid()) {
+            // 还没取到值 —— 等下一次。这不是错误,别刷日志。
+            return false;
+        }
+    }
+
+    // ★ 用 evaluate 拿值
+    QString err;
+    const double val = qwhmi::tag::ExpressionParser::evaluate(
+        d->expression(),
+        [this](const QString& name) -> const QVariant {
+            Variable* dep = vars_.value(name, nullptr);
+            if (!dep) return {};
+            return dep->value();
+        },
+        &err);
+    if (qIsNaN(val)) {
+        if (!err.isEmpty()) {
+            qWarning() << "[VariableManager] 派生" << d->name() << "求值失败:" << err;
+        }
+        return false;
+    }
+    d->recomputeAsDerived(val);
+    return true;
+}
+
+// ★ G-23:变量值变了 → 重算依赖它的派生量(以及依赖那些派生量的派生量)。
+//
+//   【为什么用队列,不用递归】
+//     派生量可以依赖派生量(D2 = D1 * 2,D1 = A + B)。
+//     递归写法在链上没问题,但遇到【环】就爆栈 ——
+//     而环是用户能配出来的(D1 = D2 + 1,D2 = D1 + 1)。
+//     队列 + processed 集合:环最多转一圈就停,不会崩。
+//
+//   【为什么必须挡住重入】
+//     recomputeOne 里 d->recomputeAsDerived() 会 emit valueChanged ——
+//     那正是本函数要接的信号。不挡就是自己调自己。
+//     挡住之后,连锁由【外层这一轮】的队列继续走完,不会漏。
+void VariableManager::onVariableValueChanged(const Variable& v) {
+    if (recomputing_) return;   // ★ 重入:外层那一轮会把连锁一起处理完
+
+    // ★ 连锁重算的轮数上限。正常工程里链长 1~2;
+    //   这个上限是给"环"兜底的 —— 宁可停下来喊一声,也别把 CPU 跑满。
+    static const int kMaxRounds = 64;
+
+    recomputing_ = true;
+    QStringList queue{v.name()};
+    QSet<QString> processed;
+    int rounds = 0;
+    while (!queue.isEmpty()) {
+        if (++rounds > kMaxRounds) {
+            qWarning() << "[VariableManager] 派生量连锁重算超过上限("
+                       << kMaxRounds << "轮),可能有环,已停止。触发变量:" << v.name();
+            break;
+        }
+        const QString changedName = queue.takeFirst();
+        if (processed.contains(changedName)) continue;
+        processed.insert(changedName);
+
+        for (Variable* d : vars_.values()) {
+            if (!d || !d->isDerived()) continue;
+            if (!d->dependencies().contains(changedName)) continue;
+            recomputeOne(d);
+            // ★ d 自己也会发 valueChanged(被本槽挡掉了),
+            //   所以这里【显式】把 d 入队 —— 依赖 d 的派生量要跟着重算。
+            queue.append(d->name());
+        }
+    }
+    recomputing_ = false;
 }
 
 // ★ 阶段 6.3(2026-08-07):加载前清空所有 variables(Q4-A 全删干净)

@@ -697,6 +697,13 @@ add_hmi_test(tst_ModbusRequestParser)
 #   ③ writeRejected 信号在基类上,四个控件都发得出;
 #   ④ RuntimeCanvas 是生产环境里唯一接这个信号的地方 —— 它必须让操作员看得见。
 add_hmi_test(tst_ControlWriteRejection)
+# ★ G-23(2026-10-30):派生变量 ——
+#   ① 存得住:expression 必须进 JSON(不存的话,存盘再打开它就变成
+#      一个 address=0 的普通变量,去读 plc1 的 0 号寄存器);
+#   ② 算得出:源变量一变,派生量必须自己跟着变(以前一行 connect 都没有);
+#   ③ 派生量不许冒充寄存器:外部写一律拒收(否则 WriteScheduler 会
+#      把它发到 plc1 的 0 号寄存器 —— 那是真的现场寄存器)。
+add_hmi_test(tst_DerivedVariable)
 # ★ E.7(2026-09-30):复制 / 粘贴 / 删除 + 它们的 Undo(原为零覆盖)。
 #   重点是"删→撤→删→撤"连环 —— 命令存 JSON 快照,撤销造的是新对象,
 #   旧指针当场失效,残留一处在第二轮就会出事。

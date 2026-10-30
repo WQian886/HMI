@@ -543,6 +543,29 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
                 return failWith(QString("variable \"%1\" 重复或非法").arg(dupName));
             }
         }
+
+        // ★ G-23(2026-10-30):派生变量的依赖必须存在。
+        //
+        //   【为什么放在【所有变量都加载完】之后才查】
+        //     派生量可以引用排在它【后面】的变量 —— JSON 里 variables 是数组,
+        //     顺序不保证(人也可以把源变量写在后面)。边加载边查会误判
+        //     "依赖不存在",把好工程判成坏的。
+        //
+        //   【为什么缺依赖要【整个加载失败】
+        //     派生量算不出来时,界面上显示的是【上一次的旧值】或者空 ——
+        //     跟"这个量真的就是这个数"长得一模一样。这就是本仓库一直在治的
+        //     静默失败:配错了却看不出来。
+        //     报警引用不存在的变量、动作引用不存在的变量,走的都是同一条路
+        //     (见下面第 6、7 步)—— 派生量没理由更宽松。
+        for (Variable* v : varMgr_->allVariables()) {
+            if (!v || !v->isDerived()) continue;
+            for (const QString& dep : v->dependencies()) {
+                if (!varMgr_->contains(dep)) {
+                    return failWith(QString("派生变量 \"%1\" 引用了不存在的 variable \"%2\"")
+                                        .arg(v->name(), dep));
+                }
+            }
+        }
     }
 
     // 6. 解析 alarms(依赖 varMgr_)

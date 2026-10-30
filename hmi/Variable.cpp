@@ -26,9 +26,6 @@ void Variable::recomputeAsDerived(double value) {
     (void)oldTimestamp; (void)oldQuality;  // 派生值未来可对比变化率,留接口
 }
 
-#include "Variable.h"
-#include <cmath>  // 阶段 3.x:std::abs(死区过滤用)
-
 namespace {
 // 判断 QVariant 是否匹配指定的 DataType
 // 用匿名 namespace,不暴露到 .h
@@ -61,6 +58,29 @@ Variable::Variable(const QString& name,
 }
 
 Variable::SetValueResult Variable::setValue(const QVariant& v, bool checkRange) {
+    // ★ G-23(2026-10-30):派生变量【不许】被外部写。
+    //
+    //   【为什么】
+    //     派生量的值是【表达式算出来的】,既不是从 PLC 读来的,也不是谁该写进去的。
+    //     让别人 setValue 有两个后果,第二个是硬的:
+    //       ① 画面上显示一个跟表达式对不上的数 —— 撒谎;
+    //       ② 写路径紧接着会 markDirty → WriteScheduler 把它当【真变量】发出去。
+    //          而派生量【没有寄存器】,它的 address 是 0 ⇒ 会写到 plc1 的 0 号寄存器。
+    //          那是【真的现场寄存器】,不是没人用的占位符。
+    //
+    //   【跟 PollScheduler 那道过滤的关系】
+    //     PollScheduler::onTick 里 `if (v->isDerived()) continue;` 是读这一侧的门;
+    //     本行是写这一侧的门。两道门都要有 —— 只加读那道门,界面照样能把
+    //     派生量写进 PLC。
+    //
+    //   【派生量要改值,只有两条路】
+    //     改表达式,或者改它依赖的源变量。recomputeAsDerived 是它自己的专属入口。
+    if (isDerived_) {
+        qWarning() << "Variable" << name_
+                   << "is derived: 派生变量的值由表达式算出,不许被外部写"
+                   << "(要改值请改表达式或改它的源变量)";
+        return SetValueResult::Rejected;
+    }
     // 类型校验:不匹配就拒绝,warning 后返 Rejected
     if (!matchesDataType(v, type_)) {
         qWarning() << "Variable" << name_

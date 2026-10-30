@@ -255,6 +255,9 @@ void tst_VariablePlcId::plcIdIsNotReportedAsUnknownField() {
         QStringLiteral("deadband"), QStringLiteral("poll_interval_ms"),
         QStringLiteral("alwaysPoll"), QStringLiteral("range"),
         QStringLiteral("plc_id"),
+        // ★ G-23(2026-10-30):expression —— 派生变量的表达式。
+        //   它【总是】写(普通变量写空串),所以反向检查不用给它开例外。
+        QStringLiteral("expression"),
     };
     // toJson 实际写出的字段,应当是 expectedKnown 的子集
     // (range 只在 hasRange() 时写,所以是子集不是全集)

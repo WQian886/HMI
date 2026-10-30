@@ -4,6 +4,7 @@
 #include "Variable.h"
 #include "Alarm.h"
 #include "ActionManager.h"   // 需要 Mapping 完整定义
+#include "tag/ExpressionParser.h"   // ★ G-23:解析 expression,恢复派生量的依赖
 
 #include <QDebug>
 #include <QMetaEnum>
@@ -52,6 +53,24 @@ QJsonObject JsonSerializer::toJson(const Variable& v) {
         obj["range"] = range;
     }
     // 没设 range 不存这个字段(节省 JSON 体积)
+
+    // ★ G-23(2026-10-30):expression —— 派生变量的表达式
+    //
+    //   【为什么以前没写,以及漏了会怎样】
+    //     Variable 早就有 expression_ 字段(Variable.h:180,阶段 D.6 加的),
+    //     但这个字段【从来没进过 JSON】。后果不是"少存一个字段",是:
+    //       派生量存盘 → expression 没了 → 读回来 isDerived() == false
+    //       → 它变成一个 address = 0 的【普通变量】
+    //       → PollScheduler 会去读 plc1 的 0 号寄存器
+    //       → 回包把真寄存器内容盖到派生量上。
+    //     派生量从此"显示的是别人的值",而且【不报错、不告警】—— 静默失败。
+    //     (PollScheduler 那边的 `if (v->isDerived()) continue;` 是 2026-10-19
+    //      加的,当时是对的:派生量确实被标着。问题在于标它的东西存不下来。)
+    //
+    //   【为什么总是写】跟 plc_id 一个道理:写出来才看得见、才能手工核对。
+    //     普通变量写空串 —— 读回来还是普通变量(空串 = 不是派生量),
+    //     老工程文件里没有这个键也照样读得动(toString() 兜底为空)。
+    obj["expression"] = v.expression();
 
     return obj;
 }
@@ -175,9 +194,42 @@ Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj,
     }
     auto access = static_cast<Variable::Access>(accessVal);
 
+    // ★ G-23(2026-10-30):派生表达式 —— 先解析,后建对象。
+    //   【为什么必须在建对象【之前】解析】
+    //     解析失败要 return nullptr,而变量对象这时已经 new 出来了,
+    //     得再 delete 一次 —— 而 delete 一个刚 new 出来、还没塞进任何
+    //     容器的东西,是最容易漏的一步(漏了就泄漏一个 QObject)。
+    //     先解析,失败就直接返回,不用 delete。
+    //
+    //   【为什么要连 dependencies 一起恢复】
+    //     VariableManager 的自动重算靠 dependencies() 知道"谁变了要重算我"。
+    //     只恢复 expression 不恢复 deps,派生量照样永远是那个初值。
+    QString derivedExpr;
+    QStringList derivedDeps;
+    {
+        const QString expr = obj["expression"].toString().trimmed();
+        if (!expr.isEmpty()) {
+            QString exprErr;
+            if (!qwhmi::tag::ExpressionParser::collectDependencies(expr, &derivedDeps, &exprErr)) {
+                return fail(QStringLiteral("变量 \"%1\": \"expression\" 表达式不合法:%2")
+                               .arg(name, exprErr));
+            }
+            derivedExpr = expr;
+        }
+    }
+
     // ★ 6.3 修正:Variable 构造第 5 参数是 QObject*,VariableManager* 要 static_cast
     //   即使 include 了 VariableManager.h,有些编译器还是要求显式转换(保险)
     Variable* v = new Variable(name, address, dataType, access, static_cast<QObject*>(parent));
+
+    // ★ G-23:把"它是个派生量"这件事恢复回去。
+    //   setExpression 顺带把 isDerived_ 置上 —— 这【就是】派生量不进轮询的那个开关
+    //   (PollScheduler::onTick 里 `if (v->isDerived()) continue;`)。
+    //   少了这一行,派生量读回来就是普通变量 → 去读 plc1 的 0 号寄存器(见 toJson 的说明)。
+    if (!derivedExpr.isEmpty()) {
+        v->setExpression(derivedExpr);
+        v->setDependencies(derivedDeps);
+    }
 
     // ★ 2026-10-16:plc_id —— 变量归属哪台 PLC
     //   老工程文件没这个键 → toString("plc1") 兜底,和 Variable 自己的默认值一致,
@@ -219,6 +271,7 @@ Variable* JsonSerializer::fromJsonVariable(const QJsonObject& obj,
         QStringLiteral("alwaysPoll"), QStringLiteral("range"),
         QStringLiteral("plc_id"),   // ★ 2026-10-16:不加的话本程序自己写出去的字段
                                       //   读回来会报"未知字段已忽略" —— 自己人打自己人
+        QStringLiteral("expression"),  // ★ G-23:同上,理由一样(本程序自己写出去的字段)
     };
     for (auto it = obj.begin(); it != obj.end(); ++it) {
         if (!kKnown.contains(it.key())) {
