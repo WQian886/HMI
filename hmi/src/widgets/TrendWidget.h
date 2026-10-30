@@ -68,7 +68,11 @@ public slots:
 
 private:
     // ★ 计算时间窗口 from/to(QDateTime)
-    QPair<QDateTime, QDateTime> rangeWindow() const;
+    //   ★ now 由调用方传进来,内部【不许】再取一次时钟。
+    //     原因:取两次的话,两次之间跨过 1 毫秒边界,
+    //     数据点的时间戳就会比窗口上界还大 → 被判成"窗外"丢掉。
+    //     详见 .cpp 里 onVariableChanged 那处的注释。
+    QPair<QDateTime, QDateTime> rangeWindow(const QDateTime& now) const;
 
     // ★ 查询 + 重画 graph
     void reloadFromHistory();

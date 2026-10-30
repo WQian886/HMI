@@ -33,6 +33,9 @@ private slots:
     void setRange_changesWindow();
     void addRealtimePoint_extendsGraph();
     void clearHistory_resetsGraph();
+
+    // ★ 2026-10-30:回归钉子(见下面实现处的说明)
+    void realtimePoint_isNeverDroppedAtWindowEdge();
 };
 
 void TestTrend::initTestCase() {
@@ -152,6 +155,41 @@ void TestTrend::clearHistory_resetsGraph() {
 
     f.tw->clearHistory();
     QCOMPARE(f.tw->dataCount(), 0);
+}
+
+// ★ 用例 6:变量一变,曲线就必须【立刻】多一个点(回归钉子)
+//
+//   【钉的是哪条 bug】TrendWidget::onVariableChanged 里那个 1 毫秒竞态(2026-10-30 修):
+//     原来窗口上界和数据点时间戳取自【两次】时钟读数,中间跨过 1ms 边界时,
+//     数据点会被判成"在时间窗外"直接丢掉 —— 曲线莫名其妙少一个点。
+//     GitHub Actions 上那次 CI 就是红在这里(tst_Trend,零输出:
+//     因为失败发生在 QTest 刷出报告之前,stdout 管道的缓冲全丢了)。
+//
+//   【为什么循环 200 次,而不是一次断言】
+//     实测(真正重编过的带 bug 版本):逐点丢点率约 2%
+//     ⇒ 一次断言 = 二十次里才红一次 = 跟没钉一样。
+//     200 次 ⇒ 修之前几乎【必红】(实测 20/20 红,掉点位置随机),
+//     修之后【一次都不会红】(实测 100/100 绿)。
+//     ★ 循环里不 qWait:emit 是同线程直接连接,onVariableChanged 是【同步】执行的,
+//       追加点不需要事件循环转一圈(qWait 是给"信号跨线程"那层保险用的)。
+//       省掉它,这条用例才跑得快(200 次不到 1 秒)。
+void TestTrend::realtimePoint_isNeverDroppedAtWindowEdge() {
+    Fixture f;
+    f.tw->setVariable("plc1", "Speed");
+    f.tw->refresh();
+
+    const int before = f.tw->dataCount();
+    for (int i = 0; i < 200; ++i) {
+        f.speed->setValue(QVariant::fromValue<float>(static_cast<float>(i) + 0.5f));
+        const int expect = before + i + 1;
+        if (f.tw->dataCount() != expect) {
+            QFAIL(qPrintable(QString(
+                "第 %1 次:变量已经变了,曲线却没多一个点 —— 点被时间窗判定丢掉了"
+                "(期望 %2 个,实际 %3 个)")
+                .arg(i + 1).arg(expect).arg(f.tw->dataCount())));
+        }
+    }
+    QCOMPARE(f.tw->dataCount(), before + 200);
 }
 
 // ★ QTEST_MAIN 创建 QApplication(TrendWidget 用 QWidget 需要 GUI 主循环;

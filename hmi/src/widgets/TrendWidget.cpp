@@ -153,15 +153,14 @@ int TrendWidget::dataCount() const {
     return graph_ ? graph_->data()->size() : 0;
 }
 
-QPair<QDateTime, QDateTime> TrendWidget::rangeWindow() const {
-    const QDateTime to = QDateTime::currentDateTime();
+QPair<QDateTime, QDateTime> TrendWidget::rangeWindow(const QDateTime& now) const {
     QDateTime from;
     switch (range_) {
-        case Range::Hour: from = to.addSecs(-3600); break;
-        case Range::Day:  from = to.addSecs(-86400); break;
-        case Range::Week: from = to.addSecs(-7 * 86400); break;
+        case Range::Hour: from = now.addSecs(-3600); break;
+        case Range::Day:  from = now.addSecs(-86400); break;
+        case Range::Week: from = now.addSecs(-7 * 86400); break;
     }
-    return {from, to};
+    return {from, now};
 }
 
 void TrendWidget::reloadFromHistory() {
@@ -170,7 +169,10 @@ void TrendWidget::reloadFromHistory() {
 
     graph_->data()->clear();
 
-    const auto [from, to] = rangeWindow();
+    // ★ 只取一次时钟:窗口上界和数据点的时间戳必须是【同一个"现在"】。
+    //   取两次的话,中间跨过 1 毫秒边界,刚写进库的那个点就会落在窗外(见 onVariableChanged)。
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const auto [from, to] = rangeWindow(QDateTime::fromMSecsSinceEpoch(nowMs));
     const auto records = history_->query(currentVarName_, from, to);
 
     for (const auto& [ts, val] : records) {
@@ -193,8 +195,21 @@ void TrendWidget::onVariableChanged(const Variable& v) {
     if (!graph_ || !plot_) return;
     if (v.plcId() != plcId_ || v.name() != varName_) return;
 
-    const auto [from, to] = rangeWindow();
+    // ★★ 2026-10-30:这里原来踩着一个 1 毫秒竞态,已修。
+    //   原来:窗口上界 to = currentDateTime() 【先】取,数据点时间戳
+    //         nowMs = currentMSecsSinceEpoch() 【后】取 —— 两次时钟读数。
+    //   两次读之间只要跨过 1 毫秒边界,nowMs 就比 to 大 1ms,而下面判的是
+    //   `nowMs > to ⇒ 不在窗内 ⇒ 丢掉` ⇒ 【这个点被当成"窗外"扔了】。
+    //   实测(2026-10-30,真正重编过的带 bug 版本):
+    //     逐点丢点率约 2%;原来那条"只 setValue 一次"的用例单次失败率约 5%
+    //     ⇒ GitHub Actions 上那次 CI 就是这么红的 —— 红在 tst_Trend,零输出。
+    //       (失败发生在 QTest 刷出报告之前,stdout 管道里的缓冲全丢了。)
+    //   为什么两次读之间能差那么多:QDateTime::currentDateTime() 要做
+    //   本地时区↔UTC 转换,再取一次 currentMSecsSinceEpoch() 又是一次系统调用 ——
+    //   几十~上百微秒,足够跨过 1ms 边界。
+    //   修法:【只取一次时钟】,窗口和数据点共用同一个"现在" ⇒ nowMs == to,永远落在窗内。
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const auto [from, to] = rangeWindow(QDateTime::fromMSecsSinceEpoch(nowMs));
 
     // ★ 只在时间窗内追加(范围外的不入 graph)
     if (nowMs < from.toMSecsSinceEpoch() || nowMs > to.toMSecsSinceEpoch()) {
