@@ -452,6 +452,20 @@ target_link_libraries(tst_SingleInstanceKey PRIVATE
 )
 target_compile_options(tst_SingleInstanceKey PRIVATE /utf-8)
 add_test(NAME tst_SingleInstanceKey COMMAND tst_SingleInstanceKey)
+# ★ G-25(2026-10-30):单实例消息【只处理一次】。
+#   共享内存里的消息以前【读完不记已读】⇒ 主实例每 500ms 把同一条消息
+#   重放一遍 ⇒ 窗口每 0.5 秒被抢一次焦点 + 一天 60 万行日志。
+#   同样不用 add_hmi_test:SingleInstance.cpp 不在 hmi_core 里。
+add_executable(tst_SingleInstanceMessage
+    tst_SingleInstanceMessage.cpp
+    ${HMI_SRC_DIR}/src/instance/SingleInstance.cpp
+)
+target_link_libraries(tst_SingleInstanceMessage PRIVATE
+    hmi_core
+    Qt6::Test
+)
+target_compile_options(tst_SingleInstanceMessage PRIVATE /utf-8)
+add_test(NAME tst_SingleInstanceMessage COMMAND tst_SingleInstanceMessage)
 # ★ 2026-10-21:应用数据目录(HMI_DATA_DIR 覆盖)
 #   长跑实例要与"已经在跑的实例"各写各的 —— 日志 / history.db / 审计日志 /
 #   崩溃标记,任意一个共用都会互相写坏。

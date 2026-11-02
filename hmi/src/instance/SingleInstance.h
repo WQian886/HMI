@@ -56,11 +56,41 @@ public:
     // 非主实例 → 给主实例发消息
     bool sendMessageToPrimary(const QStringList& args);
 
+    // ★ G-25:共享内存里的消息协议头(前面是它,后面才是载荷)。
+    //   公开出来是为了让测试能读出"处理了几条消息"这类事实。
+    struct MessageHeader {
+        quint32 magic;
+        quint32 version;
+        quint32 seq;        // 发送方自增序号 —— "这条我处理过了吗"的唯一依据
+        quint32 payloadLen; // 载荷字节数
+    };
+
+    // ★ G-25:协议常量
+    static constexpr quint32 kShmMagic   = 0x484D494Du;  // 'HMIM'
+    static constexpr quint32 kShmVersion = 1u;
+    static constexpr int     kShmSize    = 1024;         // 共享内存字节数
+    static constexpr int     kPollIntervalMs = 500;      // 轮询间隔
+
+    // ★ G-25(2026-10-30):检查一次共享内存里有没有【新】消息。
+    //
+    //   【为什么从 private slot 挪到 public slot】
+    //     这件事以前【只有定时器会调】,于是它只有一条"每 500ms 跑一遍"的
+    //     路径,测试够不着 —— "一条消息只处理一次"这条根本没法钉。
+    //     挪成 public slot 之后,测试可以【直接调】,不依赖事件循环,
+    //     结果是确定的(定时器在测试里压根不转,因为没有事件循环)。
+    //
+    //   【它现在做什么】
+    //     读共享内存头部 → 取出 seq。
+    //     ★ seq 和上次处理过的一样 ⇒ 【直接跳过】——
+    //       这就是 G-25 的全部修复。原来这里是"读完照发",
+    //       同一份内容每 500ms 重放一次。
+public slots:
+    void checkIncomingMessages();
+
 signals:
     void messageReceived(const QStringList& args);
 
-private slots:
-    void checkIncomingMessages();
+private:
 
 private:
     class Impl;
