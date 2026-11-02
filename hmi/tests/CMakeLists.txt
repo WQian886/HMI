@@ -640,6 +640,12 @@ add_hmi_test(tst_AlarmConfigDialog)
 add_hmi_test(tst_CsvExporter)
 # 阶段 D · D.6 派生表达式解析
 add_hmi_test(tst_ExpressionParser)
+# ★ G-24(2026-10-30):表达式解析安全闸 —— 深度/长度/节点数 + 非有限值
+#   【为什么单独一个文件】体检 P1-6 和 P2-1 讲的是同一件事:
+#   "一行人给的文本能把进程打爆 / 能算出没人拦的数"。
+#   钉住它的用例必须和"正常表达式怎么算"分开写 ——
+#   混在一起,后加的用例会稀释前一条的失败信号。
+add_hmi_test(tst_ExpressionParserLimits)
 # 阶段 D · D.7 标签导入(CSV-based,零三方依赖)
 add_hmi_test(tst_TagImporter)
 # 阶段 E · E.1a 第 1 个控件 LabelControl(测试需要 QApplication + offscreen)

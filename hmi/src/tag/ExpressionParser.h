@@ -25,6 +25,33 @@ namespace qwhmi::tag {
 
 class ExpressionParser {
 public:
+    // ★ G-24(2026-10-30):表达式安全闸 —— 三个上限,超了【拒绝解析】。
+    //
+    //   【为什么必须有】
+    //     解析器是递归下降的,evalNode / collectVars / freeNode 也全是递归的。
+    //     一行 5000 层括号的文本 ⇒ 5000 层栈帧 ⇒ 栈溢出 ⇒ 进程直接死,
+    //     而且是【段错误式死法】—— 没有异常、没有日志、没有栈回溯。
+    //     而表达式可以来自:CSV 导入的 expression 列、变量配置窗口的表达式框、
+    //     手改的工程文件 —— 全是【人给的数据】,不是内部生成的。
+    //
+    //   【三个闸各管什么(缺一个就有洞)】
+    //     kMaxExprLength  管【文本长度】—— 一行文本的字符数上限。
+    //                    它同时兜住了"1+1+1+…"这种【左倾二叉树】:
+    //                    运算符越多节点越多,节点数 ≈ 长度/2。
+    //     kMaxParseDepth  管【括号嵌套】—— 解析期的递归层数上限。
+    //                    这一条直接决定解析期的栈深度。
+    //     kMaxNodeCount   管【AST 节点数】—— evalNode / freeNode 的递归深度
+    //                    由【AST 深度】决定,AST 深度 ≤ 节点数。
+    //                    这一条兜住求值期和释放期的栈深度。
+    //
+    //   【为什么取这些数】
+    //     工业现场的公式一般 < 10 层嵌套、< 100 字符。
+    //     64 层 × 3 个栈帧/层 ≈ 200 帧;256 个节点 ⇒ 求值/释放各 ≤ 256 帧。
+    //     在 Windows 默认 1 MB 主线程栈上,这两条都有【两个数量级】的余量。
+    static constexpr int kMaxExprLength = 1024;   // 字符数
+    static constexpr int kMaxParseDepth = 64;     // 括号嵌套层数
+    static constexpr int kMaxNodeCount  = 256;    // AST 节点数
+
     // ★ 解析 + 求值 — 一次到位(简单场景不需要分两步)
     //   expr: 表达式字符串
     //   resolve: 变量名 → QVariant 值的回调(给变量查 variableManager.findVariable)
