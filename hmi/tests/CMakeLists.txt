@@ -803,6 +803,13 @@ add_hmi_test(tst_ControlBackgroundImage)
 #   未知字段静默丢弃、失败留半个工程三件事。见 tst_JsonLoadDiagnostics.cpp 头注释。
 add_hmi_test(tst_JsonLoadDiagnostics)
 
+# ★ 覆盖体检(2026-11-02)补的缺口:util/ValueCoercion 此前【零专属测试】。
+#   它是 G-15(联动 24h 一次都没写出去)的根因修复,只被 tst_ActionWrite 的
+#   两条端到端用例间接覆盖 —— 一旦碰撞 bug 复发,通用规则矩阵没钉住。
+#   逐条钉:已对类型原样返回 / Int→UInt16 必须适配(非误判) / LongLong→UInt16 /
+#   Double→Float / 负数·溢出·字符串非法 → 非法。详见 tst_ValueCoercion.cpp 头注释。
+add_hmi_test(tst_ValueCoercion)
+
 # ★ 崩溃 dump 消费端(2026-10-14)。修的是"pending.txt 写了 28 天没人读"那条:
 #   dumpDirectory() 依赖调用方先设好 org/app,而 main() 当时把元数据排在
 #   install()/hasPendingDump()【后面】,于是写和读落在两个不同目录。
