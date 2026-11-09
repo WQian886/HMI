@@ -113,6 +113,11 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/drivers/ProtocolAvailabilityUi.cpp
     # ★ 2026-10-16:菜单栏(tst_MenuBar 调的是 hmi.cpp 调的那个同一个 buildApplicationMenu)
     ${HMI_SRC_DIR}/src/ui/MenuBuilder.cpp
+    # ★ 2026-11-02:"当前支持的功能"对话框的文案。
+    #   原来那段文字整段硬编码在 hmi.cpp 里 —— 而 hmi.cpp 不在 hmi_core 里
+    #   ⇒ 没有任何测试能看见它 ⇒ 它说了三句假话(多 PLC 那三句)。
+    #   抽出来之后,hmi.cpp 与测试调的是【同一个函数】。
+    ${HMI_SRC_DIR}/src/ui/CapabilityReport.cpp
     # 阶段 D · D.1 SQLite 历史库(2026-09-18)
     ${HMI_SRC_DIR}/src/history/HistoryRecorder.cpp
     # ★ D.3(2026-09-20):报警持久化(对称 HistoryRecorder + alarm_history 表)
@@ -540,6 +545,15 @@ target_link_libraries(tst_AlarmTriggerPolicy PRIVATE hmi_core Qt6::Test)
 target_compile_options(tst_AlarmTriggerPolicy PRIVATE /utf-8)
 target_compile_definitions(tst_AlarmTriggerPolicy PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_AlarmTriggerPolicy COMMAND tst_AlarmTriggerPolicy)
+# ★ 2026-11-02:"当前支持的功能"对话框不许说假话。
+#   那个对话框原来硬编码在 hmi.cpp 里,说了三句假话(多 PLC 那三句),
+#   而 hmi.cpp 不在 hmi_core 里 ⇒ 没有一条测试能看见它。
+#   ★ 不用 add_hmi_test:它有一条用例要读 hmi.cpp 源码文本,所以要 HMI_SRC_DIR_STRING。
+add_executable(tst_CapabilityReport tst_CapabilityReport.cpp)
+target_link_libraries(tst_CapabilityReport PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_CapabilityReport PRIVATE /utf-8)
+target_compile_definitions(tst_CapabilityReport PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_CapabilityReport COMMAND tst_CapabilityReport)
 # ★ 2026-10-21:PowerShell 脚本里的【格式化占位符漏替换】静态检查。
 #   这不是 C++ 测试,是一条跑脚本的 ctest 目标 —— 因为它要检的东西
 #   本来就不在 C++ 里(在 .ps1 里)。

@@ -475,6 +475,8 @@
   <!-- ★ sync_vcxproj.py 追加 -->
   <ItemGroup>
     <ClCompile Include="src\alarm\AlarmTriggerPolicy.cpp" />
+    <ClCompile Include="src\ui\CapabilityReport.cpp" />
     <ClInclude Include="src\alarm\AlarmTriggerPolicy.h" />
+    <ClInclude Include="src\ui\CapabilityReport.h" />
   </ItemGroup>
 </Project>

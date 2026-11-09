@@ -7,7 +7,13 @@
     <ClCompile Include="src\alarm\AlarmTriggerPolicy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ui\CapabilityReport.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClInclude Include="src\alarm\AlarmTriggerPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\CapabilityReport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <!-- ★ 2026-10-09 补:以下条目 vcxproj 里早已注册,filters 一直漏着,

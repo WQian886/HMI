@@ -17,6 +17,7 @@
 #include "alarm/AlarmTablePresenter.h" // ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改/留多少行)
 #include "alarm/ActionWiring.h"      // ★ 2026-10-25:"报警→联动"那根接线的唯一出处
 #include "alarm/AlarmTriggerPolicy.h" // ★ G-26(2026-11-02):"这条报警要不要抢停机"的唯一出处
+#include "ui/CapabilityReport.h"    // ★ 2026-11-02:"当前支持的功能"对话框的文案(原来在说假话)
 #include "util/ValueCoercion.h"      // ★ 2026-10-25:值类型适配(联动值要转成变量声明的类型)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
@@ -1330,25 +1331,22 @@ void hmi::buildCommTracePanel() {
     });
 }
 
+// ★ 2026-11-02:这段文字原来【整段硬编码在这里】,而 hmi.cpp 不在 hmi_core 里
+//   ⇒ 没有任何一条测试能看见它 ⇒ 它说了三句假话:
+//     "多 PLC …… 但目前只连第 1 台" / "多台 PLC 同时在线 —— 在做" /
+//     "界面上直接加/删 PLC —— 在做"
+//   而这三件事早就做完了(PlcConnectionManager 建 N 台 driver、
+//   「PLC → PLC 配置」能加/删、「数据 → 变量配置」能分配变量)。
+//   ⇒ 现在文字在共享模块里(可单测),跟运行时有关的部分由【事实】带进来。
+//   详见 src/ui/CapabilityReport.h 的文件头。
 void hmi::onShowCapabilities() {
+    qwhmi::ui::CapabilityFacts facts;
+    facts.plcCount  = plcMgr_ ? plcMgr_->driverCount() : 0;
+    facts.s7Usable  = qwhmi::drivers::DriverFactory::isUsable(QStringLiteral("s7"));
+    facts.eipUsable = qwhmi::drivers::DriverFactory::isUsable(QStringLiteral("eip"));
+
     QMessageBox::information(this, tr("当前支持的功能"),
-        tr("<h3>✅ 现在就能用</h3>"
-           "<ul>"
-           "<li>连接一台 Modbus TCP 的 PLC（填 IP + 端口）</li>"
-           "<li>读变量：温度 / 压力 / 转速等，绑到画面控件上</li>"
-           "<li>写变量：手动改一个可写值发回 PLC</li>"
-           "<li>报警：上下限、超时、确认、声音、导出</li>"
-           "<li>画面编辑：22 种控件，拖拽排版、撤销重做、复制粘贴</li>"
-           "<li>数据导出：变量表、报警表存成 CSV（交接班/报表用）</li>"
-           "<li>多 PLC：可以配好存进工程文件，<b>但目前只连第 1 台</b></li>"
-           "</ul>"
-           "<h3>⏳ 还没做（菜单里不出现，免得你反复试）</h3>"
-           "<ul>"
-           "<li>多台 PLC 同时在线 —— 在做</li>"
-           "<li>界面上直接加/删 PLC —— 在做</li>"
-           "<li>西门子 S7 / AB EtherNet-IP —— 下拉框里是<b>灰的</b>，真接了才能选</li>"
-           "<li>新建工程（现在只能打开/保存已有工程）</li>"
-           "</ul>"));
+                             qwhmi::ui::buildCapabilitiesHtml(facts));
 }
 
 // ★ BUGFIX-5.5(2026-08-04 Wqian 反馈):报警值还在时禁止复位 + 复位只确认不删记录

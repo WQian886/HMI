@@ -147,6 +147,11 @@ set(SOURCES
     #   而 hmi.cpp 不在 hmi_core 里 ⇒ 没有任何单测能看见它。
     #   抽到公共层之后,hmi.cpp 与测试调的是【同一个函数】。
     src/alarm/AlarmTriggerPolicy.cpp
+    # ★ 2026-11-02:"当前支持的功能"对话框的文案。
+    #   原来那段文字整段硬编码在 hmi.cpp 里 —— 而 hmi.cpp 不在 hmi_core 里
+    #   ⇒ 没有任何测试能看见它 ⇒ 它说了三句假话(多 PLC 那三句)。
+    #   抽出来之后,hmi.cpp 与测试调的是【同一个函数】。
+    src/ui/CapabilityReport.cpp
 )
 
 set(HEADERS
@@ -239,6 +244,8 @@ set(HEADERS
     src/drivers/IPlcDriverProvider.h  # ★ 2b:纯接口无 Q_OBJECT(写进 HEADERS 便于 VS 里查得到)
     # ★ G-26(2026-11-02):报警等级跟"抢不抢停机"的判据(纯函数,无 Q_OBJECT)
     src/alarm/AlarmTriggerPolicy.h
+    # ★ 2026-11-02:"当前支持的功能"对话框的文案(纯函数,无 Q_OBJECT)
+    src/ui/CapabilityReport.h
 )
 
 set(FORMS
