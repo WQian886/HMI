@@ -103,6 +103,102 @@ QJsonObject JsonSerializer::toActionMappingJson(const QString& alarmName,
     return obj;
 }
 
+// ===== ★ F 阶段(2026-11-09):联动模板 =====
+
+// 一步动作 → QJsonObject。
+//
+//   【每种类型只写自己用得上的字段】
+//     write_variable: variable + write_value
+//     log_only     : text
+//   【为什么不多写几个空字段】工程文件是给人看、给人手改的 ——
+//     一堆空串/0 会让人以为"这里也能配"。
+QJsonObject JsonSerializer::toActionStepJson(const qwhmi::action::ActionStep& step) {
+    QJsonObject obj;
+    obj["type"] = qwhmi::action::actionTypeToString(step.type);
+    switch (step.type) {
+        case qwhmi::action::ActionType::WriteVariable:
+            obj["variable"]    = step.variableName;
+            obj["write_value"] = QJsonValue::fromVariant(step.value);
+            break;
+        case qwhmi::action::ActionType::LogOnly:
+            obj["text"] = step.text;
+            break;
+    }
+    return obj;
+}
+
+// 一整组动作 → QJsonObject。
+QJsonObject JsonSerializer::toActionTemplateJson(const qwhmi::action::ActionTemplate& tpl) {
+    QJsonObject obj;
+    obj["alarm_name"] = tpl.alarmName;
+    QJsonArray steps;
+    for (const qwhmi::action::ActionStep& step : tpl.steps) {
+        steps.append(toActionStepJson(step));
+    }
+    obj["steps"] = steps;
+    return obj;
+}
+
+// QJsonObject → 一整组动作。
+//
+//   【失败就说清楚是哪一步、为什么】
+//     工程文件是人手写的(还可能被记事本改坏),出错时用户要能照着改。
+//     而且这里【不】静默跳过坏步骤 ——
+//     跳过 = "配了但没生效",而现场看不出来。
+//     与 alarms / actions 的老规矩一致:引用不存在的变量 ⇒ 整个加载失败。
+bool JsonSerializer::actionTemplateFromJson(const QJsonObject& obj,
+                                            qwhmi::action::ActionTemplate* out,
+                                            QString* outError) {
+    auto fail = [&](const QString& why) {
+        if (outError) *outError = why;
+        return false;
+    };
+    if (!out) return fail(QStringLiteral("输出参数为空"));
+
+    const QString alarmName = obj["alarm_name"].toString().trimmed();
+    if (alarmName.isEmpty()) {
+        return fail(QStringLiteral("action_template 缺少 alarm_name"));
+    }
+
+    qwhmi::action::ActionTemplate tpl;
+    tpl.alarmName = alarmName;
+
+    const QJsonArray steps = obj["steps"].toArray();
+    for (int i = 0; i < steps.size(); ++i) {
+        const QJsonObject so = steps[i].toObject();
+
+        // 类型先认 —— 认不出来说明工程文件比这个程序新(或者是拼错了)。
+        const QString typeStr = so["type"].toString();
+        qwhmi::action::ActionType type;
+        if (!qwhmi::action::actionTypeFromString(typeStr, &type)) {
+            return fail(QStringLiteral("第 %1 步的 type \"%2\" 不认识")
+                            .arg(i + 1).arg(typeStr));
+        }
+
+        qwhmi::action::ActionStep step;
+        step.type = type;
+        if (type == qwhmi::action::ActionType::WriteVariable) {
+            step.variableName = so["variable"].toString();
+            // ★ 注意:JSON 的整数读出来是 QVariant(LongLong),
+            //   跟变量的声明类型(UInt16 之类)对不上 —— 适配在
+            //   ActionManager 那一侧做(util/ValueCoercion),这里【不】适配。
+            step.value = so["write_value"].toVariant();
+        } else {
+            step.text = so["text"].toString();
+        }
+
+        // 合法性交给公共层判(同一个函数,单测直接钉它)。
+        QString why;
+        if (!qwhmi::action::validateStep(step, &why)) {
+            return fail(QStringLiteral("第 %1 步不合法:%2").arg(i + 1).arg(why));
+        }
+        tpl.steps.append(step);
+    }
+
+    *out = tpl;
+    return true;
+}
+
 // ===== Enum ↔ String 辅助 =====
 //   【背景】AlarmLevel / Direction 是 enum class,没 Q_ENUM,QMetaEnum 不能直接用
 //   【改法】手写 switch + fallback(防御编程)

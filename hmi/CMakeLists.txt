@@ -157,6 +157,11 @@ set(SOURCES
     #   ⇒ 没有任何一条单测能看见它 ⇒ 它一直只是"设计",从来不是"钉子"。
     #   抽到共享模块之后,hmi.cpp 与测试调的是【同一张表】。
     src/state/StateMachinePolicy.cpp
+    # ★ F 阶段(2026-11-09):联动模板 —— "报警触发了要做什么"的唯一出处。
+    #   原来一条报警只能配一个"写变量"动作(addMapping 是覆盖),
+    #   而且"动作有哪些种类"整段写死在 ActionManager 里 ——
+    #   后者不在 hmi_core 里 ⇒ 没有任何一条单测能看见它。
+    src/action/ActionTemplate.cpp
 )
 
 set(HEADERS
@@ -253,6 +258,8 @@ set(HEADERS
     src/ui/CapabilityReport.h
     # ★ G-28(2026-11-02):状态迁移表(纯函数,无 Q_OBJECT)
     src/state/StateMachinePolicy.h
+    # ★ F 阶段(2026-11-09):联动模板(纯逻辑 + 抽象出口,无 Q_OBJECT)
+    src/action/ActionTemplate.h
 )
 
 set(FORMS

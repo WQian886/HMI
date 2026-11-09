@@ -484,4 +484,9 @@
     <ClCompile Include="src\state\StateMachinePolicy.cpp" />
     <ClInclude Include="src\state\StateMachinePolicy.h" />
   </ItemGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\action\ActionTemplate.cpp" />
+    <ClInclude Include="src\action\ActionTemplate.h" />
+  </ItemGroup>
 </Project>

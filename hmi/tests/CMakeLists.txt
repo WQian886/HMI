@@ -227,6 +227,11 @@ set(HMI_CORE_SOURCES
     #   以前只能"抄一份跑"—— 而这份逻辑抄错了就是【广播写】。
     #   现在测试调的是生产用的同一个 parseRequestSpec。
     ${HMI_SRC_DIR}/src/plc/ModbusRequestParser.cpp
+    # ★ F 阶段(2026-11-09):联动模板 —— "报警触发了要做什么"的判据。
+    #   【必须进 hmi_core】ActionManager.cpp 已经在里面,而它现在调的是
+    #   这个模块的 executeStep —— 漏了这一行 = 链接期 LNK2019,
+    #   而报错点全在 hmi_core 的其它目标里,离病根(这一行没加)很远。
+    ${HMI_SRC_DIR}/src/action/ActionTemplate.cpp
 )
 
 # ============================================================
@@ -809,6 +814,18 @@ add_hmi_test(tst_JsonLoadDiagnostics)
 #   逐条钉:已对类型原样返回 / Int→UInt16 必须适配(非误判) / LongLong→UInt16 /
 #   Double→Float / 负数·溢出·字符串非法 → 非法。详见 tst_ValueCoercion.cpp 头注释。
 add_hmi_test(tst_ValueCoercion)
+
+# ★ F 阶段(2026-11-09):联动模板 —— 一条报警可以配【多步】、多种动作类型。
+#   修的是 F 阶段最后一件事:原来一条报警只能配一个"写变量"动作
+#   (addMapping 是覆盖),配第二个时第一个被【悄悄顶掉】。
+#   ★ 不用 add_hmi_test:它有一条用例要读 Project.cpp 源码文本
+#     (确认工程文件真的读 action_templates),所以要 HMI_SRC_DIR_STRING。
+#     同 tst_Theme / tst_ModbusPanel / tst_ActionWrite 的理由。
+add_executable(tst_ActionTemplate tst_ActionTemplate.cpp)
+target_link_libraries(tst_ActionTemplate PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_ActionTemplate PRIVATE /utf-8)
+target_compile_definitions(tst_ActionTemplate PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_ActionTemplate COMMAND tst_ActionTemplate)
 
 # ★ 崩溃 dump 消费端(2026-10-14)。修的是"pending.txt 写了 28 天没人读"那条:
 #   dumpDirectory() 依赖调用方先设好 org/app,而 main() 当时把元数据排在

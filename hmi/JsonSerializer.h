@@ -16,6 +16,8 @@
 
 #include "VariableManager.h"  // ★ 6.3 修正:用 include 替前向声明(VariableManager 是 QObject 子类,需要完整定义才能隐式 upcast)
 #include "Alarm.h"             // ★ 6.3 修正:AlarmLevel / Direction 是 Alarm.h 嵌套类型,前向声明看不到
+// ★ F 阶段(2026-11-09):联动模板(一条报警 → 一组动作)的存读。
+#include "action/ActionTemplate.h"
 
 class Variable;
 struct CheckerConfig;
@@ -35,6 +37,34 @@ public:
     static QJsonObject toActionMappingJson(const QString& alarmName,
                                            const QString& variableName,
                                            const QVariant& value);
+
+    // ===== ★ F 阶段(2026-11-09):联动模板 =====
+    //
+    //   【为什么要新的格式】
+    //     老格式 actions 数组一条 = 一个"写变量"动作,表达不了:
+    //       · 一条报警配【多个】动作
+    //       · "只记日志"这类【不写变量】的动作
+    //     新格式 action_templates:一条报警 = 一组步骤(steps)。
+    //
+    //   【工程文件格式(一旦发布就是契约,只加不改)】
+    //     "action_templates": [
+    //       { "alarm_name": "温度高",
+    //         "steps": [
+    //           { "type": "write_variable", "variable": "Speed", "write_value": 0 },
+    //           { "type": "log_only",      "text": "已自动停机" }
+    //         ] } ]
+    //
+    //   【老工程怎么办】老格式照读、照写 —— 加载端先读 actions,
+    //   再读 action_templates 覆盖同名的;两边并存不冲突。
+    static QJsonObject toActionStepJson(const qwhmi::action::ActionStep& step);
+    static QJsonObject toActionTemplateJson(const qwhmi::action::ActionTemplate& tpl);
+
+    // 从 JSON 读一个模板。
+    //   失败返回 false 并写原因(同 fromJsonVariable 的做法)——
+    //   "类型不认识" / "步骤不合法"必须让用户看见,不能静默跳过。
+    static bool actionTemplateFromJson(const QJsonObject& obj,
+                                        qwhmi::action::ActionTemplate* out,
+                                        QString* outError = nullptr);
 
     // ===== Enum ↔ String 辅助 =====
     //   AlarmLevel / Direction 没有 Q_ENUM,手写 switch;以后 5.x 加 Q_ENUM 可删

@@ -590,8 +590,22 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
         }
     }
 
-    // 7. 解析 actions
+    // 7. 解析 actions(老格式)+ action_templates(F 阶段新格式)
+    //
+    //   【为什么两种格式都要读】
+    //     老格式 actions 数组:一条 = 一个"写变量"动作 —— 【还能用,不能扔】。
+    //       扔了 = 老工程一打开,联动全没了,而且工程还"打开成功" ——
+    //       现场看到的现象是"升级之后联动不执行了",极难查。
+    //     新格式 action_templates:一条报警 = 一组步骤(多动作 + 多类型)。
+    //
+    //   【为什么新格式排在后面】
+    //     新格式是【整组】(addTemplate 覆盖同名),老格式是【追加】(addMapping)。
+    //     先读老的再读新的 ⇒ 新的赢。
+    //     ⇒ 老工程(只有 actions)照旧能用;
+    //       新工程(两个都有)以 action_templates 为准 —— 而存盘时两个数组
+    //       是从同一份内存状态写出来的,内容必然一致。
     if (actionMgr_ && varMgr_) {
+        // ---- 7a. 老格式:actions 数组 ----
         QJsonArray actionsArr = root["actions"].toArray();
         for (const QJsonValue& ac : actionsArr) {
             QJsonObject acObj = ac.toObject();
@@ -605,6 +619,28 @@ bool Project::loadRootFromFile(const QString& path, QJsonObject& outRoot) {
                                     .arg(alarmName, varName));
             }
             actionMgr_->addMapping(alarmName, varName, writeValue);
+        }
+
+        // ---- 7b. 新格式:action_templates 数组 ----
+        QJsonArray tplArr = root["action_templates"].toArray();
+        for (int i = 0; i < tplArr.size(); ++i) {
+            qwhmi::action::ActionTemplate tpl;
+            QString tplErr;
+            if (!JsonSerializer::actionTemplateFromJson(tplArr[i].toObject(), &tpl, &tplErr)) {
+                return failWith(QString("第 %1 个 action_template 解析失败:\n%2")
+                                    .arg(i + 1).arg(tplErr));
+            }
+            // ★ 每个"写变量"步骤引用的变量必须存在 —— 跟老格式同一条规矩。
+            //   悬空引用写进工程 = 下次打不开(见下面存盘那段的长注释)。
+            for (const qwhmi::action::ActionStep& step : tpl.steps) {
+                if (step.type != qwhmi::action::ActionType::WriteVariable) continue;
+                if (!varMgr_->findVariable(step.variableName)) {
+                    return failWith(QString("action_template \"%1\" 引用了不存在的 variable \"%2\"")
+                                        .arg(tpl.alarmName, step.variableName));
+                }
+            }
+            // ★ 整组替换 —— 盖掉老格式里同名的残留。
+            actionMgr_->addTemplate(tpl);
         }
     }
 
@@ -769,6 +805,47 @@ bool Project::saveToFile(const QString& path, const QList<qwhmi::widgets::Contro
             }
         }
         root["actions"] = actionsArr;
+    }
+
+    // ★ F 阶段(2026-11-09):action_templates —— 一条报警一组动作(完整信息)
+    //
+    //   【为什么老格式 actions 还要写】
+    //     它是【只写变量那一种动作】的展平视图。老版本程序只认它 ——
+    //     写出来 = 新工程拿老程序打开,联动还在(前向兼容)。
+    //     两个数组内容一致(都是从同一份内存状态写的),不冲突。
+    //
+    //   【为什么这里也要过滤悬空变量】
+    //     同上面 actions 那段:变量被删了之后,联动里留着的【变量名字符串】
+    //     看着还挺正常,但加载端 findVariable 拿不到 → failWith → 整个工程打不开。
+    //     所以变量没了的那一步【整步跳过】。
+    //     ⚠️ "只记日志"那类步骤【没有变量】,不受影响,照样写。
+    {
+        QJsonArray tplsArr;
+        if (actionMgr_) {
+            for (const qwhmi::action::ActionTemplate& tpl : actionMgr_->templates()) {
+                qwhmi::action::ActionTemplate clean = tpl;
+                clean.steps.clear();
+                for (const qwhmi::action::ActionStep& step : tpl.steps) {
+                    if (step.type == qwhmi::action::ActionType::WriteVariable
+                        && varMgr_ && !varMgr_->findVariable(step.variableName)) {
+                        qCWarning(hmiApp) << "[Project] 联动 \"" << tpl.alarmName
+                                          << "\"引用的变量 \"" << step.variableName
+                                          << "\"已被删除,存盘时跳过这一步 —— "
+                                             "写出去会让整个工程下次打不开";
+                        continue;
+                    }
+                    clean.steps.append(step);
+                }
+                // ★ 整组都没了 → 这条报警一个动作都不剩了。
+                //   写出来就是"这条报警没有动作"(空模板)——
+                //   这是【明确】的意思,不是"没配"。所以照样写出去,
+                //   加载端 addTemplate(空) 会把老格式里同名的残留顶掉。
+                //   (老格式 actions 那边的同名条目本来也因为变量没了被跳过了,
+                //    两边一致,不会出现"顶回来"的情况。)
+                tplsArr.append(JsonSerializer::toActionTemplateJson(clean));
+            }
+        }
+        root["action_templates"] = tplsArr;
     }
 
     // ★ E.3:screens[0].controls(画布)— 反射遍历控件列表
