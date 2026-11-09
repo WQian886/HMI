@@ -1,6 +1,13 @@
 # CHANGELOG
 
-> 最后核对：**2026-11-02**（本轮：**G-26 + G-27 + G-28** 三条已修 —— 同一个形状：**主画面逻辑零覆盖**；
+> 最后核对：**2026-11-09**（本轮：**F 阶段收尾 —— 联动模板** —— 一条报警可配【多步】动作，
+> 判据搬进公共层 `src/action/ActionTemplate`）；
+> 全套重跑：**111/111**（73.30 秒）—— 110 个 + 新增 `tst_ActionTemplate`（24 条）；
+> 负向对照：**6 组**全部按预期变红（基线绿 / 六组全红 / 还原后绿 / 三个源文件 SHA256 逐字节一致）；
+> ★ 本轮**逐个提交**也验过：`047a3de`（F 联动模板）单独 checkout → 全套 **111/111**（70.27 秒）
+> —— 目标数阶梯 110→111 跟新增的测试目标对得上；
+> ⚠️ 本轮**还没在 CI 上验过**（未推远端）；
+> ★ 上一轮：**2026-11-02**（**G-26 + G-27 + G-28** 三条已修 —— 同一个形状：**主画面逻辑零覆盖**；
 > 全套重跑：**110/110**（70.04 秒）—— 106 个 + 新增 4 个目标：
 > `tst_AlarmTriggerPolicy`（8 条）/ `tst_CapabilityReport`（6 条）/ `tst_StateMachinePolicy`（11 条）/ `tst_ValueCoercion`（13 条 —— 补 `util/ValueCoercion` 一直缺的通用规则矩阵）；
 > 负向对照：G-26 **2 组** + G-27 **3 组** + G-28 **5 组**，**全部按预期变红**；
@@ -61,6 +68,78 @@
 > 原先唯一红的 `tst_ProjectMultiPlc` 已修；`hmi.exe` 编于
 > `out/build/debug2`；**MSBuild 那条路也真编过一次**（`x64\Debug\hmi.exe`,
 > moc 产物 76→71,0 字节空文件清零））
+
+## [Unreleased] - 2026-11-09
+
+### feat(action): F 阶段收尾 —— 一条报警可以配【多步】联动，判据搬进公共层
+
+> ★ 详见 `docs/现状.md` 第七节【F 阶段联动模板】。
+
+这是 F 阶段最后一项（路线图.md 里"唯一剩联动模板"）。
+
+★ 原来为什么不行
+  `addMapping` 的实现是 `mappings_[alarmName] = m;`
+  ⇒ 给同一条报警配第二个动作时，第一个被【悄悄顶掉】，
+    界面上什么提示都没有 —— 现场只会以为"配了没生效"。
+  而"动作有哪些种类"整段写死在 `onAlarmTriggered` 里，
+  没有任何一条测试能看见它。
+
+★ 改了什么
+  · 新增公共层 `hmi/src/action/ActionTemplate.{h,cpp}`（进 `hmi_core`）
+      · `ActionType`     —— 动作类型（现在两种：`write_variable` / `log_only`）
+      · `ActionStep`     —— 一步动作
+      · `ActionTemplate` —— 一条报警的一整组动作
+      · `validateStep()` —— 这一步合不合法
+      · `executeStep()`  —— 执行一步，并如实报结果（7 档 Outcome）
+      · `ActionSink`     —— 抽象出口（"把变量写成这个值"由调用方实现）
+  · `ActionManager`
+      · `addMapping` 从【覆盖】改成【追加】（本次的核心修复）
+      · 新增 `addTemplate`（整组替换）/ `templates()`
+      · `onAlarmTriggered` 改成"按模板逐步执行"，一步失败不吞后面的步骤
+      · 内部存储从 `QHash<QString,Mapping>` 换成 `QHash<QString,ActionTemplate>`
+      · `mappings()` 保留 —— 现在是"写变量步骤"的展平视图（老接口名字/用法不变）
+  · `JsonSerializer`
+      · 新增 `toActionStepJson` / `toActionTemplateJson` / `actionTemplateFromJson`
+  · `Project.cpp`
+      · 加载端：先读老格式 `actions`，再读新格式 `action_templates`（整组覆盖同名）
+      · 存盘端：两个数组都写（`actions` 供老版本程序前向兼容）
+  · 新增测试 `hmi/tests/tst_ActionTemplate.cpp`（24 条用例）
+  · 新增 `scripts/negctl_action_template.py`（6 组变异）
+  · 登记：`CMakeLists`（主工程 + 测试）、`hmi.vcxproj` + `.filters`
+
+★ 判据为什么必须搬进公共层
+  写在 `ActionManager` 里的判据，测试只能【复制一份】跑 ——
+  测的是副本，生产那份被改错了测试照样全绿。
+  搬进 `hmi_core` 之后，`ActionManager` 与测试调的是【同一个函数】。
+  手法同 `src/plc/ModbusRequestParser.h`（纯判据，不碰硬件）：
+  公共层只认识 `ActionSink`，不认识 `VariableManager`，也不碰 PLC。
+
+★ 向后兼容
+  · 老工程文件（只有 `actions` 数组）照旧打得开、联动照旧在
+  · `addMapping` 的名字和用法没变，只是语义从"覆盖"变成"追加"
+  · 老版本程序打开新工程：`actions` 数组照写 ⇒ 联动还在
+  · 类型适配仍走 `util/ValueCoercion`（G-15 那条修复没被绕过）
+
+★ 本次【没有】做的（说清楚，免得下一个人以为漏了）
+  · 联动的【配置界面】没做 —— 联动目前仍然靠手改工程 JSON 配置，
+    这跟本次修改之前的现状一样，不是这次引入的缺口。
+  · 没有加"执行脚本""发通知"这类动作类型 ——
+    它们要么需要外部依赖，要么等于"一条报警就能在 HMI 上跑任意代码"，
+    在工控上是危险动作。
+
+★ 负向对照（`scripts/negctl_action_template.py` —— 6 组变异全部按预期变红）
+  · M1 `addMapping` 退回"覆盖"          → 多动作那条用例红
+  · M2 只执行第一步                     → 整组执行 / 失败不吞后一步 两条红
+  · M3 不认识的类型 fallback 成合法类型 → 未知类型那条红
+  · M4 加载端忽略 `action_templates`    → 新格式赢老格式那条红
+  · M5 存盘端不写 `action_templates`    → 存盘那条红
+  · M6 空的变量名也算合法              → 非法步骤那条红
+  基线绿 / 六组全红 / 还原后绿 / 三个源文件 SHA256 与跑前逐字节一致。
+
+★ 验证
+  全套 `ctest` **111/111**（73.30 秒）—— 110 个 + 新增 `tst_ActionTemplate`。
+  `047a3de` 单独 checkout → 全套 **111/111**（70.27 秒）——
+  目标数阶梯 110→111 跟新增的测试目标对得上。
 
 ## [Unreleased] - 2026-11-02
 
