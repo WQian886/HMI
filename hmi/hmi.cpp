@@ -16,6 +16,7 @@
 #include "alarm/AlarmRowPalette.h"   // ★ 2026-10-14:报警表配色的唯一权威(与运行时画布共用)
 #include "alarm/AlarmTablePresenter.h" // ★ 2026-10-24:报警【行】的呈现(行怎么造/怎么改/留多少行)
 #include "alarm/ActionWiring.h"      // ★ 2026-10-25:"报警→联动"那根接线的唯一出处
+#include "alarm/AlarmTriggerPolicy.h" // ★ G-26(2026-11-02):"这条报警要不要抢停机"的唯一出处
 #include "util/ValueCoercion.h"      // ★ 2026-10-25:值类型适配(联动值要转成变量声明的类型)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
@@ -1096,7 +1097,17 @@ void hmi::executeModbus(const qwhmi::plc::RequestSpec& spec) {
 //   【改法】所有合法迁移写在这里,槽函数走 tryTransition(Trigger) 查表
 //   【取舍】多一处声明,但杜绝"非法迁移"和"重复状态设置"等混乱
 //   【参照】Wqian 2026-08-03 review #3(阶段 5.1 拍板)
-//   注:AlarmCritical / AlarmCleared 5.3 报警系统完成后再真实触发
+//   ★ 2026-11-02(G-26):AlarmCritical 入口【已经真的接上了】——
+//     AlarmManager::alarmTriggered → hmi::onAlarmTriggered →
+//     【按等级过滤之后】tryTransition(AlarmCritical)。
+//     过滤判据在 qwhmi::alarm::shouldTripMachine 里
+//     (见 src/alarm/AlarmTriggerPolicy.h):只有 Critical / Emergency 才抢停机。
+//     ★ 原来这里是【无条件】tryTransition —— 一条 Info 报警就把机器打成 Fault。
+//
+//   ★ AlarmCleared 【仍然没有触发源】,而且是【故意的】,不是漏了:
+//     抢停机后不自动恢复,必须人工按复位(见下面 Fault 那条)。
+//     反过来做(报警一恢复就自动回 Stopped)的话,机器会在条件反复越限的
+//     情况下自己爬起来、跑两秒、又自己停 —— 那比停着更危险。
 const QHash<QPair<hmi::State, hmi::Trigger>, hmi::State> hmi::kTransitionTable = {
     // Stopped 初始 / 主动停止
     {{State::Stopped,    Trigger::StartButton},        State::Running},
@@ -2117,7 +2128,28 @@ bool hmi::loadProjectAtStartup(const QString& path) {
 void hmi::onAlarmTriggered(const Alarm& a) {
     qCDebug(hmiAlarm) << "[Alarm 触发]" << a.name << "level=" << static_cast<int>(a.level)
              << "value=" << a.triggerValue << "threshold=" << a.threshold;
-    tryTransition(Trigger::AlarmCritical);   // 推状态机进 Fault
+
+    // ★ G-26(2026-11-02):【只有严重/危急才抢停机】。
+    //   原来这里是【无条件】tryTransition(Trigger::AlarmCritical) ——
+    //   于是一条 Info 报警也能把整台机器打成 Fault:counter 定时器停下、
+    //   开始/停止按钮全灰、状态标签变"状态:故障"。
+    //   而设计稿(docs/归档/2026-08-03_LEARNING_NOTES.md:219)写的是
+    //     | **任何** | AlarmCritical | **Fault** | 严重报警抢占 |
+    //   —— "AlarmCritical" 指的是【严重等级】的报警,不是【任何】报警。
+    //   判据放在共享模块 AlarmTriggerPolicy 里(可单测):
+    //   hmi.cpp 不在 hmi_core 里,在这里自己写一份 = 测试永远测不到它
+    //   —— 那正是这条 bug 活到今天的原因。
+    if (qwhmi::alarm::shouldTripMachine(a.level)) {
+        qCWarning(hmiAlarm) << "[Alarm] 严重/危急报警 → 机器抢停机:"
+                            << a.name << "等级=" << alarmLevelName(a.level);
+        tryTransition(Trigger::AlarmCritical);   // 推状态机进 Fault
+    } else {
+        // ★ 不抢停机【也要留痕】。
+        //   操作员看到机器没停,得能查到"为什么没停" —— 否则这条日志
+        //   就是"应用说自己成功了",不是证据(本项目吃过太多这种亏)。
+        qCInfo(hmiAlarm) << "[Alarm] 信息/警告报警 → 仅记录,不抢停机:"
+                         << a.name << "等级=" << alarmLevelName(a.level);
+    }
 
     // ★★ 2026-10-24:整行的创建改调 AlarmTablePresenter(BUGFIX-C3)。
     //   原来这一段在这里自己写 4 个 setItem —— 【少写第 5 列(状态列)】,

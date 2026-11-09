@@ -472,4 +472,9 @@
     <ClCompile Include="src\plc\ModbusRequestParser.cpp" />
     <ClInclude Include="src\plc\ModbusRequestParser.h" />
   </ItemGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\alarm\AlarmTriggerPolicy.cpp" />
+    <ClInclude Include="src\alarm\AlarmTriggerPolicy.h" />
+  </ItemGroup>
 </Project>

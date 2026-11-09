@@ -219,6 +219,16 @@ param(
     #   ⇒ 加了延迟就能【故意】制造撞车,把排队通路真的走一遍。
     #   ⚠ 加了延迟读也会变慢 ⇒ 轮询节奏跟着变,数字不能跟默认跑法混着比。
     [int]    $ReplyDelayMs = 0,
+    # ★ 报警等级(2026-11-02 加,为 G-26)。
+    #   空 = 不改,用工程里原本的等级(soak_project.json 里是 Critical)。
+    #   填 Warning/Info = 副本里的报警【全部】降级,
+    #   用来验"信息/警告级报警【不抢停机】,而联动照常执行"。
+    #   ★ 为什么要这个开关:G-26 修完之后,判据不能只验"严重报警会停机",
+    #     还必须验"警告报警【不】停机" —— 后者才是那个 bug 的形状。
+    #   ★ "机器停没停"在进程级唯一能看见的地方,就是应用日志里那两行
+    #     ("机器抢停机" / "仅记录,不抢停机")——
+    #     它们跟按钮变灰、状态标签变红是同一次状态迁移的两个侧面。
+    [string] $AlarmLevel  = '',
     [string] $Exe        = '',
     [string] $Project    = '',
     [string] $OutDir     = '',
@@ -345,6 +355,18 @@ try {
 }
 foreach ($v in $proj.variables) { $v.poll_interval_ms = $PollMs }
 foreach ($a in $proj.alarms)    { $a.min_duration_ms  = $AlarmMinMs }
+# ★ 报警等级覆盖(2026-11-02,为 G-26)——
+#   只改这份【副本】,仓库里的 soak_project.json 一个字都不动。
+#   等级决定"这条报警会不会把机器打成 Fault"
+#   (判据在 hmi/src/alarm/AlarmTriggerPolicy.h:只有 Critical/Emergency 抢停机)。
+if ($AlarmLevel) {
+    $validLevels = @('Info','Warning','Critical','Emergency')
+    if ($validLevels -notcontains $AlarmLevel) {
+        Say ("报警等级 '{0}' 不认识(只能是 {1})" -f $AlarmLevel, ($validLevels -join '/')) 'Red'
+        exit 2
+    }
+    foreach ($a in $proj.alarms) { $a.level = $AlarmLevel }
+}
 # ★ 端口也必须改 ★(2026-10-26 踩到)
 #   之前 -SlavePort 只用来【起从站】,工程副本里的 communications.port 纹丝不动。
 #   端口一致时看起来一切正常(所以一直没人发现),一旦不一致:
@@ -451,6 +473,8 @@ Say ("HMI 可执行 : {0}" -f $Exe)
 Say ("工程文件   : {0}(副本,节奏已改)" -f $projectCopy)
 Say ("  变量轮询  : {0} ms(原 200)" -f $PollMs)
 Say ("  报警最短  : {0} ms(原 50)" -f $AlarmMinMs)
+Say ("  报警等级  : {0}" -f $(if ($AlarmLevel) { "$AlarmLevel(本轮覆盖,判据 J12 会照它判)" }
+                                   else { "工程里的原值" }))
 Say ("  联动靶子  : {0} → 地址 {1},期望写入值 {2}" -f $targetVar,
      (($expectByAddr.GetEnumerator() | Where-Object { $_.Value.Name -eq $targetVar } |
         ForEach-Object { $_.Key }) -join ','),
@@ -620,6 +644,13 @@ $pollStatLines = @()
 $rejectLines  = @()
 # ★★ 写【排队】的行(J11 的另一半)★★
 $queuedLines  = @()
+# ★★ G-26(2026-11-02):抢停机 / 不抢停机 的那两行 ★★
+#   "机器抢停机" —— 严重/危急报警 → 状态机进 Fault(机器停)
+#   "不抢停机"   —— 信息/警告报警 → 只记录、只显示、联动照常,【不停机】
+#   ★ 两个标记互不包含("机器抢停机" 不是 "不抢停机" 的子串,反过来也不是),
+#     所以可以分开数 —— 这一对必须能分开数,否则 J12 就没意义。
+$tripLines    = @()
+$noTripLines  = @()
 $appLogFiles = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
                   Sort-Object LastWriteTime)
 foreach ($f in $appLogFiles) {
@@ -635,6 +666,8 @@ foreach ($f in $appLogFiles) {
             if ($line -match '轮询统计')            { $pollStatLines += $line }
             if ($line -match '的 driver 拒收了')     { $rejectLines += $line }
             if ($line -match '写请求【排队】')        { $queuedLines += $line }
+            if ($line -match '机器抢停机')            { $tripLines   += $line }
+            if ($line -match '不抢停机')              { $noTripLines += $line }
         }
         $sr.Close(); $fs.Close()
     } catch { }
@@ -652,6 +685,10 @@ Rep ("★ 写【排队】行  : {0}" -f $queuedLines.Count)
 foreach ($l in ($queuedLines | Select-Object -First 3)) { Rep ("    " + $l) }
 Rep ("★ 守卫命中行(有值待写时跳过读回覆盖): {0}" -f $guardLines.Count)
 foreach ($l in ($guardLines | Select-Object -First 3)) { Rep ("    " + $l) }
+Rep ("★ 抢停机行(严重/危急 → 机器进 Fault): {0}" -f $tripLines.Count)
+foreach ($l in ($tripLines | Select-Object -First 3)) { Rep ("    " + $l) }
+Rep ("★ 不抢停机行(信息/警告 → 只记录): {0}" -f $noTripLines.Count)
+foreach ($l in ($noTripLines | Select-Object -First 3)) { Rep ("    " + $l) }
 Rep ("轮询统计行  : {0}(最后一条: {1})" -f $pollStatLines.Count,
      $(if ($pollStatLines.Count -gt 0) { $pollStatLines[-1] } else { '(无)' }))
 
@@ -887,6 +924,47 @@ if ($queuedLines.Count -gt 0) {
 } else {
     Rep ("      (本轮没有写被排队 —— J11b 无从检查。" +
          "这不是问题,但也说明【排队那条通路本轮没被走到】。)") "DarkGray"
+}
+
+# ---- J12:★★ 报警等级跟"抢不抢停机"对得上 ★★ ---------------------------
+# ★ 这条是为 G-26(2026-11-02)加的。
+#   那个 bug:【任何等级的报警都把机器打成 Fault】——
+#   一条 Info 报警也能让整台机器停,而报警表、声音、审计日志一切正常,
+#   没有任何地方说"是这条报警停的机"。
+#   ⇒ 光验"严重报警会停机"【抓不住】它(那本来就是它会做的);
+#     必须验"【警告报警不停机】" —— 那才是被改对的那一半。
+#   ★ 判据看的是【应用日志里那两行】,不是按钮颜色也不是状态标签:
+#     后两个要有人坐在屏幕前才看得见,而日志是进程级的证据。
+#   ★ 等级是从【工程副本】里读出来的,不是写死的 ——
+#     写死的话,哪天工程里的等级改了,判据还在按老等级判,判出来的绿是假的。
+$alarmLevels = @($proj.alarms | ForEach-Object { [string]$_.level } | Select-Object -Unique)
+$allTrip    = ($alarmLevels.Count -gt 0) -and
+              (@($alarmLevels | Where-Object { $_ -notin @('Critical','Emergency') }).Count -eq 0)
+$allNoTrip  = ($alarmLevels.Count -gt 0) -and
+              (@($alarmLevels | Where-Object { $_ -notin @('Info','Warning') }).Count -eq 0)
+if ($allTrip) {
+    Judge ($tripLines.Count -gt 0 -and $noTripLines.Count -eq 0) "J12 ★抢停机跟等级对得上★" `
+           ("等级 {0} ⇒ 该抢停机:抢停机行 {1} 条 / 不抢停机行 {2} 条" -f
+            ($alarmLevels -join '/'), $tripLines.Count, $noTripLines.Count)
+    if ($tripLines.Count -eq 0) {
+        Rep "      ★ 严重/危急报警【没有】让机器抢停机 —— 该停的时候没停。"
+    }
+    if ($noTripLines.Count -gt 0) {
+        Rep "      ★ 同一轮里又出现【不抢停机】的行 —— 等级判断前后不一致。"
+    }
+} elseif ($allNoTrip) {
+    Judge ($noTripLines.Count -gt 0 -and $tripLines.Count -eq 0) "J12 ★不抢停机跟等级对得上★" `
+           ("等级 {0} ⇒ 不该抢停机:不抢停机行 {1} 条 / 抢停机行 {2} 条" -f
+            ($alarmLevels -join '/'), $noTripLines.Count, $tripLines.Count)
+    if ($noTripLines.Count -eq 0) {
+        Rep "      ★ 信息/警告报警【没有】留下『仅记录,不抢停机』的行 —— 判据看不见证据。"
+    }
+    if ($tripLines.Count -gt 0) {
+        Rep "      ★ 信息/警告报警【把机器抢停了】—— 这就是 G-26 本身!"
+    }
+} else {
+    Rep ("      (工程里的报警等级不统一({0}),本轮不判 J12 —— 不判不等于通过。)" -f
+         ($alarmLevels -join '/')) "DarkGray"
 }
 
 # ================================================================

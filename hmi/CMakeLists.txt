@@ -142,6 +142,11 @@ set(SOURCES
     # ★ 2026-10-20:通讯帧监视器(调试区第三页"通讯监视")。
     #   数据层,纯 QtCore,一行界面代码都没有 —— 所以能在无界面测试里跑。
     src/comm/CommTraceModel.cpp
+    # ★ G-26(2026-11-02):"这条报警要不要把机器打成 Fault"的唯一出处。
+    #   原来这条判定写在 hmi.cpp 里(而且是无条件抢停机),
+    #   而 hmi.cpp 不在 hmi_core 里 ⇒ 没有任何单测能看见它。
+    #   抽到公共层之后,hmi.cpp 与测试调的是【同一个函数】。
+    src/alarm/AlarmTriggerPolicy.cpp
 )
 
 set(HEADERS
@@ -232,6 +237,8 @@ set(HEADERS
     src/comm/CommTraceModel.h
     src/comm/CommFrame.h
     src/drivers/IPlcDriverProvider.h  # ★ 2b:纯接口无 Q_OBJECT(写进 HEADERS 便于 VS 里查得到)
+    # ★ G-26(2026-11-02):报警等级跟"抢不抢停机"的判据(纯函数,无 Q_OBJECT)
+    src/alarm/AlarmTriggerPolicy.h
 )
 
 set(FORMS

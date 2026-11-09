@@ -167,6 +167,11 @@ set(HMI_CORE_SOURCES
     #   测的是副本(hmi.cpp 不在 hmi_core 里)。两边调同一个函数,
     #   测试绿了才说明生产那根线也是通的。
     ${HMI_SRC_DIR}/src/alarm/ActionWiring.cpp
+    # ★ G-26(2026-11-02):"这条报警要不要抢停机"的唯一出处。
+    #   原来这条判定写在 hmi.cpp 里(而且是无条件抢停机),
+    #   而 hmi.cpp 不在 hmi_core 里 ⇒ 没有任何单测能看见它。
+    #   抽到共享模块之后,hmi.cpp 与测试调的是【同一个函数】。
+    ${HMI_SRC_DIR}/src/alarm/AlarmTriggerPolicy.cpp
     # ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
     #   逐个加:写完一个接线一个,避免文件还不存在就编不过
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
@@ -522,6 +527,19 @@ target_link_libraries(tst_ActionWrite PRIVATE hmi_core Qt6::Test)
 target_compile_options(tst_ActionWrite PRIVATE /utf-8)
 target_compile_definitions(tst_ActionWrite PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_ActionWrite COMMAND tst_ActionWrite)
+# ★ G-26(2026-11-02):"这条报警要不要把机器打成 Fault"的判据。
+#   Bug 现象:任何等级的报警都抢停机 —— 一条 Info 报警也能让整台机器停。
+#   为什么它能活到今天:hmi.cpp 不在 hmi_core 里 ⇒ 没有任何单测能链接到主窗口。
+#   现在判据在共享模块 qwhmi::alarm::shouldTripMachine 里,hmi.cpp 与测试同调一份。
+#
+#   ★ 不用 add_hmi_test:它有一条用例要读 hmi.cpp 源码文本
+#     (确认 hmi.cpp 真的按等级过滤,而不是又变成无条件 tryTransition),
+#     所以要 HMI_SRC_DIR_STRING。同 tst_Theme / tst_ModbusPanel / tst_ActionWrite 的理由。
+add_executable(tst_AlarmTriggerPolicy tst_AlarmTriggerPolicy.cpp)
+target_link_libraries(tst_AlarmTriggerPolicy PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_AlarmTriggerPolicy PRIVATE /utf-8)
+target_compile_definitions(tst_AlarmTriggerPolicy PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_AlarmTriggerPolicy COMMAND tst_AlarmTriggerPolicy)
 # ★ 2026-10-21:PowerShell 脚本里的【格式化占位符漏替换】静态检查。
 #   这不是 C++ 测试,是一条跑脚本的 ctest 目标 —— 因为它要检的东西
 #   本来就不在 C++ 里(在 .ps1 里)。

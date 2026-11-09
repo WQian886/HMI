@@ -246,7 +246,7 @@ private:
 	bool tryTransition(Trigger t);
 
 	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):状态迁移表(QHash<{from, trigger}> → newState)
-	//   5.1 阶段暂未接入报警系统,AlarmCritical 入口等 5.3 报警系统完成后才真实触发
+	//   ★ 2026-11-02(G-26):AlarmCritical 入口【已经真的接上了】(按等级过滤,判据见 src/alarm/AlarmTriggerPolicy.h)
 	static const QHash<QPair<State, Trigger>, State> kTransitionTable;
 
     // 阶段 1 第 2 练:网络状态(跟业务 state 平级,共同决定 UI)
