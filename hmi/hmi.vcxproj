@@ -479,4 +479,9 @@
     <ClInclude Include="src\alarm\AlarmTriggerPolicy.h" />
     <ClInclude Include="src\ui\CapabilityReport.h" />
   </ItemGroup>
+  <!-- ★ sync_vcxproj.py 追加 -->
+  <ItemGroup>
+    <ClCompile Include="src\state\StateMachinePolicy.cpp" />
+    <ClInclude Include="src\state\StateMachinePolicy.h" />
+  </ItemGroup>
 </Project>

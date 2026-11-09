@@ -18,6 +18,7 @@
 #include "alarm/ActionWiring.h"      // ★ 2026-10-25:"报警→联动"那根接线的唯一出处
 #include "alarm/AlarmTriggerPolicy.h" // ★ G-26(2026-11-02):"这条报警要不要抢停机"的唯一出处
 #include "ui/CapabilityReport.h"    // ★ 2026-11-02:"当前支持的功能"对话框的文案(原来在说假话)
+#include "state/StateMachinePolicy.h" // ★ G-28(2026-11-02):状态迁移表的唯一出处(原来写在 hmi.cpp 里,没人能测)
 #include "util/ValueCoercion.h"      // ★ 2026-10-25:值类型适配(联动值要转成变量声明的类型)
 #include "widgets/TrendWidget.h"     // ★ D.2(2026-09-20):历史曲线控件(QCustomPlot)
 #include "widgets/LabelControl.h"    // ★ E.1a(2026-09-20):6 显示控件
@@ -975,6 +976,24 @@ hmi::hmi(QWidget *parent)
     //       运行时画面  → 【不绑】     只读,任何角色都要能看现场画面
     //       演示画布    → 【不绑】     只读的演示控件
     //     漏绑是 bug,刻意不绑是决定 —— 都写在 MenuBuilder.cpp 的权限表里。
+
+    // ★★ 2026-11-02(G-28):状态机上线留痕 ★★
+    //   这一行有两个用处,【都是正经的】,不是为了凑判据:
+    //   ① 现场第一句问的就是"机器现在什么状态、为什么不走" ——
+    //      以前日志里【没有】这一句,只能盯着界面标签猜。
+    //   ② 它是短跑判据 J13a 的【阳性对照】:证明"状态机这一路的日志通路是通的"。
+    //      没有它,判据"J13 = 一次都没进 Fault"就是【空断言】——
+    //      日志通路整个坏掉时它照样是绿的。
+    //      (2026-11-02 第一轮就踩了这个坑:迁移日志打的是 qCDebug,
+    //        默认级别 info ⇒ 一行不落 ⇒ "迁移行 0 条"既可能是"没迁移",
+    //        也可能是"迁移了但没落盘",两件事长得一模一样。)
+    //   ★ 级别 INFO:默认日志配置(default_level=info)下这一行必须落盘。
+    //   ★ 标记写成【状态机就绪】而不是【状态机】——
+    //     否则短跑脚本会把这一行也当成"一次状态迁移"数进去。
+    qCInfo(hmiApp).noquote()
+        << QStringLiteral("[状态机就绪] 当前状态=%1,迁移表 %2 条")
+               .arg(qwhmi::state::machineStateName(state))
+               .arg(qwhmi::state::transitionTable().size());
 }
 
 
@@ -1109,35 +1128,67 @@ void hmi::executeModbus(const qwhmi::plc::RequestSpec& spec) {
 //     抢停机后不自动恢复,必须人工按复位(见下面 Fault 那条)。
 //     反过来做(报警一恢复就自动回 Stopped)的话,机器会在条件反复越限的
 //     情况下自己爬起来、跑两秒、又自己停 —— 那比停着更危险。
-const QHash<QPair<hmi::State, hmi::Trigger>, hmi::State> hmi::kTransitionTable = {
-    // Stopped 初始 / 主动停止
-    {{State::Stopped,    Trigger::StartButton},        State::Running},
-    {{State::Stopped,    Trigger::StopButton},         State::Stopped},   // 重复按 stop,合法但无变化
-    {{State::Stopped,    Trigger::ResetButton},        State::Resetting}, // 启动 3s reset 定时器
-    {{State::Stopped,    Trigger::AlarmCritical},      State::Fault},
-    // Running
-    {{State::Running,    Trigger::StopButton},         State::Stopped},
-    {{State::Running,    Trigger::ResetButton},        State::Resetting}, // 启动 3s reset 定时器
-    {{State::Running,    Trigger::AlarmCritical},      State::Fault},
-    // Resetting 中按按钮无变化(等定时器),只能被报警打断
-    {{State::Resetting,  Trigger::ResetButton},        State::Resetting},
-    {{State::Resetting,  Trigger::ResetTimerFinished}, State::Stopped},   // 3s 定时器到点
-    {{State::Resetting,  Trigger::AlarmCritical},      State::Fault},
-    // Fault 只能复位清,且严重故障直接转 Stopped(不等定时器,避免长时间卡 Fault)
-    {{State::Fault,      Trigger::ResetButton},        State::Stopped},
-};
+//
+// ★★ 2026-11-02(G-28):那张迁移表【搬走了】——
+//   现在住在 qwhmi::state::transitionTable()(src/state/StateMachinePolicy.{h,cpp})。
+//   搬走的原因和 G-26 一模一样:表写在这里,而 hmi.cpp 不在 hmi_core 里
+//   ⇒ 没有任何一条单元测试能看见它 ⇒ 这张表从来只是"设计",从来不是"钉子"。
+//   现在 4 状态 × 6 触发源 = 24 种组合被 tst_StateMachinePolicy 全部钉死。
+//   ★ 搬走之前先确认过:表的内容【逐条没变】(11 条),
+//     非法迁移的返回值、非法迁移不写 out 的行为也都没变。
+//     本次是【搬家 + 加测试 + 补一行迁移日志】,不改语义。
 
 // ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):单一状态迁移入口
 //   返回 true=成功迁移(已 updateUi),false=非法迁移(原 state 不变)
 bool hmi::tryTransition(Trigger t) {
-    auto key = qMakePair(state, t);
-    auto it = kTransitionTable.find(key);
-    if (it == kTransitionTable.end()) {
-        // 非法迁移:不输出日志(避免噪音,5.3 报警触发时可能高频调用)
+    const State from = state;
+    State to = State::Stopped;
+    if (!qwhmi::state::nextState(from, t, &to)) {
+        // 非法迁移:【不】写 INFO/WARNING(避免噪音,5.3 报警触发时可能高频调用
+        //   —— 比如已经在 Fault 态,又来一条严重报警)。
+        // ★ 注意 qwhmi::state::nextState 在返回 false 时【不写】to ——
+        //   所以这里的 to 还是初值,不会被误当成"切到 Stopped 了"。
+        // ★ 这条留的是 DEBUG:要查"为什么没切"时把 hmi.app 开到 debug 就能看到。
+        //   标记写成【状态机·非法】而不是【状态机】——
+        //   否则短跑脚本的 J13 会把这行也当成"一次迁移"数进去。
+        qCDebug(hmiApp) << "[状态机·非法] 非法迁移(状态不变):"
+                        << qwhmi::state::machineStateName(from)
+                        << "--(" << qwhmi::state::machineTriggerName(t) << ")--> (无)";
         return false;
     }
-    State newState = it.value();
-    state = newState;
+    state = to;
+
+    // ★★ 2026-11-02(G-28):迁移留痕。
+    //   以前"机器切到哪个状态"在日志里【什么痕迹都没有】——
+    //   而"停了没有""为什么停了"恰恰是现场最常问的问题。
+    //   G-26 之所以只能靠"机器抢停机"那一行来判,就是因为【状态迁移本身没日志】。
+    //   ⇒ 补这一行,判据才能从"打了那行日志"升级成"状态真的切了"。
+    //   格式固定成  [状态机] From --(Trigger)--> To
+    //   (短跑脚本的 J13 判据按这个格式数"进了 Fault 的次数"。)
+    //
+    // ★★ 级别为什么不是 DEBUG(2026-11-02 实测踩过)★★
+    //   第一版写的是 qCDebug(hmiApp)。默认日志配置是
+    //     { "logging": { "default_level": "info" } }
+    //   而 hmi.app 没有单独的级别覆盖 ⇒ 这一行 severity=Debug(0) < Info(1)
+    //   ⇒ 【一行都不落盘】。
+    //   后果:短跑判据 J13 看到"迁移行 0 条",分不清是
+    //     (a) 状态【真的】没切,还是
+    //     (b) 状态切了,但证据被级别过滤【扔了】。
+    //   这两件事长得一模一样 —— 而第二件是假绿的温床。
+    //   ⇒ 迁移是【低频但关键】的事:普通迁移走 INFO,进 Fault 走 WARNING
+    //     (进 Fault 是要报警级别的现场事件)。
+    //   跟 2026-10-23 那次 qCDebug → qCWarning 修的是同一类问题。
+    const QString trace = qwhmi::state::transitionTrace(from, t, to);
+    // ★ noquote():Qt 的 QDebug 默认会给带空格的字符串【加引号】——
+    //   打出来是 "[状态机] Stopped --(AlarmCritical)--> Fault",
+    //   判据的正则照样能命中,但人读起来多一层没用的引号。
+    //   这一行是给现场看的("机器到底切到哪了"),那就让它像一句话。
+    if (to == State::Fault) {
+        qCWarning(hmiApp).noquote() << trace;
+    } else {
+        qCInfo(hmiApp).noquote() << trace;
+    }
+
     updateUi();
     return true;
 }

@@ -35,6 +35,12 @@ namespace qwhmi::comm { class CommTraceModel; }
 //   未必是同一份(从站号 0 = 广播写就是这么来的)。
 //   现在待发请求直接存这个结构:【验过的就是发的】。
 #include "plc/ModbusRequestParser.h"
+// ★ 2026-11-02(G-28):业务状态机的【判据】搬进公共层。
+//   以前 State / Trigger / kTransitionTable 三样都只在 hmi.h 里,
+//   而 hmi.h 不在 hmi_core 里 ⇒ 没有任何一条单测能看见那张表。
+//   现在枚举跟判据都住在 src/state/StateMachinePolicy.h 里,
+//   hmi 这边只是【别名】—— 写法(State::Running / Trigger::StartButton)一个字没改。
+#include "state/StateMachinePolicy.h"
 
 // ★ QMenu 一直是靠 QtWidgets 传递包含进来的,这里把两个都显式前向声明 ——
 //   2026-10-14 新增 QAction 成员时才发现:不能假设"QMenu 可见则 QAction 也可见"。
@@ -231,7 +237,12 @@ private:
     //           原因:Reset 跟 Qt 内部信号/方法名太像,容易混淆
     // [FIX #10] 改 Resetting(正在复位),语义更清晰
     // ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):加 Fault 态,严重报警触发,只能 ResetButton 清
-	enum class State { Stopped, Running, Resetting, Fault };// 业务状态机
+	// ★ 2026-11-02(G-28):枚举搬到公共层了,这里只留别名。
+	//   【为什么不能留在这里】判据的键是 (状态, 触发源)——
+	//   枚举不搬过去,公共层就没法查那张表,那张表也就还是测不到。
+	//   【写法不变】State::Running / Trigger::StartButton 一字未改,
+	//   下面所有用到的地方都不用动。
+	using State = qwhmi::state::MachineState;   // 业务状态机
     State state = State::Stopped;   // 业务三键的"事实"
 
 	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):状态迁移触发源(单一迁移入口 tryTransition 的入参)
@@ -239,15 +250,25 @@ private:
 	//   【改法】所有状态变化必须走 tryTransition(Trigger t),查迁移表决定新 state
 	//   【取舍】新增 1 个 enum + 1 个方法 + 1 个静态表,但杜绝了"任何态都能转任何态"的混乱
 	//   【参照】Wqian 2026-08-03 review #3(阶段 5.1 拍板)
-	enum class Trigger { StartButton, StopButton, ResetButton, ResetTimerFinished, AlarmCritical, AlarmCleared };
+	// ★ 2026-11-02(G-28):同上,触发源也搬到公共层了(别名)。
+	using Trigger = qwhmi::state::MachineTrigger;
 
 	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):单一状态迁移入口
 	//   返回 true=成功迁移(已 updateUi),false=非法迁移(原 state 不变)
 	bool tryTransition(Trigger t);
 
 	// ★ IMPROVE-5.1(2026-08-03 Wqian 拍板):状态迁移表(QHash<{from, trigger}> → newState)
-	//   ★ 2026-11-02(G-26):AlarmCritical 入口【已经真的接上了】(按等级过滤,判据见 src/alarm/AlarmTriggerPolicy.h)
-	static const QHash<QPair<State, Trigger>, State> kTransitionTable;
+	//   ★ 2026-11-02(G-28):这张表【搬走了】—— 现在住在
+	//     qwhmi::state::transitionTable()(src/state/StateMachinePolicy.{h,cpp})。
+	//     搬走的原因和 G-26 一样:表写在 hmi.h / hmi.cpp 里,
+	//     而它们不在 hmi_core 里 ⇒ 没有任何一条单测能看见那张表。
+	//     现在 4 状态 × 6 触发源 = 24 种组合被 tst_StateMachinePolicy 全部钉死。
+	//   ★ 2026-11-02(G-26)订正:AlarmCritical 入口【已经真的接上了】
+	//     (AlarmManager::alarmTriggered → onAlarmTriggered → tryTransition),
+	//     而且【按等级过滤】—— 只有 Critical / Emergency 才抢停机,
+	//     判据在 qwhmi::alarm::shouldTripMachine(见 src/alarm/AlarmTriggerPolicy.h)。
+	//   ★ AlarmCleared 【故意没有触发源】:抢停机后不自动恢复,必须人工复位。
+	//     (自动恢复 ⇒ 条件反复越限时机器自己爬起来又自己停,比停着更危险。)
 
     // 阶段 1 第 2 练:网络状态(跟业务 state 平级,共同决定 UI)
 	enum class ConnState { Disconnected, Connecting, Connected, Failed, Reconnecting };// 连接状态机

@@ -152,6 +152,11 @@ set(SOURCES
     #   ⇒ 没有任何测试能看见它 ⇒ 它说了三句假话(多 PLC 那三句)。
     #   抽出来之后,hmi.cpp 与测试调的是【同一个函数】。
     src/ui/CapabilityReport.cpp
+    # ★ G-28(2026-11-02):状态迁移表的唯一出处。
+    #   那张表原来整张写在 hmi.h / hmi.cpp 里,而它们不在 hmi_core 里
+    #   ⇒ 没有任何一条单测能看见它 ⇒ 它一直只是"设计",从来不是"钉子"。
+    #   抽到共享模块之后,hmi.cpp 与测试调的是【同一张表】。
+    src/state/StateMachinePolicy.cpp
 )
 
 set(HEADERS
@@ -246,6 +251,8 @@ set(HEADERS
     src/alarm/AlarmTriggerPolicy.h
     # ★ 2026-11-02:"当前支持的功能"对话框的文案(纯函数,无 Q_OBJECT)
     src/ui/CapabilityReport.h
+    # ★ G-28(2026-11-02):状态迁移表(纯函数,无 Q_OBJECT)
+    src/state/StateMachinePolicy.h
 )
 
 set(FORMS

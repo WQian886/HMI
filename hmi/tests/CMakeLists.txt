@@ -177,6 +177,11 @@ set(HMI_CORE_SOURCES
     #   而 hmi.cpp 不在 hmi_core 里 ⇒ 没有任何单测能看见它。
     #   抽到共享模块之后,hmi.cpp 与测试调的是【同一个函数】。
     ${HMI_SRC_DIR}/src/alarm/AlarmTriggerPolicy.cpp
+    # ★ G-28(2026-11-02):状态迁移表的唯一出处。
+    #   那张表原来整张写在 hmi.h / hmi.cpp 里,而它们不在 hmi_core 里
+    #   ⇒ 没有任何一条单测能看见它 ⇒ 它一直只是"设计",从来不是"钉子"。
+    #   抽到共享模块之后,hmi.cpp 与测试调的是【同一个表】。
+    ${HMI_SRC_DIR}/src/state/StateMachinePolicy.cpp
     # ★ E.1c(2026-09-28):5 个工业控件(储罐/管道/阀门/泵/电机)
     #   逐个加:写完一个接线一个,避免文件还不存在就编不过
     ${HMI_SRC_DIR}/src/widgets/TankControl.cpp
@@ -554,6 +559,15 @@ target_link_libraries(tst_CapabilityReport PRIVATE hmi_core Qt6::Test)
 target_compile_options(tst_CapabilityReport PRIVATE /utf-8)
 target_compile_definitions(tst_CapabilityReport PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_CapabilityReport COMMAND tst_CapabilityReport)
+# ★ 2026-11-02(G-28):业务状态机的判据不许变。
+#   那张迁移表原来写在 hmi.h / hmi.cpp 里,没人能测 ⇒ G-26 就是在它旁边出的事。
+#   现在 4 状态 × 6 触发源 = 24 种组合被整张钉死。
+#   ★ 不用 add_hmi_test:它有一条用例要读 hmi.cpp / hmi.h 源码文本,所以要 HMI_SRC_DIR_STRING。
+add_executable(tst_StateMachinePolicy tst_StateMachinePolicy.cpp)
+target_link_libraries(tst_StateMachinePolicy PRIVATE hmi_core Qt6::Test)
+target_compile_options(tst_StateMachinePolicy PRIVATE /utf-8)
+target_compile_definitions(tst_StateMachinePolicy PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
+add_test(NAME tst_StateMachinePolicy COMMAND tst_StateMachinePolicy)
 # ★ 2026-10-21:PowerShell 脚本里的【格式化占位符漏替换】静态检查。
 #   这不是 C++ 测试,是一条跑脚本的 ctest 目标 —— 因为它要检的东西
 #   本来就不在 C++ 里(在 .ps1 里)。

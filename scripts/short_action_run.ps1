@@ -651,6 +651,23 @@ $queuedLines  = @()
 #     所以可以分开数 —— 这一对必须能分开数,否则 J12 就没意义。
 $tripLines    = @()
 $noTripLines  = @()
+# ★★ G-28(2026-11-02):状态机迁移的那几行 ★★
+#   格式固定成  [状态机] From --(Trigger)--> To
+#   ★ 为什么 J12 还需要它:J12 看的是"打了『机器抢停机』那行日志",
+#     那是 tryTransition 之前打的 —— 它只证明【分支走到了】,
+#     【不】证明【状态真的切了】(迁移非法的话,机器照样停在原地)。
+#     J13 看的才是"状态真的切了"。
+$stateLines      = @()   # 所有状态迁移行
+$faultTrans      = @()   # 目标态是 Fault 的那些
+$alarmFaultTrans = @()   # 【并且】是 AlarmCritical 触发的那些
+# ★★ G-28(2026-11-02):状态机【就绪】行 —— J13a 的阳性对照 ★★
+#   "迁移行 0 条"这个观察有两种完全不同的解释:
+#     (a) 状态【真的】没切;
+#     (b) 状态切了,但那一路的日志被【级别过滤】扔了。
+#   而 (b) 在 2026-11-02 第一轮真的发生过(迁移日志打的是 qCDebug,
+#   默认级别是 info ⇒ 一行都不落)—— 那时候判据照样是绿的。
+#   ⇒ 所以先要有一行【证明这条通路是通的】,再谈"这一路没有东西"。
+$stateReadyLines = @()
 $appLogFiles = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
                   Sort-Object LastWriteTime)
 foreach ($f in $appLogFiles) {
@@ -668,6 +685,10 @@ foreach ($f in $appLogFiles) {
             if ($line -match '写请求【排队】')        { $queuedLines += $line }
             if ($line -match '机器抢停机')            { $tripLines   += $line }
             if ($line -match '不抢停机')              { $noTripLines += $line }
+            if ($line -match '\[状态机\]')            { $stateLines  += $line }
+            if ($line -match '\[状态机\].*-->\s*Fault')        { $faultTrans      += $line }
+            if ($line -match '\[状态机\].*--\(AlarmCritical\)-->\s*Fault') { $alarmFaultTrans += $line }
+            if ($line -match '\[状态机就绪\]')        { $stateReadyLines += $line }
         }
         $sr.Close(); $fs.Close()
     } catch { }
@@ -689,6 +710,10 @@ Rep ("★ 抢停机行(严重/危急 → 机器进 Fault): {0}" -f $tripLines.Co
 foreach ($l in ($tripLines | Select-Object -First 3)) { Rep ("    " + $l) }
 Rep ("★ 不抢停机行(信息/警告 → 只记录): {0}" -f $noTripLines.Count)
 foreach ($l in ($noTripLines | Select-Object -First 3)) { Rep ("    " + $l) }
+Rep ("★ 状态机就绪行(证明这一路的日志是通的): {0}" -f $stateReadyLines.Count)
+foreach ($l in ($stateReadyLines | Select-Object -First 2)) { Rep ("    " + $l) }
+Rep ("★ 状态机迁移行: {0}(其中进 Fault 的 {1} 条)" -f $stateLines.Count, $faultTrans.Count)
+foreach ($l in ($stateLines | Select-Object -First 6)) { Rep ("    " + $l) }
 Rep ("轮询统计行  : {0}(最后一条: {1})" -f $pollStatLines.Count,
      $(if ($pollStatLines.Count -gt 0) { $pollStatLines[-1] } else { '(无)' }))
 
@@ -965,6 +990,74 @@ if ($allTrip) {
 } else {
     Rep ("      (工程里的报警等级不统一({0}),本轮不判 J12 —— 不判不等于通过。)" -f
          ($alarmLevels -join '/')) "DarkGray"
+}
+
+# ---- J13a:★★ 状态机这一路的日志【是通的】吗 ★★ --------------------------
+# ★ 这条是为 G-28(2026-11-02)加的,而且它排在 J13 前面 —— 不是凑数。
+#   "迁移行 0 条"这个观察有两种完全不同的解释:
+#     (a) 状态【真的】没切;
+#     (b) 状态切了,但那一路的日志被【级别过滤】扔了。
+#   而 (b) 在 2026-11-02 第一轮真的发生过:迁移日志打的是 qCDebug,
+#   而默认日志配置是 default_level=info ⇒ 一行都不落盘。
+#   那一轮 J13 红着(还看不出为什么),第二轮"绿"了 —— 但那个绿是
+#   【0 条迁移行】换来的,也就是说【整条通路坏了也照样绿】。
+#   ⇒ 先证明"这条通路是通的",再谈"这一路上没有东西"。
+if ($stateReadyLines.Count -ge 1) {
+    Judge $true "J13a ★状态机这一路的日志是通的★" `
+           ("状态机就绪行 {0} 条(证明 hmi.app 这一路的 INFO 能落盘)" -f
+            $stateReadyLines.Count)
+} else {
+    Judge $false "J13a ★状态机这一路的日志是通的★" `
+           ("状态机就绪行 0 条 —— 状态机这一路的日志【一条都没落盘】")
+    Rep "      ★ 这一路的日志整个是哑的 ⇒ 本轮 J13/J13b 【一律不算数】:"
+    Rep "        『0 条进 Fault』既可能是『没进』,也可能是『进了但没落盘』,"
+    Rep "        而这两件事在日志里长得一模一样。"
+}
+
+# ---- J13:★★ 状态机【真的】切了,不是只打了那行日志 ★★ ------------------
+# ★ 这条是为 G-28(2026-11-02)加的。
+#   J12 看的是"打了『机器抢停机』那行日志" —— 那行是在 tryTransition 【之前】打的,
+#   它只证明【分支走到了】,【不】证明【状态真的切了】。
+#   迁移非法的话(Fault 态再来一次严重报警),机器照样停在原地,
+#   而 J12 照样是绿的 —— 这就是"打了日志 ≠ 发生了迁移"。
+#   ⇒ J13 看的才是 tryTransition 之后打的那行:
+#       [状态机] From --(Trigger)--> To
+#   ★ 判据是【进程级】的:这台短跑里没人点按钮,所以机器全程停在 Stopped,
+#     于是"进 Fault"这件事【只能】由严重报警造成 —— 判据因此是干净的。
+#   ★ 而且只会迁移【一次】:进了 Fault 之后再来的严重报警是【非法迁移】
+#     (表里故意没有 Fault + AlarmCritical),状态不变、也不再打迁移行。
+#     所以 J13 数到的进 Fault 条数应当【正好是 1】,不是 74。
+if ($stateReadyLines.Count -ge 1) {
+    if ($allTrip) {
+        Judge ($faultTrans.Count -ge 1) "J13 ★机器真的进了 Fault★" `
+               ("进了 Fault 的状态迁移 {0} 条(状态机迁移行共 {1} 条)" -f
+                $faultTrans.Count, $stateLines.Count)
+        if ($faultTrans.Count -eq 0) {
+            Rep "      ★ 打了『机器抢停机』,却【没有】任何一条进 Fault 的状态迁移 —— "
+            Rep "        状态没切,机器还在跑。这正是『打了日志 ≠ 发生了迁移』。"
+        }
+        # ★ 而且必须是【严重报警】造成的 —— 别的是别的东西把它推进 Fault 的
+        Judge ($alarmFaultTrans.Count -eq $faultTrans.Count) "J13b ★进 Fault 的是严重报警★" `
+               ("AlarmCritical 触发的 {0} 条 / 进 Fault 的共 {1} 条" -f
+                $alarmFaultTrans.Count, $faultTrans.Count)
+        # ★ 进 Fault 只应发生【一次】:后面再来的严重报警都是非法迁移。
+        #   要是这里数出好几条,说明"非法迁移"被放行了 —— 那比不停机更危险。
+        Judge ($faultTrans.Count -eq 1) "J13c ★进 Fault 只发生了一次★" `
+               ("进 Fault 的状态迁移 {0} 条(应当正好 1 条 —— 后面再来的严重报警都是非法迁移)" -f
+                $faultTrans.Count)
+    } elseif ($allNoTrip) {
+        Judge ($faultTrans.Count -eq 0) "J13 ★一次都没进 Fault★" `
+               ("进 Fault 的状态迁移 {0} 条(状态机迁移行共 {1} 条)" -f
+                $faultTrans.Count, $stateLines.Count)
+        if ($faultTrans.Count -gt 0) {
+            Rep "      ★ 信息/警告报警【把机器推进了 Fault】—— 状态迁移行说它确实切了。"
+        }
+    } else {
+        Rep ("      (工程里的报警等级不统一({0}),本轮不判 J13 —— 不判不等于通过。)" -f
+             ($alarmLevels -join '/')) "DarkGray"
+    }
+} else {
+    Rep ("      (状态机这一路的日志没落盘(J13a 红),本轮不判 J13/J13b —— 不判不等于通过。)" ) "DarkGray"
 }
 
 # ================================================================
