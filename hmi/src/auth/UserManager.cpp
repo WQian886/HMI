@@ -64,17 +64,89 @@ bool UserManager::addUser(const QString& name, const QString& plainPassword, Rol
     return true;
 }
 
-bool UserManager::removeUser(const QString& name) {
+bool UserManager::removeUser(const QString& name, const QString& actor) {
     const int idx = indexOf(name);
     if (idx < 0) {
+        qCWarning(hmiApp) << "[UserMgr] removeUser 失败:用户不存在" << name;
         return false;
     }
     const QString trimmed = users_[idx].name;
+
+    // ★ 2026-11-10 (G-30):护栏搬进公共层。
+    //   原来这三条全在 UserManagementDialog 里(而且是拿【显示文本】比角色名),
+    //   绕过那个对话框的调用一个都拦不住 ⇒ 判据必须在公共层。
+    //   1) 不能禁自己
+    if (!actor.isEmpty() && User::namesEqual(trimmed, actor)) {
+        qCWarning(hmiApp) << "[UserMgr] removeUser 拒绝:不能禁用当前登录的用户" << trimmed;
+        return false;
+    }
+    //   2) 已经是禁用状态 —— 没东西可禁(不做无意义的 userRemoved 审计噪音)
+    if (users_[idx].disabled) {
+        qCWarning(hmiApp) << "[UserMgr] removeUser 拒绝:已经是禁用状态" << trimmed;
+        return false;
+    }
+    //   3) 最后一个 enabled Admin —— 禁掉之后没人能管用户了
+    if (users_[idx].role == Role::Admin && enabledAdminCount() <= 1) {
+        qCWarning(hmiApp) << "[UserMgr] removeUser 拒绝:这是最后一个 enabled Admin" << trimmed;
+        return false;
+    }
+
     // 软删除:标记 disabled 而不是真 erase(审计 + 历史)
     users_[idx].disabled = true;
     qCInfo(hmiApp) << "[UserMgr] 用户已禁用(软删除):" << trimmed;
     emit userRemoved(trimmed);
     return true;
+}
+
+bool UserManager::canDisableUser(const QString& name, const QString& actor,
+                                 QString* reason) const {
+    // reason 填人话原因 —— 调用方(对话框)直接弹给用户看,不用自己再翻译一遍
+    const auto say = [reason](const QString& s) { if (reason) *reason = s; };
+
+    const int idx = indexOf(name);
+    if (idx < 0) {
+        say(tr("用户不存在"));
+        return false;
+    }
+    const User& u = users_[idx];
+    if (!actor.isEmpty() && User::namesEqual(u.name, actor)) {
+        say(tr("不能禁用当前登录的用户"));
+        return false;
+    }
+    if (u.disabled) {
+        say(tr("该用户已经是禁用状态"));
+        return false;
+    }
+    if (u.role == Role::Admin && enabledAdminCount() <= 1) {
+        say(tr("这是最后一个 enabled Admin,禁用后没人能登录(请先新建另一个 Admin)"));
+        return false;
+    }
+    say(QString());
+    return true;
+}
+
+bool UserManager::enableUser(const QString& name) {
+    const int idx = indexOf(name);
+    if (idx < 0) {
+        qCWarning(hmiApp) << "[UserMgr] enableUser 失败:用户不存在" << name;
+        return false;
+    }
+    if (!users_[idx].disabled) {
+        qCWarning(hmiApp) << "[UserMgr] enableUser 跳过:本来就是启用状态" << users_[idx].name;
+        return false;
+    }
+    users_[idx].disabled = false;
+    qCInfo(hmiApp) << "[UserMgr] 用户已重新启用:" << users_[idx].name;
+    emit userEnabled(users_[idx].name);
+    return true;
+}
+
+int UserManager::enabledAdminCount() const {
+    int n = 0;
+    for (const User& u : users_) {
+        if (u.role == Role::Admin && !u.disabled) ++n;
+    }
+    return n;
 }
 
 bool UserManager::changePassword(const QString& name, const QString& oldPlain, const QString& newPlain) {

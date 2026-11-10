@@ -53,6 +53,12 @@ set(HMI_CORE_SOURCES
     ${HMI_SRC_DIR}/src/auth/UserStore.cpp
     # 阶段 B · B2.2 CurrentUser
     ${HMI_SRC_DIR}/src/auth/CurrentUser.cpp
+    # ★ 2026-11-10 (G-30):用户管理对话框 + 新增用户对话框。
+    #   以前这两个对话框【零测试覆盖】—— 全仓体检发现的 4 个之一。
+    #   它们要进 hmi_core,是因为 tst_UserManagementDialog 要真的把对话框
+    #   构造出来看表填得对不对(不构造就只是"测了个寂寞")。
+    ${HMI_SRC_DIR}/src/auth/UserManagementDialog.cpp
+    ${HMI_SRC_DIR}/src/auth/NewUserDialog.cpp
     # ★ 2026-10-14:B2.2 InactivityWatcher(自动注销)
     #   【为什么现在才加】做 24h 长跑的 --soak 时发现它【零测试覆盖】——
     #   而它是个【安全特性】(5 分钟无操作自动注销)。
@@ -409,6 +415,14 @@ target_compile_definitions(tst_UIPermission PRIVATE HMI_SRC_DIR_STRING="${HMI_SR
 # 阶段 B · B5
 add_hmi_test(tst_AuditLog)
 add_hmi_test(tst_AuditE2E)
+# ★ 2026-11-10 (G-30):用户管理对话框 —— 此前【零测试覆盖】。
+#   全仓体检(生产 .cpp 有没有在某个 tst_*.cpp 里出现过)发现 86 个生产 .cpp
+#   里有 4 个一个测试都没提到过,UserManagementDialog.cpp 就在其中 ——
+#   而"能不能禁用用户"这条判据当时正好只活在这个对话框里。
+#   本文件验两件事:表填对了 + 判据是从公共层来的(读源码文本钉"接线",
+#   同 tst_UIPermission —— 点按钮会弹模态框把测试卡死,所以不点)。
+add_hmi_test(tst_UserManagementDialog)
+target_compile_definitions(tst_UserManagementDialog PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 # 阶段 C · C.0
 add_hmi_test(tst_ProjectSchema)
 # 阶段 C · C.1 协议抽象层
@@ -586,6 +600,19 @@ add_test(NAME tst_StateMachinePolicy COMMAND tst_StateMachinePolicy)
 add_test(NAME tst_PsFormatLeak
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
             -File ${HMI_SRC_DIR}/../scripts/check_ps_format_leak.ps1)
+# ★ 2026-11-10 (G-29):判据的判据 —— 证明 check_ps_format_leak.ps1
+#   扫的是【仓库的代码】,不是整个工作区。
+#   2026-11-10 实测:那条判据把 .gitignore 掉的 .scratch/ 也扫了进去,
+#   于是一条 ctest 的结论取决于本地垃圾 ⇒ 本地红、CI 绿,两边对不上。
+#   这条测试在临时目录里造一个【假仓库】,把六种现场各造一遍:
+#     正片有漏替换(红) / 正片干净(绿) / 被忽略的目录里有坏脚本(绿)
+#     / 新写的未跟踪脚本有漏替换(红) / 根目录的 build.ps1 有漏替换(红)
+#     / build 目录里的脚本(绿)
+#   ★ 六种现场各自复位 —— 不复位的话,前一个场景留下的坏文件
+#     会让后一个场景"红"的原因不对(2026-11-10 第一次写就踩了这个)。
+add_test(NAME tst_PsFormatLeakScope
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File ${HMI_SRC_DIR}/../scripts/test_ps_format_leak_scope.ps1)
 # ★ 2026-10-21:长跑看门狗(self_test)。
 #   上一轮 24 小时验收批在 00:40 死了,58 个采样点之后没人知道,
 #   README 还"跑批中"挂了两天 —— 那条记录自己写下的结论是

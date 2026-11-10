@@ -43,8 +43,19 @@
 #
 #  ★ "{{0}}" 这种转义写法要放行:PowerShell 的 -f 把 {{  当成一个字面的 {。
 #
+#  扫哪些文件(2026-11-10 G-29 定下的规则)
+#  ------------------------------------------
+#    · 受版本控制的 .ps1            —— 仓库的正片,必扫
+#    · 未跟踪但【没被忽略】的 .ps1  —— 新写的脚本在 git add 之前也要被扫到
+#    · 被 gitignore 的                —— .scratch/ soaks/ memprobe/ 这些临时区,不扫
+#
+#    为什么不能"扫整个工作区":那会让判据的结论取决于本地垃圾 ——
+#    本地红、CI 绿,两边各说各话。这条规则的判据是
+#    scripts/test_ps_format_leak_scope.ps1(ctest 目标 tst_PsFormatLeakScope)。
+#
 #  用法:
 #    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check_ps_format_leak.ps1
+#    powershell ... -File scripts\check_ps_format_leak.ps1 -Root <目录>
 #  退出码:
 #    0 = 没有漏替换
 #    1 = 有漏替换(或某个文件解析失败)
@@ -57,17 +68,109 @@
 #    本仓库其它 .ps1 也都是带 BOM 的,保持一致。
 # ============================================================================
 
+param(
+    # ★ 2026-11-10 (G-29):扫描根目录。留空 = 本仓库(本脚本所在目录的上一级)。
+    #   加这个参数是为了让【判据自己也能被测】:测试要拿一个临时目录当仓库,
+    #   造出"被忽略的目录里藏着坏脚本"这种现场 —— 不给参数就没法造。
+    [string]$Root = ''
+)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+$global:LASTEXITCODE = 0
 
-$repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+} else {
+    $repo = (Resolve-Path $Root).Path
+}
+
+# ============================================================================
+# 扫描范围:只扫【属于本仓库的脚本】
+# ============================================================================
+# ★ 2026-11-10 (G-29)修的坑:
+#   原来这里扫的是【整个工作区】—— 连被 .gitignore 忽略的
+#   .scratch/ soaks/ memprobe/ 这些临时区/产物区/备份区一起扫。
+#   ⇒ 判据的结论取决于【本地垃圾】,不取决于仓库 ⇒
+#     本地红、CI 绿,两边各说各话,谁也说不清哪个是真的。
+#   (2026-11-10 实测:本地那次红,红在一个 .scratch 里的临时脚本上。)
+#
+#   现在的规则:
+#     · 受版本控制的 .ps1            —— 仓库的正片,必扫
+#     · 未跟踪但【没被忽略】的 .ps1  —— 新写的脚本在 git add 之前也要被扫到
+#     · 被忽略的                       —— 临时区/长跑产物/备份,不归我们管
+#
+#   ★ 为什么"未跟踪但没被忽略"也要扫:
+#     只扫已跟踪文件 ⇒ 新写的脚本在 git add 之前【逃过检查】⇒ 又是假绿。
+#     而"被忽略"是作者自己声明的"这不是仓库代码" ⇒ 排除它是尊重这个声明。
+#
+#   没有 git(或不在 git 仓库里)时退回"扫整个目录"(老行为),
+#   并打印一行说明 —— 别让人以为扫全了。
+
+function Invoke-Git([string]$repoPath, [string[]]$gitArgs) {
+    # ★ 原生命令的 stderr 在 $ErrorActionPreference='Stop' 下会被当成
+    #   NativeCommandError 抛出来 —— 而 git 的"正常失败"(不是仓库/没匹配)
+    #   正是往 stderr 写东西。所以调 git 时把错误偏好降成 Continue。
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & git -C $repoPath @gitArgs 2>$null
+        return @{ Output = @($out); ExitCode = $LASTEXITCODE }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+$hasGit = ($null -ne (Get-Command git -ErrorAction SilentlyContinue))
+if ($hasGit) {
+    $probe = Invoke-Git $repo @('rev-parse', '--is-inside-work-tree')
+    $hasGit = ($probe.ExitCode -eq 0 -and ($probe.Output -join '').Trim() -eq 'true')
+    if (-not $hasGit) {
+        Write-Host ("  [范围] {0} 不是 git 仓库 ⇒ 退回『扫整个目录』" -f $repo) -ForegroundColor Yellow
+    }
+}
 
 # 排除编译产物目录 —— 里面可能有从别处拷来的脚本,不是本仓库的代码。
-$files = @(Get-ChildItem -Path $repo -Recurse -Include *.ps1 -File |
-           Where-Object { $_.FullName -notmatch '\\out\\|\\build|\\node_modules\\|\\\.git\\' })
+# ★ 2026-11-10 (G-29-b):排除的是【目录名】,不是【路径里含 build 的那一段】。
+#   原来写的是 '\\out\\|\\build|\\node_modules\\|\\\.git\\' ——
+#   其中 '\\build' 后面没有跟分隔符,于是仓库根的
+#   build.ps1 / build_tests.ps1 也被一起排除了。
+#   ⇒ 这两个正片脚本【从来没被这条判据看过】(今天实测它们没有漏替换,
+#     所以今天还不是 bug —— 但判据一直是瞎的,跟 tst_ProjectSchema
+#     那个"硬编码路径"是同一族:它测的不是它声称在测的东西)。
+#   现在改成按【目录段】判断:build / build-* / build_ninja / cmake-build-*
+#   / out / node_modules / .git 这些【目录】才排除,
+#   而根目录下的 build.ps1 这种【文件】照扫不误。
+$candidates = @(Get-ChildItem -Path $repo -Recurse -Include *.ps1 -File |
+                Where-Object {
+                    $d = $_.DirectoryName
+                    -not ($d -match '\\(?:out|node_modules|\.git|cmake-build-[^\\]*|build[^\\]*)(?:\\|$)')
+                })
+
+# 受版本控制的 .ps1(索引里的;一行一个,相对仓库根,正斜杠)
+$tracked = New-Object 'System.Collections.Generic.HashSet[string]'
+if ($hasGit) {
+    $ls = Invoke-Git $repo @('ls-files', '--cached', '--', '*.ps1')
+    foreach ($p in $ls.Output) {
+        if ($null -eq $p) { continue }   # git 一行没输出时,数组里会带一个 $null
+        [void]$tracked.Add((($p -replace '\\', '/')).Trim())
+    }
+}
+
+$files = @()
+foreach ($f in $candidates) {
+    $rel = ($f.FullName.Substring($repo.Length) -replace '^[\\/]+', '') -replace '\\', '/'
+    if ($tracked.Contains($rel)) { $files += $f; continue }
+    if ($hasGit) {
+        # 被忽略 ⇒ 作者声明过"这不是仓库代码" ⇒ 不归我们管
+        $ig = Invoke-Git $repo @('check-ignore', '-q', '--', $rel)
+        if ($ig.ExitCode -eq 0) { continue }
+    }
+    $files += $f
+}
 $files = @($files | Sort-Object FullName)
 
-Write-Host "扫描 $($files.Count) 个 .ps1" -ForegroundColor Cyan
+Write-Host "扫描 $($files.Count) 个 .ps1(仓库内的;被 gitignore 的临时区不算)" -ForegroundColor Cyan
 
 # 找出一个表达式子树里的全部【字符串字面量】节点
 function Get-StringLiterals($node) {

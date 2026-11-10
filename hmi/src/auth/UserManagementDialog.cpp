@@ -38,6 +38,7 @@ UserManagementDialog::UserManagementDialog(UserManager& mgr, QWidget* parent)
     infoLabel_  = new QLabel(this);
     addBtn_     = new QPushButton(tr("新增用户"), this);
     deleteBtn_  = new QPushButton(tr("禁用选中"), this);
+    enableBtn_  = new QPushButton(tr("启用选中"), this);   // ★ 2026-11-10 (G-30)
     refreshBtn_ = new QPushButton(tr("刷新"), this);
     closeBtn_   = new QPushButton(tr("关闭"), this);
 
@@ -49,6 +50,7 @@ UserManagementDialog::UserManagementDialog(UserManager& mgr, QWidget* parent)
     btnRow->addStretch();
     btnRow->addWidget(addBtn_);
     btnRow->addWidget(deleteBtn_);
+    btnRow->addWidget(enableBtn_);
     btnRow->addWidget(refreshBtn_);
     btnRow->addWidget(closeBtn_);
 
@@ -58,6 +60,7 @@ UserManagementDialog::UserManagementDialog(UserManager& mgr, QWidget* parent)
 
     connect(addBtn_,     &QPushButton::clicked, this, &UserManagementDialog::onAddUser);
     connect(deleteBtn_,  &QPushButton::clicked, this, &UserManagementDialog::onDeleteUser);
+    connect(enableBtn_,  &QPushButton::clicked, this, &UserManagementDialog::onEnableUser);
     connect(refreshBtn_, &QPushButton::clicked, this, &UserManagementDialog::refreshTable);
     connect(closeBtn_,   &QPushButton::clicked, this, &QDialog::accept);
 
@@ -79,6 +82,9 @@ void UserManagementDialog::setupTable() {
 
 void UserManagementDialog::setupButtons() {
     deleteBtn_->setToolTip(tr("禁用(disabled=true),不删除记录(审计用)"));
+    // ★ 2026-11-10 (G-30):禁用是【可逆】的了 —— 原来只能禁不能启,
+    //   而确认框还写着"(可后续用密码恢复)"(密码根本救不回来)。
+    enableBtn_->setToolTip(tr("重新启用被禁用的用户(disabled=false)"));
 }
 
 void UserManagementDialog::refreshTable() {
@@ -119,34 +125,61 @@ void UserManagementDialog::onDeleteUser() {
         return;
     }
     const QString name = table_->item(row, kColName)->text();
-    const QString currentUser = CurrentUser::instance().name();
+    const QString actor = CurrentUser::instance().name();
 
-    // 防止 1) Admin 删自己 2) 删最后一个 enabled admin
-    if (name == currentUser) {
-        QMessageBox::warning(this, tr("不能删自己"), tr("不能禁用当前登录的用户"));
+    // ★ 2026-11-10 (G-30):判据搬到公共层(UserManager::canDisableUser)。
+    //   原来这里自己判,而且是拿【显示文本】比角色列的"管理员"和禁用列的"是"——
+    //   换个语言/改个显示名就失效;绕过这个对话框的调用更是一路畅通。
+    //   现在这里只负责把 reason 弹出来。
+    QString reason;
+    if (!mgr_.canDisableUser(name, actor, &reason)) {
+        QMessageBox::warning(this, tr("不能禁用"), reason);
         return;
     }
-    if (table_->item(row, kColRole)->text() == roleDisplayName(Role::Admin)
-        && table_->item(row, kColDisabled)->text() != tr("是")) {
-        // 找所有 enabled admin 数量
-        int enabledAdmins = 0;
-        for (const User& u : mgr_.listUsers()) {
-            if (u.role == Role::Admin && !u.disabled && u.name != name) ++enabledAdmins;
-        }
-        if (enabledAdmins == 0) {
-            QMessageBox::warning(this, tr("最后一个 Admin"),
-                                  tr("这是最后一个 enabled Admin,禁用后没人能登录"));
-            return;
-        }
-    }
 
+    // ★ 2026-11-10 (G-30):这句话以前是假的 —— "(可后续用密码恢复)"。
+    //   密码根本救不回来:authenticate() 对 disabled 用户一律拒绝,
+    //   而"启用"入口那时候还不存在 ⇒ 账号被禁就等于报废。
+    //   现在有【启用选中】了,这句话才是真的。
     if (QMessageBox::question(this, tr("确认禁用"),
-                                 tr("确定禁用用户 '%1' 吗?\n(可后续用密码恢复)").arg(name))
+                                 tr("确定禁用用户 '%1' 吗?\n(禁用后此账号无法登录;需要恢复请用【启用选中】)").arg(name))
         != QMessageBox::Yes) {
         return;
     }
-    if (!mgr_.removeUser(name)) {
+    if (!mgr_.removeUser(name, actor)) {
         QMessageBox::warning(this, tr("失败"), tr("禁用失败,看日志"));
+        return;
+    }
+    refreshTable();
+}
+
+// ★ 2026-11-10 (G-30):启用 —— removeUser 的逆操作。
+//   原来"禁用"是单向的:被禁用的账号永远回不来(没有启用按钮,
+//   UserManager 也没有对应的 API),而确认框还在骗人说"可后续用密码恢复"。
+void UserManagementDialog::onEnableUser() {
+    const int row = table_->currentRow();
+    if (row < 0) {
+        QMessageBox::information(this, tr("未选择"), tr("请先在表格里选中一行"));
+        return;
+    }
+    const QString name = table_->item(row, kColName)->text();
+    const User* u = mgr_.findUser(name);
+    if (u == nullptr) {
+        QMessageBox::warning(this, tr("失败"), tr("用户不存在,点【刷新】再试"));
+        return;
+    }
+    if (!u->disabled) {
+        QMessageBox::information(this, tr("已经是启用状态"),
+                                 tr("用户 '%1' 本来就是启用的").arg(name));
+        return;
+    }
+    if (QMessageBox::question(this, tr("确认启用"),
+                                 tr("确定重新启用用户 '%1' 吗?").arg(name))
+        != QMessageBox::Yes) {
+        return;
+    }
+    if (!mgr_.enableUser(name)) {
+        QMessageBox::warning(this, tr("失败"), tr("启用失败,看日志"));
         return;
     }
     refreshTable();

@@ -279,6 +279,14 @@ int main(int argc, char *argv[])
             auth::UserStore::save(userMgr);
             auth::AuditLog::instance().appendCurrent("user.remove", name);
         });
+    // ★ 2026-11-10 (G-30):重新启用 —— 跟 userRemoved 一样要存盘 + 留痕。
+    //   少了这一条,启用状态就只在内存里:重启后 users.json 里的
+    //   disabled 仍是 true,用户会发现"明明启用了,重启又登不上"。
+    QObject::connect(&userMgr, &auth::UserManager::userEnabled, &app,
+        [&userMgr](const QString& name) {
+            auth::UserStore::save(userMgr);
+            auth::AuditLog::instance().appendCurrent("user.enable", name);
+        });
     QObject::connect(&userMgr, &auth::UserManager::passwordChanged, &app,
         [&userMgr](const QString& name) {
             auth::UserStore::save(userMgr);
