@@ -16,7 +16,7 @@ using namespace qwhmi::widgets;
 class TestGaugeControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_GaugeControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_GaugeControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_GaugeControl] cleanup"; }
 
     void construct_defaultRange();

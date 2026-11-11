@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# NEGCTL: manual — 它要临时改 C++ 源码再重编,在 ctest 里跑会动工作区,跟并行跑的目标打架
 """负向对照:把 BUGFIX-E1「写排队」的闸拆掉,tst_ModbusWriteQueue 必须变红。
 
 ★ 绿色的测试不一定是有效的测试 —— 它得"咬自己一口"才算数。★

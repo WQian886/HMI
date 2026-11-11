@@ -126,7 +126,6 @@ static QString auditTempDir() {
 }
 
 void TestControlWriteRejection::initTestCase() {
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     qputenv("HMI_DATA_DIR", auditTempDir().toUtf8());
     QDir().mkpath(auditTempDir());
 }

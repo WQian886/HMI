@@ -41,7 +41,6 @@ private slots:
 
 void TestLabelControl::initTestCase() {
     // ★ paint() 需要 GUI 主循环(QGraphicsScene/View + QPainter)
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     qInfo() << "[tst_LabelControl] init,QT_QPA_PLATFORM=" << qgetenv("QT_QPA_PLATFORM");
 }
 
@@ -176,6 +175,9 @@ void TestLabelControl::toJson_fromJson_roundTrips() {
 }
 
 // ★ QTEST_MAIN(创建 QApplication — paint 测试需要 GUI 主循环)
-//   initTestCase 已经设 QT_QPA_PLATFORM=offscreen,无窗口弹出
+//   ★ 2026-11-11 (G-31-e):QT_QPA_PLATFORM=offscreen 现在是【CMake 钉的】
+//     (hmi/tests/CMakeLists.txt 给每个 ctest 目标设的 ENVIRONMENT 属性)。
+//     以前这行写在 initTestCase 里 —— 而 initTestCase 是在 QApplication
+//     构造【之后】才跑的 ⇒ 那行什么也没做(实测:配 bogusplatform 会挂死)。
 QTEST_MAIN(TestLabelControl)
 #include "tst_LabelControl.moc"

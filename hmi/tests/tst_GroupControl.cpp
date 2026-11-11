@@ -16,7 +16,7 @@ using namespace qwhmi::widgets;
 class TestGroupControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_GroupControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_GroupControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_GroupControl] cleanup"; }
 
     void construct_defaultSizeAndTitle();

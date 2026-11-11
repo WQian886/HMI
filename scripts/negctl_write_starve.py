@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# NEGCTL: manual — 现场级:要改源码、编 hmi.exe、跑真实短跑,在 ctest 里跑既动工作区又不稳定
 """负向对照(现场级):把 BUGFIX-E1 的【写排队】拆掉,短跑判据【必须】变红。
 
 ★ 为什么要有这个脚本(它跟 negctl_write_queue.py 是一对,但【层级不同】)★

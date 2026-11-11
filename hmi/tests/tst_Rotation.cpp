@@ -33,8 +33,6 @@ using namespace qwhmi::editor;
 class TestRotation : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     // ===== ① 基线:rotation 本来就有的部分 =====
     void rotation_isAlreadyAProperty();       // 反射能看到
     void rotation_roundTripsThroughJson();    // JSON 存读

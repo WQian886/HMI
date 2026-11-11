@@ -30,8 +30,6 @@ using namespace qwhmi::editor;
 class TestGeometryUndo : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     // ===== ① undo 完整性 =====
     void alignLeft_undoRestoresAll();
     void alignRight_undoRestoresAll();

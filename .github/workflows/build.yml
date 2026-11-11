@@ -43,6 +43,11 @@ jobs:
     #        那不是冗余,是真实工作量 —— 别指望 C 方案能一把解决超时。
     #        在那之前,先把超时抬到能跑完,拿到一次真实的绿灯基线。
     #
+    #   ★ 2026-11-11 更正:上面这一段里的数字(66 个测试目标 / 67 个编译目标)
+    #     是【当时】的测量值(2026-09/10),它们解释的是"为什么超时被抬到 120"。
+    #     今天的实际数字见下面 Run tests 那段(109 个编译目标 / 116 个 ctest 目标)。
+    #     历史数字故意保留 —— 改掉它们,这段推理就断了。
+    #
     #   ★ 2026-10-14 更正:上面那句"最多省五分之一"【低估了】。
     #     它大概只数了 src/ 下的源,漏掉了两个大头。重新按【字节】实测
     #     (build_ninja,5762 个 obj / 3834 MB):
@@ -211,24 +216,38 @@ jobs:
 
       - name: Run tests
         working-directory: build-tests
-        # ★ QT_QPA_PLATFORM 必须显式设。
-        #   66 个 ctest 目标里有 38 个在 initTestCase 里自己
-        #   qputenv("offscreen"),但另外 28 个没有 —— 它们靠的是
-        #   【调用者】已经设好了。
-        #   本地靠 build_tests.ps1:56 设,CI 上没有这个脚本,不设就会在
-        #   无显示器的 runner 上弹真窗口甚至直接崩。
+        # ★ QT_QPA_PLATFORM 现在由【CMake 钉死】,不再靠这里的环境变量。
+        #   2026-11-11 (G-31-e)之前,这个 env: 是唯一的开关,而 45 个测试
+        #   在 initTestCase 里自己 qputenv("QT_QPA_PLATFORM","offscreen") ——
+        #   那 45 行【全是无效的】:initTestCase 是在 QApplication 构造
+        #   【之后】才跑的,平台早就选好了。
+        #   (实测:同一个测试在 QT_QPA_PLATFORM=bogusplatform 下【挂死 20 秒】
+        #    —— QPA 插件加载失败后弹对话框等输入;offscreen 下才 EXIT=0。
+        #    这就证明那行什么也没做。)
+        #   ⇒ 现在 hmi/tests/CMakeLists.txt 【末尾】给每一个 ctest 目标设了
+        #     ENVIRONMENT "QT_QPA_PLATFORM=offscreen" + TIMEOUT 600 ——
+        #     进程起之前就生效,本地和 CI 走同一条路。
+        #   ★ 这里保留 env: 是【双保险】,不是开关:
+        #     它盖住的是"还没配 CMake 之前"的那段时间;
+        #     而"CMake 里的属性还在不在"由 ctest 目标 tst_CtestEnv 判 ——
+        #     删掉那几行,流水线会红,而不是【悄悄弹真窗口】。
         #
-        #   ★ 这里有三个不一样的数,别互相套用、也别当成 bug 去"修":
-        #       磁盘 tst_*.cpp     = 67   (Get-ChildItem)
-        #       编译目标(67 个 exe)= 67   (ninja -t targets all)
-        #                              66 个 add_hmi_test() + 1 个直接
+        #   ★ 这里有几个不一样的数,别互相套用、也别当成 bug 去"修":
+        #       磁盘 tst_*.cpp     = 109  (Get-ChildItem)
+        #       编译目标(109 个 exe)= 109  (ninja -t targets all)
+        #                              94 个 add_hmi_test() + 15 个直接
         #                              add_executable,见
-        #                              hmi/tests/CMakeLists.txt:165
-        #       ctest 目标         = 66   (ctest -N)
-        #     差的那一个是有意为之:tst_ProtocolComboShot 只编译、
-        #     不注册测试 —— 它靠真实 QTipLabel 显示取证,要多链 UiTools
-        #     和两个路径宏,判定线不稳,进 ctest 会变成间歇性失败。
-        #     但它【确实会被编译】,所以它照样占一整份 HMI_CORE_SOURCES。
+        #                              hmi/tests/CMakeLists.txt
+        #       ctest 目标         = 116  (ctest -N)
+        #     差的那几个都有来由:
+        #       · tst_ProtocolComboShot 只编译、不注册测试 ——
+        #         它靠真实 QTipLabel 显示取证,要多链 UiTools 和两个路径宏,
+        #         判定线不稳,进 ctest 会变成间歇性失败。
+        #         但它【确实会被编译】,所以它照样占一整份 HMI_CORE_SOURCES。
+        #       · 8 个目标不是 C++ 测试,是【跑脚本的】判据:
+        #         tst_PsFormatLeak / tst_PsFormatLeakScope / tst_SoakWatchdog
+        #         / tst_QObjectDetection / tst_QObjectNegCtl
+        #         / tst_Ps1Encoding / tst_NegctlRegistry / tst_CtestEnv
         env:
           QT_QPA_PLATFORM: offscreen
         # ★ 删掉了原来的 -C Debug。Ninja 是单配置生成器,没有"配置"可选。

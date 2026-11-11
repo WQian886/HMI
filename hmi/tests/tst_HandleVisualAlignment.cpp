@@ -23,7 +23,7 @@ using namespace qwhmi::editor;
 class TestHandleVisualAlignment : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_HandleVisualAlignment] init"; }
+    void initTestCase() {  qInfo() << "[tst_HandleVisualAlignment] init"; }
     void cleanupTestCase() { qInfo() << "[tst_HandleVisualAlignment] cleanup"; }
 
     void verify_handle_visual_offset_on_alarmlist();   // 量化视觉偏移

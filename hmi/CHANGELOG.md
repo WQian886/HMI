@@ -1,6 +1,18 @@
 # CHANGELOG
 
-> 最后核对：**2026-11-10**（本轮：**G-29** —— 一条判据扫了整个工作区 ⇒ **本地红 / CI 绿**；
+> 最后核对：**2026-11-11**（本轮：**G-31** —— 判据跟环境【彻底脱钩】：
+> 六条"判据的结论取决于这台机器"的缺陷 —— 扫描范围看**绝对路径**（仓库住在
+> `build*` 祖先目录下 ⇒ 整仓扫不到、还报绿）/ 判定看**中文**（控制台代码页
+> 一变、同一份仓库结论相反）/ `.ps1` 的**落盘形态**从来没有任何东西执行过 /
+> Q_OBJECT 判据读**工作区**（结论取决于本地状态）/ 45 处 `qputenv` 写在
+> `initTestCase` 里 ⇒ **全是无效的**（平台早就选好了）/ 仓库路径靠"往上爬
+> 6 层"猜 + 端口钉死 1502；**元缺陷**：13 个负向对照只有 1 个进了 ctest，
+> CI 里 "negctl" 出现 **0 次** ⇒ **既不跑也不说**）；
+> 全套重跑：**116/116**（76.59 秒）—— 113 个 + 新增 3 个脚本类目标
+> （`tst_Ps1Encoding` / `tst_NegctlRegistry` / `tst_CtestEnv`）；
+> 负向对照：G-29 **5 组** + G-31 **4 组**，全部按预期变红；
+> 还原后源文件【逐字节一致】（SHA256 对得上）；
+> ★ 上一轮：**2026-11-10**（**G-29** —— 一条判据扫了整个工作区 ⇒ **本地红 / CI 绿**；
 > **G-30** —— 用户管理的「禁用」是**单向**的，而确认框还在骗人"(可后续用密码恢复)"；
 > 判据还只活在对话框里、拿**显示文本**比角色名）；
 > 全套重跑：**113/113**（85.74 秒）—— 112 个 + 新增 `tst_UserManagementDialog`；
@@ -79,7 +91,91 @@
 > `out/build/debug2`；**MSBuild 那条路也真编过一次**（`x64\Debug\hmi.exe`,
 > moc 产物 76→71,0 字节空文件清零））
 
-## [Unreleased] - 2026-11-10
+## [Unreleased] - 2026-11-11
+
+### fix(test): G-31 —— 判据跟环境【彻底脱钩】:六条"结论取决于这台机器" + 一条元缺陷
+
+> ★ 详见 `docs/现状.md` 第七节【G-31】。
+
+★ 现象
+  这一轮巡检的对象不是功能，是**判据本身**。挑出六条同族的缺陷：
+  它们的共同形状是 —— **判据的结论取决于【环境】，而不取决于【被测的那份代码】**。
+
+  a  `check_ps_format_leak.ps1` 排除编译产物目录时判的是**绝对路径**
+     ⇒ 仓库**自己**所在的祖先目录只要叫 `build*`，整仓的 `.ps1` 一个都扫不到，
+       而判据照样打印 `OK`、退出码 0
+       （实测：把仓库放到 `C:\...\build674cde85\hmi` 下，真含 `{0}` 的 `.ps1`
+       照样得到"扫描 0 个 .ps1" + OK + EXIT=0）
+  b  checker 的标记是中文『[漏替换]』，而它的判据靠 **grep 中文**确认"红的原因对不对"
+     ⇒ 实测 `[Console]::OutputEncoding = CP437` 时输出里的中文**全变成 `?`**
+       ⇒ 判据判成"红了，但原因不对" ⇒ **假红**（US 机器 = 本地绿、CI 红）
+  c  仓库的硬规矩是"含中文的 `.ps1` 必须 UTF-8 + BOM + CRLF"，
+     但**没有一条判据检查任何 `.ps1` 的 BOM 或行尾**
+     ⇒ 实测 18 个 `.ps1` 全带 BOM，而 `hmi/installer/package.ps1` 是**唯一的 LF 文件**
+       ⇒ 规矩今天已经被违反，而**没有任何东西会红**
+  d  `check_qobject_detection.py` 直接读**工作区** ⇒ 未提交的改动、`.gitignore`
+     掉的临时区、上次 checkout 的残留，全都会进结论
+  e  45 个测试各写一行 `qputenv("QT_QPA_PLATFORM","offscreen")`，全写在
+     `initTestCase()` / `init()` 里 —— 而那两处是 `QTest::qExec` **内部**调的，
+     也就是在 `QApplication` 构造**之后** ⇒ **全是无效的**
+     （实测：`tst_BarControl` 在 bogus 平台下挂死 20 秒，offscreen 下才 EXIT=0）
+  f  `tst_ModbusFailureRecovery` 的 `findRepoFile()` 写死"往上爬 6 层"，
+     而本地 3 层、CI 1 层 ⇒ 换个目录层级就"找不到文件"而红；
+     同一文件还把端口钉死 1502（长跑脚本自己挑的端口）
+
+  ★ 元缺陷：仓库里 13 个 `negctl_*.py`，**只有 1 个**登记进了 ctest，
+    CI 的 `build.yml` 里 "negctl" 一词出现 **0 次**
+    ⇒ 其余 **12 条负向对照在流水线上一次都没跑过**，
+      而文件躺在 `scripts/` 里看着像"有保障" ⇒ **既不跑也不说**
+
+★ 改了什么
+  · `scripts/check_ps_format_leak.ps1`
+      · 扫描范围先算【相对仓库根】的路径，再按目录段判断
+        ⇒ "仓库住在哪"不再影响判据的结论
+      · 加**自检**：扫描范围为空而仓库里有受版本控制的 `.ps1` ⇒ 必须红（`[SCOPE-EMPTY]`）
+      · 机器可读标记一律 **ASCII**（`[LEAK]` / `[PARSE-ERROR]` / `[SCOPE-EMPTY]`），
+        中文只留给人看 ⇒ 判定不再受控制台代码页影响
+  · `scripts/test_ps_format_leak_scope.ps1`（`tst_PsFormatLeakScope`）
+      从 6 种现场扩到 **9 种**：新增 G（仓库住在 `build*` 祖先目录下）/
+      H（扫描范围为空）/ I（CP437 代码页，且现场自带反向确认）
+  · 新增 `.gitattributes`：`*.ps1 text eol=crlf`
+      ⇒ 同一个提交在任何机器上落盘形态一致
+  · 新增 `scripts/check_ps1_encoding.py`（`tst_Ps1Encoding`）—— 查**索引里的 blob**
+      （带 BOM / 没有裸 CR / 严格 UTF-8 可解）+ 查属性在位
+  · `scripts/check_qobject_detection.py` 改判**索引**（`git checkout-index` 摊出来再判）
+  · `hmi/tests/CMakeLists.txt`：45 处无效 `qputenv` **全部摘掉**；
+      环境与超时改钉在 CMake 的 `ENVIRONMENT` 属性上，且那个循环**必须放在文件最后**
+  · 新增 `scripts/check_ctest_env.py`（`tst_CtestEnv`）—— 查**配置后的真实结果**
+      （生成出来的 `CTestTestfile.cmake`），不只查源
+  · 新增 `scripts/check_negctl_registry.py`（`tst_NegctlRegistry`）——
+      每个 `negctl_*.py` 要么登记进 ctest，要么在文件头写
+      `# NEGCTL: manual — <理由 ≥ 8 字>` ⇒ 不许**既不跑也不说**
+  · `tst_ModbusFailureRecovery`：路径由 CMake 钉死（`HMI_SRC_DIR_STRING`），
+      端口只查"合法 + 不能是 502（现场总线默认端口）"
+
+★ 负向对照（`scripts/negctl_g31_env_closure.py` —— 4 组变异全部按预期变红）
+  · M1 把索引里某个 `.ps1` 的 BOM 去掉  → `tst_Ps1Encoding` 红
+  · M2 删掉一个 negctl 的声明行          → `tst_NegctlRegistry` 红
+  · M3 删掉 CMake 里那段"钉死环境"的循环 → `tst_CtestEnv` 红
+  · M4 工作区里放一个没登记的 `Q_OBJECT` 头：**工作区里看不见（绿）**、
+    放进索引**看得见且会红**、还原后**绿** ⇒ 两头都要有
+  · 还原后重跑绿，且源文件【逐字节一致】（SHA256 对得上）
+  · G-29 那条从 3 组扩到 **5 组**（`negctl_ps_format_leak_scope.py`）
+
+★ ★ 本轮自己的判据也现了两回丑（如实记）
+  · `tst_CtestEnv` 第一次全量跑就红（**115/116**）—— 判据自己的正则带了 `re.S`，
+    一路吃到文件末尾 ⇒ 116 个目标里 **115 个**被当成"没有属性行"
+    ⇒ **判据自己成了假红**（而且红得还挺像那么回事）
+  · 负向对照 M3 第一次跑出来是"**变异后仍然全绿**" —— 判据 grep 的是注释、
+    后来又是 `message()` 里那句说明 ⇒ 真代码删光它照样绿
+  ★ 这两回都不是自查发现的：第一回是**全量 ctest** 撞出来的，
+    第二回是**负向对照**撞出来的 ⇒ 判据必须有人去**撞**它
+
+★ 验证
+  · 全套 ctest **116/116 全绿**（76.59 秒）
+  · `tst_PsFormatLeakScope` 9 种现场全绿；两条负向对照 5 组 + 4 组全红
+  · ★ 这一版**还没跑过 CI** —— CI 跑的是【提交之后】的版本，
+    它的结果没法写进同一笔提交里（自己证自己）
 
 ### fix(test): G-29 —— 一条判据扫了整个工作区 ⇒ 本地红 / CI 绿
 

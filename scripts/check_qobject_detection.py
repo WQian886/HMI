@@ -27,12 +27,26 @@
       //   · 纯接口,无 Q_OBJECT,不进 moc —— 它不是信号槽参与方
   直接全文搜 "Q_OBJECT",这个头会被判成"需要 QtMoc" —— **判反了**。
 
+★ 判的是【git 索引】,不是工作区(2026-11-11 加,G-31-d)★
+  以前这条判据直接读工作区。而工作区里有三样东西会变:
+    · 未提交的改动
+    · .gitignore 掉的临时文件(.scratch/ soaks/ …)
+    · 上一次 checkout 留下的残留
+  ⇒ 判据的结论取决于【本地状态】⇒ 本地绿、CI 红,两边各说各话
+    (本轮要消灭的就是这一族:判据跟环境彻底脱钩)。
+  ⇒ 现在把**索引里的内容**摊到临时目录再判:
+    索引是【提交的一部分】⇒ 任何机器上跑都是同一份字节。
+  ★ 摊开之后,尺子一行都没改 ★
+    scan_source_files() / header_has_qobject() 还是原来那两个,
+    扫的还是同一批文件、同样的范围 —— 变的只是"文件从哪儿来"。
+
 用法
 ----
     python scripts/check_qobject_detection.py
 退出码:0 全过 / 1 有断言没过 / 2 找不到 sync_vcxproj.py
 """
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -42,6 +56,33 @@ sys.path.insert(0, str(SCRIPTS))
 import sync_vcxproj as s
 
 fails = []
+
+
+def materialize_index(dest_root: Path) -> Path:
+    """把 git 索引里的内容原样摊到 dest_root,返回 dest_root。
+
+    ★ 为什么不用工作区 ★
+      见文件头:工作区会随本地状态变(未提交的改动、被忽略的临时区、
+      上次 checkout 的残留)⇒ 判据的结论就不取决于仓库,
+      而取决于"这台机器现在是什么样"。
+    ★ 为什么用 checkout-index 而不是 archive ★
+      checkout-index 写出来的就是【索引里的 blob】(带 checkout 转换),
+      跟"提交进仓库的那份"逐字节同源;而 archive 走的是 HEAD,
+      HEAD 跟索引在【已经 staged 但还没 commit】时不一样 ——
+      索引才是"这次要提交进去的东西"。
+    """
+    prefix = dest_root.as_posix()
+    if not prefix.endswith("/"):
+        prefix += "/"
+    dest_root.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(
+        ["git", "-C", str(SCRIPTS.parent), "checkout-index", "--all",
+         "--prefix=" + prefix],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if r.returncode != 0:
+        raise RuntimeError("git checkout-index 失败:%s"
+                           % r.stderr.decode("utf-8", "replace").strip())
+    return dest_root
 
 
 def check(label, cond, detail=""):
@@ -146,7 +187,15 @@ check("换行保留", masked.count("\n") == probe.count("\n"))
 
 print()
 print("=== 真实的仓库文件:已知答案的抽查 ===")
-REPO = SCRIPTS.parent / "hmi"
+# ★ 判【索引】里的那份,不是工作区(G-31-d)——
+#   索引是提交的一部分 ⇒ 这条判据在本地和 CI 上必然是同一个结论。
+IDX_ROOT = Path(tempfile.mkdtemp(prefix="qobject_idx_"))
+REPO = materialize_index(IDX_ROOT) / "hmi"
+print("  (索引已摊到 %s —— 判据不看工作区)" % IDX_ROOT)
+# ★ 索引里要是没有 hmi/ ⇒ 下面那一大块断言会被【整块跳过】,
+#   而"跳过了"和"查过了都绿"在退出码上长得一模一样 ⇒ 必须自己判出来。
+check("索引里有 hmi/ 目录", REPO.exists(),
+      "(没有 ⇒ 下面关于真实仓库的断言会被整块跳过 —— 那就等于没查)")
 if REPO.exists():
     # IPlcDriverProvider.h 的注释里明写"无 Q_OBJECT" → 必须判"没有"
     p = REPO / "src" / "drivers" / "IPlcDriverProvider.h"
@@ -280,6 +329,7 @@ if REPO.exists():
                       s.filters_needs_sync(_v2, _f2) is True)
 
 shutil.rmtree(tmp, ignore_errors=True)
+shutil.rmtree(IDX_ROOT, ignore_errors=True)
 print()
 print("RESULT:", "PASS" if not fails else "FAIL -> %s" % fails)
 sys.exit(0 if not fails else 1)

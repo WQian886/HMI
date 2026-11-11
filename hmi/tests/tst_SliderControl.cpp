@@ -14,7 +14,7 @@ using namespace qwhmi::widgets;
 class TestSliderControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_SliderControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_SliderControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_SliderControl] cleanup"; }
 
     void construct_defaults();

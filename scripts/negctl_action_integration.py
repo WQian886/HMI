@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# NEGCTL: manual — 现场级:要改源码、编主程序 hmi.exe、再起真 socket 的从站跑短跑——在 ctest 里跑会动工作区,而且耗时长到会拖垮并行的那一批
 """整条链路的负向对照:把类型适配拆掉,短跑实测【必须判红】。
 
 ★ 为什么还要再做一次(单测层已经做过 negctl_action_write.py)★

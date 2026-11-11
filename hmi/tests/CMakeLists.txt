@@ -434,6 +434,12 @@ add_hmi_test(tst_IPollDriver)
 #   改之前这条路径【一次都没被测过】(它压根不产生可观测信号),
 #   现在用自己写的最小从站把它钉成断言。
 add_hmi_test(tst_ModbusFailureRecovery)
+# ★ 2026-11-11 (G-31-f):它要读仓库里的 scripts/soak_project.json。
+#   以前那个路径是"从当前目录往上爬 6 层"猜出来的 —— 而构建目录的层级
+#   各处不一样(本地 hmi/tests/build_ninja/ 往上 3 层,CI build-tests/ 往上 1 层)
+#   ⇒ 换个层级就"找不到文件"而红,红的原因还跟它声称在测的东西无关。
+#   ⇒ 路径由 CMake 钉死(同 tst_PollStatsFormat 的做法)。
+target_compile_definitions(tst_ModbusFailureRecovery PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 # ★ 2026-10-21:写响应的 echo 地址必须真的跟请求比对。
 #   改之前 ModbusMaster::handleWriteResponse 里那行是
 #   `echoAddr != quint16(req->reply ? /*addr 通过 reply 拿*/0 : 0)` ——
@@ -653,18 +659,52 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/check_qobject_detection.py)
     add_test(NAME tst_QObjectNegCtl
         COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/negctl_qobject.py)
+    # ★ 2026-11-11 (G-31-c):.ps1 的落盘形态判据。
+    #   本仓库的硬规矩是"含中文的 .ps1 必须是 UTF-8+BOM+CRLF",
+    #   而这条规矩【从来没有被任何东西执行过】——
+    #   2026-11-11 实测:hmi/installer/package.ps1 是全仓唯一一个 LF 的 .ps1,
+    #   没有一条判据会红。
+    #   判据查的是【git 索引里的 blob】+【.gitattributes 的属性】,
+    #   不是工作区文件 ⇒ 本地和 CI 必然一致。
+    add_test(NAME tst_Ps1Encoding
+        COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/check_ps1_encoding.py)
+    # ★ 2026-11-11 (G-31-e):负向对照的【登记状态】判据。
+    #   13 个 negctl_*.py 里只有 1 个登记进了 ctest ⇒ 其余 12 条
+    #   在流水线上一次都没跑过,而文件躺在 scripts/ 里看着像"有保障"。
+    #   ⇒ 这条判据要求:每个 negctl_*.py 要么登记进 ctest,
+    #     要么在文件头写明"为什么只能手动跑"——不许【既不跑也不说】。
+    add_test(NAME tst_NegctlRegistry
+        COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/check_negctl_registry.py)
+    # ★ 2026-11-11 (G-31-e):ctest 目标的运行环境判据。
+    #   查【配置后的真实结果】(构建目录里的 CTestTestfile.cmake),
+    #   不只查源 —— 源里写了循环,不代表每个目标都赶上了(循环在末尾)。
+    add_test(NAME tst_CtestEnv
+        COMMAND ${Python3_EXECUTABLE} ${HMI_SRC_DIR}/../scripts/check_ctest_env.py
+                --source ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+                --generated ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake)
 else()
-    # 找不到 Python 就把这两条【标掉】,而不是让 ctest 报失败 ——
+    # 找不到 Python 就把这些【标掉】,而不是让 ctest 报失败 ——
     # 判据检查是守门,不是被测对象;守门缺席不该让整条流水线红。
     message(WARNING
         "没找到 Python3 解释器 —— tst_QObjectDetection / tst_QObjectNegCtl "
-        "被禁用(它们守的是 sync_vcxproj.py 的 Q_OBJECT 判据)")
+        "/ tst_Ps1Encoding / tst_NegctlRegistry / tst_CtestEnv "
+        "被禁用(它们守的是 sync_vcxproj.py 的 Q_OBJECT 判据、"
+        ".ps1 的落盘形态、负向对照的登记状态、ctest 目标的运行环境)")
     add_test(NAME tst_QObjectDetection
         COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
     set_tests_properties(tst_QObjectDetection PROPERTIES DISABLED TRUE)
     add_test(NAME tst_QObjectNegCtl
         COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
     set_tests_properties(tst_QObjectNegCtl PROPERTIES DISABLED TRUE)
+    add_test(NAME tst_Ps1Encoding
+        COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
+    set_tests_properties(tst_Ps1Encoding PROPERTIES DISABLED TRUE)
+    add_test(NAME tst_NegctlRegistry
+        COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
+    set_tests_properties(tst_NegctlRegistry PROPERTIES DISABLED TRUE)
+    add_test(NAME tst_CtestEnv
+        COMMAND ${CMAKE_COMMAND} -E echo "SKIPPED: 没有 Python3 解释器")
+    set_tests_properties(tst_CtestEnv PROPERTIES DISABLED TRUE)
 endif()
 # ★ 2026-10-10:TcpClient 重连退避状态机(改善清单 #2/#10)
 #   TcpClient 从阶段 1 就是核心类,但此前【一个测试都没有】。
@@ -854,6 +894,35 @@ target_compile_options(tst_ActionTemplate PRIVATE /utf-8)
 target_compile_definitions(tst_ActionTemplate PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 add_test(NAME tst_ActionTemplate COMMAND tst_ActionTemplate)
 
+# ============================================================================
+# ★ 2026-11-11 (G-31-e):给【每一个】ctest 目标钉死两件事
+# ============================================================================
+#
+#  ① QT_QPA_PLATFORM=offscreen
+#     --------------------------------------------------------------
+#     以前 45 个测试各写一行 qputenv("QT_QPA_PLATFORM","offscreen"),
+#     全都写在 initTestCase()/init() 里 —— 而那两处是 QTest::qExec
+#     内部调的,也就是在 QApplication 构造【之后】⇒ 那 45 行【全是无效的】。
+#     实测(2026-11-11):tst_BarControl(第 19 行就写着那行)在
+#     QT_QPA_PLATFORM=bogusplatform 下【挂死 20 秒】(QPA 插件加载失败后
+#     弹对话框等输入),offscreen 下才 EXIT=0 —— 证明那行什么也没做。
+#
+#     ⇒ 真正的开关在 CMake 的 ENVIRONMENT 属性上(进程起之前就有)。
+#       本地不再依赖 build_tests.ps1 第 56 行那次 qputenv,
+#       CI 也不再依赖 build.yml 里那个 env: —— 两边走同一条路。
+#     ★ 这不是"给测试加限制",是【把测试的环境固定下来】:
+#       以前本地(忘了跑 build_tests.ps1)跑的是"带真窗口的 windows 平台",
+#       CI 跑的是 offscreen —— 同一份代码,两条渲染路径。
+#
+#  ② TIMEOUT 600
+#     --------------------------------------------------------------
+#     ctest 默认【不限时】。一个挂死的测试(比如 QPA 平台不对 ⇒ 弹框等输入)
+#     会一路吃到 GitHub Actions 的 timeout-minutes: 120,
+#     整条流水线被掐成 `cancelled` —— 而 `cancelled` 和"测试超时"
+#     在界面上几乎长得一样,排查成本极高。
+#     ⇒ 给挂死设一个上限,让它变成【一条红色的失败】,而不是掐掉整条流水线。
+#     (tst_LoggingFileUnavailable 自己设了 60 秒 —— 日志文件打不开那个现场
+#      本来就该快点红,不动它。)
 # ★ 崩溃 dump 消费端(2026-10-14)。修的是"pending.txt 写了 28 天没人读"那条:
 #   dumpDirectory() 依赖调用方先设好 org/app,而 main() 当时把元数据排在
 #   install()/hasPendingDump()【后面】,于是写和读落在两个不同目录。
@@ -873,3 +942,57 @@ add_hmi_test(tst_CommTracePanel)
 target_compile_definitions(tst_CommTracePanel PRIVATE HMI_SRC_DIR_STRING="${HMI_SRC_DIR}")
 
 option(HMI_ENABLE_COVERAGE "Enable coverage build" OFF)
+
+# ============================================================================
+# ★★★ 每个 ctest 目标的运行环境 —— 必须放在【本文件的最后】★★★
+# ============================================================================
+#
+#  ① QT_QPA_PLATFORM=offscreen
+#     --------------------------------------------------------------
+#     以前 45 个测试各写一行 qputenv("QT_QPA_PLATFORM","offscreen"),
+#     全都写在 initTestCase()/init() 里 —— 而那两处是 QTest::qExec
+#     内部调的,也就是在 QApplication 构造【之后】⇒ 那 45 行【全是无效的】。
+#     实测(2026-11-11):tst_BarControl(第 19 行就写着那行)在
+#     QT_QPA_PLATFORM=bogusplatform 下【挂死 20 秒】(QPA 插件加载失败后
+#     弹对话框等输入),offscreen 下才 EXIT=0 —— 证明那行什么也没做。
+#
+#     ⇒ 真正的开关在 CMake 的 ENVIRONMENT 属性上(进程起之前就有)。
+#       本地不再依赖 build_tests.ps1 第 56 行那次 qputenv,
+#       CI 也不再依赖 build.yml 里那个 env: —— 两边走同一条路。
+#     ★ 这不是"给测试加限制",是【把测试的环境固定下来】:
+#       以前本地(忘了跑 build_tests.ps1)跑的是"带真窗口的 windows 平台",
+#       CI 跑的是 offscreen —— 同一份代码,两条渲染路径。
+#
+#  ② TIMEOUT 600
+#     --------------------------------------------------------------
+#     ctest 默认【不限时】。一个挂死的测试(比如 QPA 平台不对 ⇒ 弹框等输入)
+#     会一路吃到 GitHub Actions 的 timeout-minutes: 120,
+#     整条流水线被掐成 `cancelled` —— 而 `cancelled` 和"测试超时"
+#     在界面上几乎长得一样,排查成本极高。
+#     ⇒ 给挂死设一个上限,让它变成【一条红色的失败】,而不是掐掉整条流水线。
+#     (tst_LoggingFileUnavailable 自己设了 60 秒 —— 日志文件打不开那个现场
+#      本来就该快点红,不动它。)
+#
+#  ★★ 为什么必须放在【本文件最后】★★
+#     属性是在【配置时】写进生成文件的;这个循环遍历的是
+#     "到目前为止已经登记的目标"。循环后面再写 add_test,
+#     那个目标就【没赶上】⇒ 生成文件里它没有 ENVIRONMENT。
+#     (2026-11-11 就是这么差点漏的:循环当时写在文件倒数第三节,
+#      后面还有三个 add_hmi_test。)
+#     ⇒ ctest 目标 tst_CtestEnv 会查【生成出来的】CTestTestfile.cmake,
+#       专门盯这件事:漏一个就红。
+# ============================================================================
+get_property(HMI_ALL_TESTS DIRECTORY PROPERTY TESTS)
+foreach(HMI_T ${HMI_ALL_TESTS})
+    if(HMI_T STREQUAL "tst_LoggingFileUnavailable")
+        # 这条自己设了 60 秒超时(日志目录打不开那个现场本来就该快点红)——不动它
+        set_tests_properties(${HMI_T} PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    else()
+        set_tests_properties(${HMI_T} PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+            TIMEOUT 600)
+    endif()
+endforeach()
+list(LENGTH HMI_ALL_TESTS HMI_TEST_COUNT)
+message(STATUS "G-31-e:已给 ${HMI_TEST_COUNT} 个 ctest 目标钉死 QT_QPA_PLATFORM=offscreen + TIMEOUT 600")

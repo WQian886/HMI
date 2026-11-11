@@ -60,7 +60,7 @@ public:
 class TestAlarmListControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_AlarmListControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_AlarmListControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_AlarmListControl] cleanup"; }
 
     void construct_defaults();

@@ -37,7 +37,6 @@ class TestPropertySheet : public QObject {
     Q_OBJECT
 private slots:
     void initTestCase() {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
         qInfo() << "[tst_PropertySheet] init";
     }
     void cleanupTestCase() { qInfo() << "[tst_PropertySheet] cleanup"; }

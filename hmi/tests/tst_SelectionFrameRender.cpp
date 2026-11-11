@@ -56,8 +56,6 @@ int countFramePixels(const QImage& img, int tolerance = 40) {
 class TestSelectionFrameRender : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     // ★★★ 本文件最要紧的一条:选中框必须在画面上真的画出来。
     //   之前所有用例都只断言几何,这一条才断言"用户看得见"。
     void frame_isActuallyPainted();

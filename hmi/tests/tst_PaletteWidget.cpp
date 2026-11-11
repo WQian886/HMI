@@ -64,7 +64,6 @@ void registerAllForTest() {
 
 void TestPaletteWidget::initTestCase() {
     registerAllForTest();
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     qInfo() << "[tst_PaletteWidget] init";
 }
 void TestPaletteWidget::cleanupTestCase() {

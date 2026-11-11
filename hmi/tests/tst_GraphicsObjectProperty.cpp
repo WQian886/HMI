@@ -18,7 +18,7 @@ using namespace qwhmi::editor;
 class TestGraphicsObjectProperty : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_GOP] init"; }
+    void initTestCase() {  qInfo() << "[tst_GOP] init"; }
     void cleanupTestCase() { qInfo() << "[tst_GOP] cleanup"; }
 
     void verify_qgraphicsobject_properties_on_alarmlist();

@@ -15,7 +15,7 @@ using namespace qwhmi::widgets;
 class TestLineControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_LineControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_LineControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_LineControl] cleanup"; }
 
     void construct_defaults();

@@ -129,7 +129,6 @@ static void clickItem(QGraphicsScene* s, QGraphicsItem* item) {
 }
 
 void TestControlBaseWrite::init() {
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     // Operator 有 WriteVariable(Viewer 没有)—— 默认身份取"能写"的,
     // 拒写用例再单独切到 Viewer
     CurrentUser::instance().login(makeUser("op1", Role::Operator));

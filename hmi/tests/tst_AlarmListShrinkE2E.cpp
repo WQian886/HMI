@@ -29,7 +29,6 @@ private slots:
 };
 
 void TestAlarmListShrinkE2E::initTestCase() {
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     qInfo() << "[tst_AlarmListShrinkE2E] init";
 }
 void TestAlarmListShrinkE2E::cleanupTestCase() {

@@ -29,8 +29,6 @@ using namespace qwhmi::widgets;
 class TestPipeControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     void construct_defaults();
     void isFlowing_usesDeadband();
     void isReversed_followsSign();

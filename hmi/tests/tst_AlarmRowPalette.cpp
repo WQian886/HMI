@@ -65,8 +65,6 @@ QString levelName(AlarmLevel l) {
 class TestAlarmRowPalette : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     // ===== 1. 四档在静止态必须两两可分 =====
     void fourLevels_haveDistinctStaticColors();
 

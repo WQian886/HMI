@@ -16,7 +16,7 @@ using namespace qwhmi::widgets;
 class TestImageControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_ImageControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_ImageControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_ImageControl] cleanup"; }
 
     void construct_defaultSize();

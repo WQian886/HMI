@@ -14,7 +14,7 @@ using namespace qwhmi::widgets;
 class TestToggleControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_ToggleControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_ToggleControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_ToggleControl] cleanup"; }
 
     void construct_defaults();

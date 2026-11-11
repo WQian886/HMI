@@ -79,7 +79,6 @@ QWidget* findProxyWidget(ControlBase* c) {
 
 void TestResizeHandle::initTestCase() {
     registerAllForTest();
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     qInfo() << "[tst_ResizeHandle] init";
 }
 void TestResizeHandle::cleanupTestCase() {

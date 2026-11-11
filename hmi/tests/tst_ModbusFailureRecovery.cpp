@@ -142,16 +142,17 @@ private slots:
     void soakProjectFileIsLoadable();
 };
 
-// 从当前目录往上找仓库根(测试的 ctest 工作目录是 build_ninja)
-static QString findRepoFile(const QString& relPath) {
-    QDir d = QDir::current();
-    for (int i = 0; i < 6; ++i) {
-        const QString cand = d.absoluteFilePath(relPath);
-        if (QFile::exists(cand)) return cand;
-        if (!d.cdUp()) break;
-    }
-    return QString();
-}
+// ★ 2026-11-11 (G-31-f):仓库里的文件不再靠"从当前目录往上爬 6 层"猜。
+//   以前这里写死了 6 层 —— 而构建目录的层级各处不一样:
+//     本地  hmi/tests/build_ninja/   (往上 3 层到仓库根)
+//     CI    build-tests/              (往上 1 层)
+//   ⇒ 换个目录层级,这条用例就会"找不到文件"而红,
+//     而红的原因跟它声称在测的东西(工程文件能不能被 Project 打开)
+//     毫无关系 —— 这正是"判据跟环境脱钩"那一族。
+//   ⇒ 改用 CMake 钉进来的 HMI_SRC_DIR_STRING(同 tst_PollStatsFormat 的做法)。
+#ifndef HMI_SRC_DIR_STRING
+#    error "HMI_SRC_DIR_STRING 没定义 —— 见 CMakeLists.txt 里 tst_ModbusFailureRecovery 的 target_compile_definitions"
+#endif
 
 // ---------------------------------------------------------------------------
 // 1. 异常响应必须报失败
@@ -302,18 +303,29 @@ void tst_ModbusFailureRecovery::schedulerRecoversWhenSlaveComesBack() {
 //    "启动后 5 秒就退出了"。提前在这儿验一遍,比在长跑现场验便宜得多。
 // ---------------------------------------------------------------------------
 void tst_ModbusFailureRecovery::soakProjectFileIsLoadable() {
-    const QString path = findRepoFile(QStringLiteral("scripts/soak_project.json"));
-    QVERIFY2(!path.isEmpty(), "找不到 scripts/soak_project.json");
+    const QString path = QStringLiteral(HMI_SRC_DIR_STRING "/../scripts/soak_project.json");
     QVERIFY2(QFile::exists(path), qPrintable(QStringLiteral("工程文件不存在: %1").arg(path)));
 
-    // 先看内容:端口必须是 1502(自建从站),不能是 502(mbslave 那个空的)
+    // 先看内容:端口要是个合法的 TCP 端口,而且不能是 502
+    // ★ 2026-11-11 (G-31-f):以前这里写死 QCOMPARE(port, 1502)。
+    //   1502 是长跑脚本自己挑的端口,不是这条用例要守的东西 ——
+    //   哪天长跑换了端口,这条用例就会红,而红的原因跟它声称在测的
+    //   ("工程文件能不能被 Project 打开""内容有没有写错")毫无关系。
+    //   ⇒ 真正要守的两条是【有意义的】那两条:
+    //     ① 端口是个合法值(1..65535);
+    //     ② 不能是 502 —— 那是现场总线(MBAP 从站)的默认端口,
+    //       而长跑要连的是【自建从站】;这条是语义,不是随手挑的数字。
     QFile f(path);
     QVERIFY(f.open(QIODevice::ReadOnly));
     const QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
     f.close();
     const QJsonObject comms = root.value(QStringLiteral("communications")).toObject();
     QCOMPARE(comms.value(QStringLiteral("host")).toString(), QStringLiteral("127.0.0.1"));
-    QCOMPARE(comms.value(QStringLiteral("port")).toInt(), 1502);
+    const int port = comms.value(QStringLiteral("port")).toInt();
+    QVERIFY2(port > 0 && port <= 65535,
+             qPrintable(QStringLiteral("端口不是合法值: %1").arg(port)));
+    QVERIFY2(port != 502,
+             "端口是 502 —— 那是现场总线从站的默认端口,长跑要连的是自建从站");
     const QJsonArray vars = root.value(QStringLiteral("variables")).toArray();
     QCOMPARE(vars.size(), 3);
 

@@ -31,7 +31,6 @@ class TestEditorMainWindow : public QObject {
     Q_OBJECT
 private slots:
     void initTestCase() {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
         qInfo() << "[tst_EditorMainWindow] init";
     }
     void cleanupTestCase() { qInfo() << "[tst_EditorMainWindow] cleanup"; }

@@ -27,8 +27,6 @@ using namespace qwhmi::widgets;
 class TestSpinAnimator : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     void construct_defaults();
     void setPeriodMs_clamps();
     void setPeriodMs_keepsRunning();

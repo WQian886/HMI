@@ -15,7 +15,7 @@ using namespace qwhmi::widgets;
 class TestRectangleControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_RectangleControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_RectangleControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_RectangleControl] cleanup"; }
 
     void construct_defaultColors();

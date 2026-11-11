@@ -41,7 +41,6 @@ private slots:
 void TestTrend::initTestCase() {
     // ★ TrendWidget 内部用 QCustomPlot(QWidget 派生的画图控件),
     //   测试需 GUI 主循环;用 offscreen 平台避免真起窗口
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     qInfo() << "[tst_Trend] init,QT_QPA_PLATFORM=" << qgetenv("QT_QPA_PLATFORM");
 }
 
@@ -192,7 +191,9 @@ void TestTrend::realtimePoint_isNeverDroppedAtWindowEdge() {
     QCOMPARE(f.tw->dataCount(), before + 200);
 }
 
-// ★ QTEST_MAIN 创建 QApplication(TrendWidget 用 QWidget 需要 GUI 主循环;
-//   已在 initTestCase 里 QT_QPA_PLATFORM=offscreen,无窗口弹出)
+// ★ QTEST_MAIN 创建 QApplication(TrendWidget 用 QWidget 需要 GUI 主循环);
+//   ★ 2026-11-11 (G-31-e):QT_QPA_PLATFORM=offscreen 现在是【CMake 钉的】
+//     (hmi/tests/CMakeLists.txt 的 ENVIRONMENT 属性)—— 以前写在
+//     initTestCase 里,而那时 QApplication 已经构造完了 ⇒ 无效。
 QTEST_MAIN(TestTrend)
 #include "tst_Trend.moc"

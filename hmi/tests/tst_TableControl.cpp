@@ -21,7 +21,7 @@ using namespace qwhmi::widgets;
 class TestTableControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_TableControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_TableControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_TableControl] cleanup"; }
 
     void construct_defaults();

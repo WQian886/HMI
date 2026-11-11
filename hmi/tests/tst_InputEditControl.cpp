@@ -12,7 +12,7 @@ using namespace qwhmi::widgets;
 class TestInputEditControl : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_InputEditControl] init"; }
+    void initTestCase() {  qInfo() << "[tst_InputEditControl] init"; }
     void cleanupTestCase() { qInfo() << "[tst_InputEditControl] cleanup"; }
 
     void construct_defaults();

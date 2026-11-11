@@ -42,8 +42,6 @@ using namespace qwhmi::widgets;
 class TestControlBaseColorJson : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     // ★ 核心:带颜色属性的控件,toJson 出来的颜色字段不能是 null
     void colorProperty_serializedAsHexString();
     // ★ 核心:存-读往返颜色不变

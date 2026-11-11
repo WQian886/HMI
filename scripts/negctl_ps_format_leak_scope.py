@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""扫描范围判据的负向对照:把三个洞放回去,判据【必须判红】。
+# NEGCTL: manual — 它要临时改仓库里的 .ps1 再调 ctest,在 ctest 里跑会动工作区(而且它自己就要起 ctest,套在一起没法算)
+"""扫描范围判据的负向对照:把五个洞放回去,判据【必须判红】。
 
 ★ 为什么需要这个脚本 ★
   ----------------------------------------------------------
@@ -25,9 +26,17 @@
               (红的是场景 A:正片里有漏替换,它却一声不吭)
               ★ 这条防的是"判据自己死了却还是绿的"
 
-    M3(排除层)把排除规则还原成老的 '\\build'(路径里含 build 就排掉)
+    M3(排除层)把排除判断退回【绝对路径】
             → tst_PsFormatLeakScope 必须【红】
-              (红的是场景 E:根目录的 build.ps1 被误伤,从来没被扫过)
+              (红的是场景 G:仓库住在 build* 祖先目录下时整仓扫不到)
+
+    M4(标记层)把 ASCII 标记 [LEAK] 换回中文
+            → tst_PsFormatLeakScope 必须【红】
+              (红的是场景 A/D/I:输出里找不到 [LEAK] ⇒ "红的原因不对")
+
+    M5(存活层)去掉『扫描范围为空 ⇒ 必须红』这条自检
+            → tst_PsFormatLeakScope 必须【红】
+              (红的是场景 H:扫不到东西却报 OK)
 
   判据红的唯一依据是【ctest 的退出码】—— 不是本脚本自己的判断。
   ★ 而且还要看 ctest 【真的跑了这个目标】——
@@ -38,7 +47,7 @@
     python -I scripts/negctl_ps_format_leak_scope.py
 
 退出码:
-    0 = 基线绿、三个变异全红、还原后绿、还原逐字节一致
+    0 = 基线绿、五个变异全红、还原后绿、还原逐字节一致
     1 = 任一环节不符合预期
 """
 
@@ -68,10 +77,23 @@ M2_NAME = "M2(存活层) 让判据什么都不扫"
 M2_OLD = "    if ($tracked.Contains($rel)) { $files += $f; continue }"
 M2_NEW = "    if ($true) { continue }   # ★ 变异"
 
-# M3:排除规则还原成老的 '\\build'(含 build 的路径整段排掉)
-M3_NAME = "M3(排除层) 排除规则还原成老的 \\build"
-M3_OLD = "                    -not ($d -match '\\\\(?:out|node_modules|\\.git|cmake-build-[^\\\\]*|build[^\\\\]*)(?:\\\\|$)')"
-M3_NEW = "                    -not ($_.FullName -match '\\\\build')   # ★ 变异"
+# M3:排除判断退回【绝对路径】—— 仓库只要住在 build* 祖先目录下就整仓扫不到
+#    (G-31-a 修的就是这个;2026-11-11 改写了 checker 的排除块,
+#     所以这个变异点也跟着换了位置 —— 变异点写死在源文件里是对的:
+#     源文件结构一变,apply_mutation 会直接说"原片段没找到"而不是默默放过。)
+M3_NAME = "M3(排除层) 排除判断退回按绝对路径"
+M3_OLD = "                    $rel = $_.FullName.Substring($repo.Length) -replace '^[\\\\/]+', ''"
+M3_NEW = "                    $rel = $_.FullName -replace '^[\\\\/]+', ''   # ★ 变异"
+
+# M4:把 ASCII 标记 [LEAK] 换回中文(G-31-b:判定必须只认 ASCII)
+M4_NAME = "M4(标记层) ASCII 标记 [LEAK] 换回中文"
+M4_OLD = '        Write-Host ("  [LEAK][漏替换] {0}:{1}" -f $f.Name, $lit.Extent.StartLineNumber) -ForegroundColor Red'
+M4_NEW = '        Write-Host ("  [漏替换] {0}:{1}" -f $f.Name, $lit.Extent.StartLineNumber) -ForegroundColor Red'
+
+# M5:去掉『扫描范围为空 ⇒ 必须红』这条自检(G-31-a 的另一半)
+M5_NAME = "M5(存活层) 去掉『扫描范围为空 ⇒ 红』自检"
+M5_OLD = "if ($files.Count -eq 0 -and $tracked.Count -gt 0) {"
+M5_NEW = "if ($false) {   # ★ 变异"
 
 # ---- 输出用 UTF-8 ----------------------------------------------------------
 try:
@@ -241,8 +263,30 @@ def main():
             print("★ M3 变异后【仍然全绿】—— 判据没咬住 ★")
         restore(CHECKER, bak)
 
-        # ---- ⑤ 还原后再跑一次 ------------------------------------------
-        print("\n=== ⑤ 还原后重跑 ===")
+        # ---- ⑤ M4:标记层 ----------------------------------------------
+        print("\n=== ⑤ %s===" % M4_NAME)
+        if not apply_mutation(CHECKER, M4_OLD, M4_NEW):
+            return 1
+        green, out = run_test(ctest)
+        print("  ctest 通过=%s" % green)
+        results["m4_red"] = (not green)
+        if green:
+            print("★ M4 变异后【仍然全绿】—— 判据没咬住 ★")
+        restore(CHECKER, bak)
+
+        # ---- ⑥ M5:存活层(范围为空也要红) -------------------------------
+        print("\n=== ⑥ %s===" % M5_NAME)
+        if not apply_mutation(CHECKER, M5_OLD, M5_NEW):
+            return 1
+        green, out = run_test(ctest)
+        print("  ctest 通过=%s" % green)
+        results["m5_red"] = (not green)
+        if green:
+            print("★ M5 变异后【仍然全绿】—— 判据没咬住 ★")
+        restore(CHECKER, bak)
+
+        # ---- ⑦ 还原后再跑一次 ------------------------------------------
+        print("\n=== ⑦ 还原后重跑 ===")
         green, out = run_test(ctest)
         print("  ctest 通过=%s" % green)
         results["restored_green"] = green
@@ -272,9 +316,10 @@ def main():
         print("★ 还原后源文件逐字节一致(SHA256 对得上)")
 
     need = ("baseline_green", "m1_red", "m2_red", "m3_red",
+            "m4_red", "m5_red",
             "restored_green", "restore_identical")
     if all(results.get(k) for k in need):
-        print("\n★ 结论:基线绿、三个变异全红、还原后绿、还原逐字节一致 —— "
+        print("\n★ 结论:基线绿、五个变异全红、还原后绿、还原逐字节一致 —— "
               "扫描范围判据确实咬得住 ★")
         return 0
     print("\n★ 结论:不符合预期 ★")

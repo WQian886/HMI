@@ -53,6 +53,25 @@
 #    本地红、CI 绿,两边各说各话。这条规则的判据是
 #    scripts/test_ps_format_leak_scope.ps1(ctest 目标 tst_PsFormatLeakScope)。
 #
+#  机器可读标记(2026-11-11 G-31-b)—— 【判定不许看中文】
+#    ---------------------------------------------
+#    [LEAK]          有一处格式化占位符漏替换
+#    [PARSE-ERROR]   某个 .ps1 解析失败
+#    [SCOPE-EMPTY]   扫描范围为空(排除规则把整仓都排掉了 ⇒ 必须红)
+#    摘要行: RED — leaks=N broken=M  (LEAK=N PARSE-ERROR=M)
+#    ★ 摘要行【故意不带方括号】——
+#      判定方是拿"[LEAK]"当子串去匹配的:摘要行要是也写成 "[LEAK]=0",
+#      那一行就会把"有没有漏替换"这个问题答成"永远有" ⇒ 判据恒绿。
+#      方括号只留给【逐条】的明细行。
+#
+#    这三个标记是本脚本与【判据的判据】
+#    (scripts/test_ps_format_leak_scope.ps1,ctest 目标 tst_PsFormatLeakScope)
+#    之间的【契约】—— 判定一律走 ASCII。
+#    中文标记([漏替换]/[解析失败])还在,但只给人看:
+#    中文能不能被 grep 到取决于控制台输出代码页 —— 实测 CP437 下
+#    checker 的输出里中文全变成 '?',靠 grep 中文判定的脚本会【假红】。
+#    ⇒ 一句话:【显示给人看的东西不许参与判定】。
+#
 #  用法:
 #    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check_ps_format_leak.ps1
 #    powershell ... -File scripts\check_ps_format_leak.ps1 -Root <目录>
@@ -141,10 +160,32 @@ if ($hasGit) {
 #   现在改成按【目录段】判断:build / build-* / build_ninja / cmake-build-*
 #   / out / node_modules / .git 这些【目录】才排除,
 #   而根目录下的 build.ps1 这种【文件】照扫不误。
+#
+# ★ 2026-11-11 (G-31-a):再修一层 —— 排除判断必须只看【仓库根以下】的路径段。
+#   原来判的是【绝对路径】$_.DirectoryName ⇒ 仓库【自己】所在的祖先目录
+#   只要叫 build*/out/node_modules,整仓的 .ps1 就【一个都扫不到】,
+#   而判据照样打印 "OK — 没有漏替换"、退出码 0 ⇒ 判据彻底瞎了还报绿。
+#   实测(2026-11-11):把仓库放到 C:\...\build674cde85\hmi 下,
+#   一个真含 {0} 的 .ps1 照样"扫描 0 个 .ps1" + OK + EXIT=0。
+#   ⇒ 现在先算【相对仓库根】的路径,再按目录段判断。
+#     仓库根自己的名字(以及更上层的祖先目录名)不再参与判断 ——
+#     "仓库住在哪"不该影响判据的结论。
 $candidates = @(Get-ChildItem -Path $repo -Recurse -Include *.ps1 -File |
                 Where-Object {
-                    $d = $_.DirectoryName
-                    -not ($d -match '\\(?:out|node_modules|\.git|cmake-build-[^\\]*|build[^\\]*)(?:\\|$)')
+                    $rel = $_.FullName.Substring($repo.Length) -replace '^[\\/]+', ''
+                    $relDir = Split-Path -Parent $rel
+                    $segs = @()
+                    if (-not [string]::IsNullOrEmpty($relDir)) {
+                        $segs = @($relDir -split '[\\/]' | Where-Object { $_ -ne '' })
+                    }
+                    $excluded = $false
+                    foreach ($sg in $segs) {
+                        if ($sg -match '^(?:out|node_modules|\.git|cmake-build-.+|build.*)$') {
+                            $excluded = $true
+                            break
+                        }
+                    }
+                    -not $excluded
                 })
 
 # 受版本控制的 .ps1(索引里的;一行一个,相对仓库根,正斜杠)
@@ -169,6 +210,15 @@ foreach ($f in $candidates) {
     $files += $f
 }
 $files = @($files | Sort-Object FullName)
+
+# ★ 2026-11-11 (G-31-a):扫描范围【自检】—— "我什么都没看" ≠ "没问题"。
+#   扫到 0 个文件、而仓库里明明有受版本控制的 .ps1 ⇒ 一定是排除规则把整仓
+#   都排掉了(见上面 G-31-a 那段)。这时候必须【红】。
+#   以前这里没有自检 ⇒ 判据在"扫了 0 个文件"的情况下也报 OK —— 假绿。
+if ($files.Count -eq 0 -and $tracked.Count -gt 0) {
+    Write-Host ("RED — [SCOPE-EMPTY] 扫描范围为空,但仓库里有 {0} 个受版本控制的 .ps1 ⇒ 排除规则把整仓都排掉了" -f $tracked.Count) -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "扫描 $($files.Count) 个 .ps1(仓库内的;被 gitignore 的临时区不算)" -ForegroundColor Cyan
 
@@ -212,7 +262,7 @@ foreach ($f in $files) {
 
     if ($errs -and $errs.Count -gt 0) {
         $broken++
-        Write-Host ("  [解析失败] {0}:{1} {2}" -f `
+        Write-Host ("  [PARSE-ERROR][解析失败] {0}:{1} {2}" -f `
             $f.Name, $errs[0].Extent.StartLineNumber, $errs[0].Message) -ForegroundColor Red
         continue
     }
@@ -239,7 +289,7 @@ foreach ($f in $files) {
             if (-not (Test-HasPlaceholder $lit.Value)) { continue }
             if ($covered.Contains($lit.Extent.StartOffset)) { continue }
             $leaks++
-            Write-Host ("  [漏替换] {0}:{1}" -f $f.Name, $lit.Extent.StartLineNumber) -ForegroundColor Red
+            Write-Host ("  [LEAK][漏替换] {0}:{1}" -f $f.Name, $lit.Extent.StartLineNumber) -ForegroundColor Red
             Write-Host ("             " + $lit.Value) -ForegroundColor DarkGray
             Write-Host ("             ⇒ 这段本该是数字,现在空着。修法:把整个拼接括起来再 -f") -ForegroundColor DarkGray
         }
@@ -251,5 +301,13 @@ if ($leaks -eq 0 -and $broken -eq 0) {
     Write-Host "OK — 没有漏替换的格式化占位符" -ForegroundColor Green
     exit 0
 }
-Write-Host ("RED — 漏替换 {0} 处,解析失败 {1} 个" -f $leaks, $broken) -ForegroundColor Red
+# ★ 2026-11-11 (G-31-b):摘要行也带【ASCII 机器可读】的计数 ——
+#   这条判据的"判据"(test_ps_format_leak_scope.ps1)以前靠 grep 中文
+#   『漏替换』来确认"红的原因对不对",而中文能不能被 grep 到取决于
+#   控制台输出代码页:实测把 [Console]::OutputEncoding 设成 CP437,
+#   输出里的中文全变成 '?',判据就误判成"红的原因不对" ⇒ 假红
+#   (US 机器 = 本地绿、CI 红,两边对不上)。
+#   ⇒ 判定一律走 ASCII 标记([LEAK] / [PARSE-ERROR] / [SCOPE-EMPTY]),
+#     中文只留给人看 —— 【显示给人看的东西不许参与判定】。
+Write-Host ("RED — leaks={0} broken={1}  (LEAK={0} PARSE-ERROR={1})" -f $leaks, $broken) -ForegroundColor Red
 exit 1

@@ -105,7 +105,6 @@ private slots:
 };
 
 void TestPumpControl::init() {
-    qputenv("QT_QPA_PLATFORM", "offscreen");
     CurrentUser::instance().login(makeUser("op1", Role::Operator));
 }
 

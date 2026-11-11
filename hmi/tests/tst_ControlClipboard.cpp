@@ -36,8 +36,6 @@ using namespace qwhmi::editor;
 class TestControlClipboard : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); }
-
     // ===== ① 复制 / 粘贴 =====
     void copy_storesSnapshotOfSelection();
     void copy_snapshotType_isRegistryShortName_notClassName();   // ★ E.5 同款坑的锁

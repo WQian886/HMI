@@ -23,7 +23,7 @@ using namespace qwhmi::widgets;
 class TestNumberDisplay : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_QPA_PLATFORM", "offscreen"); qInfo() << "[tst_NumberDisplay] init"; }
+    void initTestCase() {  qInfo() << "[tst_NumberDisplay] init"; }
     void cleanupTestCase() { qInfo() << "[tst_NumberDisplay] cleanup"; }
 
     void construct_defaultSizeAndFormat();

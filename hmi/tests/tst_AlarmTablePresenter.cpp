@@ -68,7 +68,6 @@ class TestAlarmTablePresenter : public QObject {
     Q_OBJECT
 private slots:
     void initTestCase() {
-        qputenv("QT_QPA_PLATFORM", "offscreen");
         qInfo() << "[tst_AlarmTablePresenter] init";
     }
     void cleanupTestCase() { qInfo() << "[tst_AlarmTablePresenter] cleanup"; }
